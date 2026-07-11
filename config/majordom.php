@@ -19,4 +19,9 @@ return [
         'model' => env('MAJORDOM_BUILDER_MODEL'),
         'gateway_model' => env('MAJORDOM_BUILDER_GATEWAY_MODEL'),
     ],
+
+    'harness' => [
+        'aider_bin' => env('MAJORDOM_AIDER_BIN', 'aider'),
+        'timeout' => (int) env('MAJORDOM_HARNESS_TIMEOUT', 1800), // seconds
+    ],
 ];
