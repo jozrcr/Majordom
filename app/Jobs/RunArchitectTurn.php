@@ -50,9 +50,11 @@ class RunArchitectTurn implements ShouldQueue
     {
         Cache::forget("architect-turn:{$this->projectId}");
 
-        Project::find($this->projectId)?->consensusMessages()->create([
+        $project = Project::find($this->projectId);
+        $project?->consensusMessages()->create([
             'role' => MessageRole::System,
             'content' => 'Architect turn failed: '.($e?->getMessage() ?? 'unknown failure'),
         ]);
+        $project?->update(['status' => \App\Enums\ProjectStatus::Parked, 'last_activity_at' => now()]);
     }
 }

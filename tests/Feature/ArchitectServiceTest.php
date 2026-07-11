@@ -182,3 +182,19 @@ it('sends the system prompt with open questions listed', function () {
         ->and($provider->requests[0]->jsonMode)->toBeTrue()
         ->and($provider->requests[0]->model)->toBe(config('majordom.architect.model'));
 });
+
+it('flips project status with the question gate', function () {
+    [$service] = architect([
+        json_encode(['reply' => 'Q.', 'questions' => [['text' => 'One?']], 'consensus_reached' => false]),
+        json_encode(['reply' => 'ok', 'questions' => [], 'consensus_reached' => false]),
+    ]);
+
+    $service->converse($this->project, 'Start');
+    expect($this->project->fresh()->status)->toBe(\App\Enums\ProjectStatus::NeedsYou);
+
+    $service->answer($this->project->openQuestions()->first(), 'Yes');
+    expect($this->project->fresh()->status)->toBe(\App\Enums\ProjectStatus::Working);
+
+    $service->converse($this->project);
+    expect($this->project->fresh()->status)->toBe(\App\Enums\ProjectStatus::Idle);
+});

@@ -5,6 +5,7 @@ namespace App\Agents\Architect;
 use App\Agents\Providers\Provider;
 use App\Agents\Providers\ProviderRequest;
 use App\Enums\MessageRole;
+use App\Enums\ProjectStatus;
 use App\Models\ConsensusMessage;
 use App\Models\Project;
 use App\Models\Question;
@@ -77,6 +78,15 @@ class ArchitectService
             $planWritten = true;
         }
 
+        // Status light: open questions = the human is awaited. Direct writes
+        // for now; M4 moves these behind event listeners.
+        $project->update([
+            'status' => $project->openQuestions()->count() > 0
+                ? ProjectStatus::NeedsYou
+                : ProjectStatus::Idle,
+            'last_activity_at' => now(),
+        ]);
+
         return ['message' => $message, 'planWritten' => $planWritten];
     }
 
@@ -93,6 +103,11 @@ class ArchitectService
             'content' => "**Answer** — {$question->text}\n\n{$answer}",
             'meta' => ['questionId' => $question->id],
         ]);
+
+        if ($question->project->openQuestions()->count() === 0) {
+            // All answered; the follow-up turn is about to run.
+            $question->project->update(['status' => ProjectStatus::Working, 'last_activity_at' => now()]);
+        }
     }
 
     /**

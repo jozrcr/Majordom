@@ -27,6 +27,7 @@ class ProjectWorkspace extends Component
         ]);
 
         Cache::put("architect-turn:{$this->project->id}", 'thinking', now()->addMinutes(15));
+        $this->project->update(['status' => \App\Enums\ProjectStatus::Working, 'last_activity_at' => now()]);
 
         RunArchitectTurn::dispatch($this->project->id, $this->draft)
             ->onConnection('harness')
