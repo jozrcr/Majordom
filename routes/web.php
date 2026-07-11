@@ -4,6 +4,11 @@ use Illuminate\Support\Facades\Route;
 
 Route::get('/', \App\Livewire\ProjectDashboard::class)->name('home');
 
+// Dev-only M1 de-risk surface; gone once the real workflow exists (M3).
+if (config('app.debug')) {
+    Route::get('/dev/harness', \App\Livewire\HarnessSmoke::class)->name('dev.harness');
+}
+
 Route::get('/login', function () {
     return view('auth.login');
 })->name('login');

@@ -10,7 +10,7 @@
 ## Context you won't otherwise have
 
 - **Sibling project:** metallama (running checkout: `../metafork-work/metallama-stable`;
-  its `ARCHITECTURE.md` lives in `../meta-fork/metallama`) — a working FastAPI + vanilla-JS
+  its `ARCHITECTURE.md` lives in `../metallama`) — a working FastAPI + vanilla-JS
   llama.cpp manager. Read its `ARCHITECTURE.md`. Majordom **depends on it** as the
   model runtime and calls it over HTTP (see [docs/METALLAMA.md](docs/METALLAMA.md)).
   Do not modify metallama from here.
