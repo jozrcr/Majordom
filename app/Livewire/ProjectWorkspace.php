@@ -7,10 +7,8 @@ use App\Enums\QuestionStatus;
 use App\Jobs\RunArchitectTurn;
 use App\Models\Project;
 use Illuminate\Support\Facades\Cache;
-use Livewire\Attributes\Title;
 use Livewire\Component;
 
-#[Title('')]
 class ProjectWorkspace extends Component
 {
     public Project $project;
@@ -20,7 +18,6 @@ class ProjectWorkspace extends Component
     public function mount(Project $project): void
     {
         $this->project = $project;
-        $this->setTitle($project->name);
     }
 
     public function send(): void
@@ -78,6 +75,6 @@ class ProjectWorkspace extends Component
             'messages' => $messages,
             'questionsByMessage' => $questionsByMessage,
             'openCount' => $openCount,
-        ]);
+        ])->title("Majordom — {$this->project->name}");
     }
 }

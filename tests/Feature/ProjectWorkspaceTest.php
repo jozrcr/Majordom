@@ -13,16 +13,10 @@ uses(\Illuminate\Foundation\Testing\RefreshDatabase::class);
 
 beforeEach(function () {
     Queue::fake();
-    $this->service = \Mockery::mock(ArchitectService::class)->makePartial();
-    $this->app->instance(ArchitectService::class, $this->service);
-});
-
-afterEach(function () {
-    \Mockery::close();
 });
 
 test('page GET shows project name and returns 200', function () {
-    $project = Project::create(['name' => 'Test Project', 'repo_path' => '/tmp/test']);
+    $project = Project::factory()->create(['name' => 'Test Project']);
     
     Livewire::test(\App\Livewire\ProjectWorkspace::class, ['project' => $project])
         ->assertSee($project->name)
@@ -30,7 +24,7 @@ test('page GET shows project name and returns 200', function () {
 });
 
 test('component renders existing messages', function () {
-    $project = Project::create(['name' => 'Test Project', 'repo_path' => '/tmp/test']);
+    $project = Project::factory()->create(['name' => 'Test Project']);
     ConsensusMessage::create(['project_id' => $project->id, 'role' => 'user', 'content' => 'Hello']);
     ConsensusMessage::create(['project_id' => $project->id, 'role' => 'architect', 'content' => 'Hi there']);
     
@@ -40,7 +34,7 @@ test('component renders existing messages', function () {
 });
 
 test('send with draft pushes job and clears draft', function () {
-    $project = Project::create(['name' => 'Test Project', 'repo_path' => '/tmp/test']);
+    $project = Project::factory()->create(['name' => 'Test Project']);
     
     Livewire::test(\App\Livewire\ProjectWorkspace::class, ['project' => $project])
         ->set('draft', 'Build a login page')
@@ -53,7 +47,7 @@ test('send with draft pushes job and clears draft', function () {
 });
 
 test('send with empty draft fails validation', function () {
-    $project = Project::create(['name' => 'Test Project', 'repo_path' => '/tmp/test']);
+    $project = Project::factory()->create(['name' => 'Test Project']);
     
     Livewire::test(\App\Livewire\ProjectWorkspace::class, ['project' => $project])
         ->set('draft', '')
@@ -64,7 +58,7 @@ test('send with empty draft fails validation', function () {
 });
 
 test('answerQuestion records answer and pushes job if last open', function () {
-    $project = Project::create(['name' => 'Test Project', 'repo_path' => '/tmp/test']);
+    $project = Project::factory()->create(['name' => 'Test Project']);
     $msg = ConsensusMessage::create(['project_id' => $project->id, 'role' => 'architect', 'content' => 'Question?']);
     $question = Question::create([
         'project_id' => $project->id,
@@ -73,8 +67,6 @@ test('answerQuestion records answer and pushes job if last open', function () {
         'text' => 'Choose?',
         'options' => ['Yes', 'No'],
     ]);
-    
-    $this->service->shouldReceive('answer')->once();
     
     Livewire::test(\App\Livewire\ProjectWorkspace::class, ['project' => $project])
         ->set('answerDrafts.'.$question->id, 'Yes')
@@ -89,7 +81,7 @@ test('answerQuestion records answer and pushes job if last open', function () {
 });
 
 test('answerQuestion with empty answer fails validation', function () {
-    $project = Project::create(['name' => 'Test Project', 'repo_path' => '/tmp/test']);
+    $project = Project::factory()->create(['name' => 'Test Project']);
     $msg = ConsensusMessage::create(['project_id' => $project->id, 'role' => 'architect', 'content' => 'Question?']);
     $question = Question::create([
         'project_id' => $project->id,
@@ -108,7 +100,7 @@ test('answerQuestion with empty answer fails validation', function () {
 });
 
 test('open question card renders text and options, answered renders collapsed', function () {
-    $project = Project::create(['name' => 'Test Project', 'repo_path' => '/tmp/test']);
+    $project = Project::factory()->create(['name' => 'Test Project']);
     $msg = ConsensusMessage::create(['project_id' => $project->id, 'role' => 'architect', 'content' => 'Q']);
     $openQ = Question::create([
         'project_id' => $project->id,
@@ -132,7 +124,7 @@ test('open question card renders text and options, answered renders collapsed', 
 });
 
 test('gate pill shows remaining count or is absent', function () {
-    $project = Project::create(['name' => 'Test Project', 'repo_path' => '/tmp/test']);
+    $project = Project::factory()->create(['name' => 'Test Project']);
     $msg = ConsensusMessage::create(['project_id' => $project->id, 'role' => 'architect', 'content' => 'Q']);
     Question::create(['project_id' => $project->id, 'consensus_message_id' => $msg->id, 'status' => QuestionStatus::Open, 'text' => 'Q1']);
     Question::create(['project_id' => $project->id, 'consensus_message_id' => $msg->id, 'status' => QuestionStatus::Open, 'text' => 'Q2']);

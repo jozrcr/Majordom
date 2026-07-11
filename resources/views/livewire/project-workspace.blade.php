@@ -10,12 +10,12 @@
 
     <div class="flex-1 space-y-4 overflow-y-auto py-5">
         @forelse($messages as $message)
-            @if($message->role === 'user')
+            @if($message->role === \App\Enums\MessageRole::User)
                 <div class="max-w-[640px] ml-auto">
                     <p class="font-mono text-micro uppercase tracking-[.14em] text-mute">You</p>
                     <div class="mt-1 text-body text-body whitespace-pre-wrap">{{ $message->content }}</div>
                 </div>
-            @elseif($message->role === 'architect')
+            @elseif($message->role === \App\Enums\MessageRole::Architect)
                 <div class="max-w-[640px]">
                     <p class="font-mono text-micro uppercase tracking-[.14em] text-mute">Architect</p>
                     <div class="mt-1 space-y-2 text-body text-body [&_p]:leading-relaxed [&_code]:font-mono [&_code]:text-[12px]">
@@ -51,7 +51,7 @@
                         </div>
                     @endif
                 @endforeach
-            @elseif($message->role === 'system')
+            @elseif($message->role === \App\Enums\MessageRole::System)
                 <p class="text-center font-mono text-meta text-mute">{{ $message->content }}</p>
             @endif
         @empty
