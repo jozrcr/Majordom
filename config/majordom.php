@@ -24,4 +24,12 @@ return [
         'aider_bin' => env('MAJORDOM_AIDER_BIN', 'aider'),
         'timeout' => (int) env('MAJORDOM_HARNESS_TIMEOUT', 1800), // seconds
     ],
+
+    'providers' => [
+        'openrouter' => [
+            'base_url' => env('OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1'),
+            'api_key' => env('OPENROUTER_API_KEY'),
+            'timeout' => (int) env('PROVIDER_TIMEOUT', 120),
+        ],
+    ],
 ];
