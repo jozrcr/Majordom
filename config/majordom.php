@@ -6,6 +6,9 @@ return [
         'base_url' => env('METALLAMA_BASE_URL', 'http://127.0.0.1:8010'),
         'token' => env('METALLAMA_TOKEN'),
         'timeout' => (int) env('METALLAMA_TIMEOUT', 10),
+        'start_timeout' => (int) env('METALLAMA_START_TIMEOUT', 300),
+        'stop_timeout' => (int) env('METALLAMA_STOP_TIMEOUT', 60),
+        'poll_interval_ms' => (int) env('METALLAMA_POLL_INTERVAL_MS', 2000),
     ],
 
     // The Builder's model: 'model' is the metallama managed-server id the
