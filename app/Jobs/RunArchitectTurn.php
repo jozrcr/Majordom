@@ -41,4 +41,18 @@ class RunArchitectTurn implements ShouldQueue
             Cache::forget("architect-turn:{$this->projectId}");
         }
     }
+
+    /**
+     * Also fires when the job dies BEFORE handle() (e.g. a stale worker that
+     * cannot resolve dependencies) — the UI must never stay on "thinking".
+     */
+    public function failed(?\Throwable $e): void
+    {
+        Cache::forget("architect-turn:{$this->projectId}");
+
+        Project::find($this->projectId)?->consensusMessages()->create([
+            'role' => MessageRole::System,
+            'content' => 'Architect turn failed: '.($e?->getMessage() ?? 'unknown failure'),
+        ]);
+    }
 }
