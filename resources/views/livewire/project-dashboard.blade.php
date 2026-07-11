@@ -41,7 +41,7 @@
                 <article class="rounded-xl border p-4 transition-colors duration-120 {{ $cardClasses }}">
                     <div class="flex items-center gap-2.5">
                         <span class="h-2 w-2 rounded-full {{ $ledClasses }}"></span>
-                        <h2 class="text-title-sm font-medium text-text">{{ $project->name }}</h2>
+                        <h2 class="text-title-sm font-medium text-text"><a href="{{ route('project.workspace', $project) }}" class="hover:text-hi">{{ $project->name }}</a></h2>
                         <span class="ml-auto rounded-full px-2.5 py-0.5 font-mono text-[10.5px] font-semibold tracking-[.06em] {{ $pillClasses }}">{{ $project->status->label() }}</span>
                     </div>
                     <p class="mt-3 text-body-sm text-t2">No milestones yet</p>
