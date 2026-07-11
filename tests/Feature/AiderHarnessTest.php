@@ -217,3 +217,29 @@ it('includes file hints as trailing args', function () {
         in_array('config/app.php', $process->command)
     );
 });
+
+it('handles a repo with no initial commit (aider makes the first one)', function () {
+    Process::fake([
+        "'git' 'rev-parse' 'HEAD'" => Process::sequence()
+            ->push(Process::result(output: '', errorOutput: 'fatal: ambiguous argument', exitCode: 128))
+            ->push(Process::result(output: "e88b520\n")),
+        "'git' 'diff' '4b825dc642cb6eb9a060e54bf8d69288fbee4904' 'HEAD'" => Process::result(output: "diff --git a/hello.sh b/hello.sh\nnew file"),
+        "'git' 'diff' 'HEAD'" => Process::result(output: ''),
+        "'git' 'diff' '--name-only' '4b825dc642cb6eb9a060e54bf8d69288fbee4904' 'HEAD'" => Process::result(output: "hello.sh\n"),
+        "'git' 'diff' '--name-only' 'HEAD'" => Process::result(output: ''),
+        "'aider' '--model'*" => Process::result(output: 'Commit e88b520', exitCode: 0),
+    ]);
+
+    $harness = new AiderHarness('aider', 1800);
+    $result = $harness->runTask(new HarnessRequest(
+        repoPath: $this->tempDir,
+        endpointBaseUrl: 'http://127.0.0.1:8010/ollama/v1',
+        modelName: 'test-model',
+        rolePrompt: 'You are a coder',
+        taskPrompt: 'Write a script',
+    ));
+
+    expect($result->status)->toBe(App\Agents\Harness\HarnessStatus::Completed)
+        ->and($result->filesChanged)->toBe(['hello.sh'])
+        ->and($result->diff)->toContain('new file');
+});

@@ -40,20 +40,10 @@ class AiderHarness implements Harness
             );
         }
 
-        // 2. Resolve HEAD
-        try {
-            $before = trim(Process::path($repoPath)->run(['git', 'rev-parse', 'HEAD'])->output());
-        } catch (\Throwable $e) {
-            return new HarnessResult(
-                status: HarnessStatus::Failed,
-                diff: '',
-                filesChanged: [],
-                testsPassed: null,
-                summary: 'Could not resolve HEAD.',
-                openQuestions: [],
-                rawLog: $e->getMessage()
-            );
-        }
+        // 2. Resolve HEAD. A fresh `git init` repo has none — aider will make
+        // the first commit; we then diff against git's empty-tree object.
+        $beforeResult = Process::path($repoPath)->run(['git', 'rev-parse', 'HEAD']);
+        $before = $beforeResult->successful() ? trim($beforeResult->output()) : null;
 
         // 3. Write instruction file
         $instructionFile = sys_get_temp_dir() . '/majordom-task-' . uniqid() . '.md';
@@ -120,13 +110,18 @@ class AiderHarness implements Harness
                 );
             }
 
-            // 7. Diff & filesChanged
-            $diffCommitted = trim(Process::path($repoPath)->run(["git", "diff", $before, "HEAD"])->output());
-            $diffUncommitted = trim(Process::path($repoPath)->run(["git", "diff", "HEAD"])->output());
+            // 7. Diff & filesChanged. With no pre-run HEAD, diff from the
+            // canonical empty-tree object (works in every git repo).
+            $base = $before ?? '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
+            $afterResult = Process::path($repoPath)->run(['git', 'rev-parse', 'HEAD']);
+            $hasHead = $afterResult->successful();
+
+            $diffCommitted = $hasHead ? trim(Process::path($repoPath)->run(["git", "diff", $base, "HEAD"])->output()) : '';
+            $diffUncommitted = $hasHead ? trim(Process::path($repoPath)->run(["git", "diff", "HEAD"])->output()) : '';
             $diff = $diffCommitted . ($diffUncommitted ? "\n" . $diffUncommitted : '');
 
-            $namesCommitted = array_filter(array_map('trim', explode("\n", Process::path($repoPath)->run(["git", "diff", "--name-only", $before, "HEAD"])->output())));
-            $namesUncommitted = array_filter(array_map('trim', explode("\n", Process::path($repoPath)->run(["git", "diff", "--name-only", "HEAD"])->output())));
+            $namesCommitted = $hasHead ? array_filter(array_map('trim', explode("\n", Process::path($repoPath)->run(["git", "diff", "--name-only", $base, "HEAD"])->output()))) : [];
+            $namesUncommitted = $hasHead ? array_filter(array_map('trim', explode("\n", Process::path($repoPath)->run(["git", "diff", "--name-only", "HEAD"])->output()))) : [];
             $filesChanged = array_values(array_unique(array_merge($namesCommitted, $namesUncommitted)));
             sort($filesChanged);
 
