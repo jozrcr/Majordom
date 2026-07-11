@@ -181,7 +181,10 @@ substrate; **Events/Listeners** = the bus; **Notifications** = the messengers;
 
 **Database (SQLite):** projects, workflows, executions, nodes, milestones,
 tasks, events, approvals, commit_suggestions, notifications, services, roles,
-settings. Migrations own the schema. No SQLite-specific SQL (stay portable).
+settings, consensus_messages, questions (the consensus chat + its
+ask-all-questions gate are operational state — the distilled transcript in
+memory files is the projection). Migrations own the schema. No SQLite-specific
+SQL (stay portable).
 
 **Files — per-project memory store** (Majordom's data dir, e.g.
 `~/.majordom/projects/<slug>/`), *not* the user's repo by default:
