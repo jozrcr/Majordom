@@ -33,19 +33,26 @@ class FakeMetallamaClient extends MetallamaClient
     public function start(string $id): ModelState
     {
         $this->calls[] = "start:{$id}";
-        return $this->scriptedStatus[$this->statusIndex++] ?? new ModelState($id, ServerStatus::Starting, null, null);
+
+        return new ModelState(id: $id, status: ServerStatus::Starting);
     }
 
     public function stop(string $id): ModelState
     {
         $this->calls[] = "stop:{$id}";
-        return $this->scriptedStatus[$this->statusIndex++] ?? new ModelState($id, ServerStatus::Offline, null, null);
+
+        return new ModelState(id: $id, status: ServerStatus::Offline);
     }
 }
 
 function makeState(string $id, string $statusStr, ?string $lastExit = null, ?string $lastLog = null): ModelState
 {
-    return new ModelState($id, ServerStatus::from($statusStr), $lastExit, $lastLog);
+    return new ModelState(
+        id: $id,
+        status: ServerStatus::from(strtolower($statusStr)),
+        lastExit: $lastExit,
+        lastLog: $lastLog ?? '',
+    );
 }
 
 beforeEach(function () {

@@ -27,19 +27,26 @@ URL in Settings → Integrations (`METALLAMA_BASE_URL`, default
 3. **State/introspection.** Majordom asks what's running and its health before
    deciding to start/stop (the resource coordinator, below).
 
-## Endpoints (verify against metallama's actual API before wiring)
+## Endpoints (verified against `metafork-work/metallama-stable`, 2026-07-11)
 
-metallama's routes are documented in its `ARCHITECTURE.md`; **confirm exact
-paths/shapes against its code or README during implementation** — treat the
-below as the shape, not the literal contract.
+| Need | Endpoint | Shape |
+|---|---|---|
+| List servers | `GET /api/models` | `{"models": [payload…]}`; managed servers have `"managed": true` (remote entries mixed in — filter) |
+| Server status | `GET /api/models/{id}/status` | payload directly; 404 `{"detail":"Unknown model"}` |
+| Start | `POST /api/models/{id}/start` | `{"ok": true, "model": payload}`; **409** when already running or port busy (treat as benign → re-fetch status); 400 binary missing |
+| Stop | `POST /api/models/{id}/stop` | `{"ok": true, "model": payload}`; idempotent |
+| Chat inference (Builder) | Gateway `/ollama/v1/chat/completions` (OpenAI shape) | model name = routable name from the registry (currently the full GGUF path unless an alias is configured) |
 
-| Need | metallama surface (per its ARCHITECTURE.md) |
-|---|---|
-| List / inspect managed servers | `GET /api/models/*` |
-| Start / stop a server | `POST /api/models/*` (start/stop actions) |
-| Server status / health | `GET /api/models/{id}/status` |
-| Chat inference (Builder) | Gateway: `/ollama/v1/chat/completions` (OpenAI) or `/ollama/api/chat` (Ollama) |
-| System / VRAM info | metallama's system routes (for capacity checks) |
+Payload fields Majordom relies on: `id`, `status` (`offline`/`starting`/`online`
+— *health-checked*: llama-server binds its port before the model loads, so
+port-open alone is "starting"), `port`, `url`, `context_window`,
+`load_progress` (float|null while starting), `last_exit`, `last_log`.
+`detail` on FastAPI errors may be a string **or an object** — stringify defensively.
+
+Auth: when metallama has an admin password configured, mutating routes require
+`Authorization: Bearer <session token>` (from `POST /api/auth/login`); when
+disabled (`GET /api/auth/status` → `{"auth_enabled": false}`), no header.
+`METALLAMA_TOKEN` config covers the enabled case.
 
 Wrap all of this behind **one client class** (`Runtime/Metallama/Client`). No
 other part of Majordom issues metallama HTTP calls.

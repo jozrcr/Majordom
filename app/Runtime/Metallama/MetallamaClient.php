@@ -42,10 +42,10 @@ class MetallamaClient
     public function models(): array
     {
         $response = $this->request('GET', '/api/models');
-        return array_map(
+        return array_values(array_map(
             fn ($m) => ModelState::fromArray($m),
             array_filter($response['models'] ?? [], fn ($m) => ($m['managed'] ?? false) === true)
-        );
+        ));
     }
 
     public function status(string $id): ModelState
@@ -87,6 +87,10 @@ class MetallamaClient
 
         if ($response->failed()) {
             $detail = $response->json('detail', 'Request failed.');
+            // FastAPI sometimes nests detail as an object.
+            if (! is_string($detail)) {
+                $detail = json_encode($detail) ?: 'Request failed.';
+            }
             throw new RequestFailed($response->status(), $detail);
         }
 

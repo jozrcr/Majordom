@@ -32,7 +32,7 @@ class ResourceCoordinator
             return $requiredState;
         }
 
-        if ($requiredState !== null && $requiredState->status->value === 'Starting') {
+        if ($requiredState !== null && $requiredState->status === ServerStatus::Starting) {
             return $this->waitUntilOnline($modelId, $startTimeout, $pollIntervalMs, 'starting');
         }
 
@@ -40,7 +40,7 @@ class ResourceCoordinator
             if ($state->id === $modelId) {
                 continue;
             }
-            if ($state->isOnline() || $state->status->value === 'Starting') {
+            if ($state->isOnline() || $state->status === ServerStatus::Starting) {
                 $this->client->stop($state->id);
                 $this->waitUntilOffline($state->id, $stopTimeout, $pollIntervalMs);
             }
@@ -57,7 +57,7 @@ class ResourceCoordinator
         while (microtime(true) < $deadline) {
             ($this->sleeper)($pollIntervalMs);
             $lastState = $this->client->status($id);
-            if ($lastState->status->value === 'Offline') {
+            if ($lastState->status === ServerStatus::Offline) {
                 return;
             }
         }
@@ -78,12 +78,17 @@ class ResourceCoordinator
                 return $lastState;
             }
 
-            if ($lastState->status->value === 'Starting') {
+            if ($lastState->status === ServerStatus::Starting) {
                 $wasStarting = true;
-            } elseif ($lastState->status->value === 'Offline' && $wasStarting) {
+            } elseif ($lastState->status === ServerStatus::Offline && $wasStarting) {
                 $msg = "model {$id} exited while starting";
-                if ($lastState->lastExit) $msg .= " (exit: {$lastState->lastExit})";
-                if ($lastState->lastLog) $msg .= " (log: {$lastState->lastLog})";
+                if ($lastState->lastExit) {
+                    $exit = is_string($lastState->lastExit) ? $lastState->lastExit : json_encode($lastState->lastExit);
+                    $msg .= " (exit: {$exit})";
+                }
+                if ($lastState->lastLog) {
+                    $msg .= " (log: {$lastState->lastLog})";
+                }
                 throw new CoordinatorTimeout($msg, $lastState);
             }
         }
