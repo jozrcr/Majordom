@@ -32,7 +32,7 @@ acceptance test) — the same discipline the product uses on its own Builder.
 
 ## Stack & conventions
 
-- **Laravel + TALL** (Tailwind, Alpine, Livewire). Livewire 3 components for
+- **Laravel + TALL** (Tailwind, Alpine, Livewire). Laravel 13, Livewire 4 components for
   interactive UI; Alpine for local sprinkles; Tailwind for everything visual.
 - **Real-time:** Laravel **Reverb** (WebSockets) for the activity timeline and
   live status. Broadcast off domain events — never poll where a broadcast fits.

@@ -9,7 +9,8 @@
 
 ## Context you won't otherwise have
 
-- **Sibling project:** [metallama](../metallama) — a working FastAPI + vanilla-JS
+- **Sibling project:** metallama (running checkout: `../metafork-work/metallama-stable`;
+  its `ARCHITECTURE.md` lives in `../meta-fork/metallama`) — a working FastAPI + vanilla-JS
   llama.cpp manager. Read its `ARCHITECTURE.md`. Majordom **depends on it** as the
   model runtime and calls it over HTTP (see [docs/METALLAMA.md](docs/METALLAMA.md)).
   Do not modify metallama from here.
@@ -37,7 +38,7 @@ Claude-Code-headless last (it ties the Builder to Anthropic).
 
 ```
 majordom/                     (this repo — new, sibling to metallama)
-  composer.json              Laravel 11+, Livewire 3, Reverb, notification channels
+  composer.json              Laravel 13, Livewire 4, Reverb, notification channels
   app/                       (namespaces per docs/SPEC.md §6)
     Core/{Workflow,Events,Autonomy}
     Runtime/Metallama
