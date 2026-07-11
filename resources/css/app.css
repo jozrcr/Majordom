@@ -2,8 +2,222 @@
 
 @source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
 @source '../../storage/framework/views/*.php';
+@source '../views/**/*.blade.php';
+@source '../../app/Livewire/**/*.php';
 
-@theme {
-    --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
-        'Segoe UI Symbol', 'Noto Color Emoji';
+/* ---------------------------------------------------------------- fonts */
+/* IBM Plex Sans + Mono, self-hosted (OFL). Sans = UI voice; Mono = the
+   machine voice (ids, events, timestamps, branches, counts) — never body. */
+@font-face {
+    font-family: 'IBM Plex Sans';
+    src: url('/fonts/IBMPlexSans-Regular.woff2') format('woff2');
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+}
+@font-face {
+    font-family: 'IBM Plex Sans';
+    src: url('/fonts/IBMPlexSans-Medium.woff2') format('woff2');
+    font-weight: 500;
+    font-style: normal;
+    font-display: swap;
+}
+@font-face {
+    font-family: 'IBM Plex Sans';
+    src: url('/fonts/IBMPlexSans-SemiBold.woff2') format('woff2');
+    font-weight: 600;
+    font-style: normal;
+    font-display: swap;
+}
+@font-face {
+    font-family: 'IBM Plex Mono';
+    src: url('/fonts/IBMPlexMono-Regular.woff2') format('woff2');
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+}
+@font-face {
+    font-family: 'IBM Plex Mono';
+    src: url('/fonts/IBMPlexMono-Medium.woff2') format('woff2');
+    font-weight: 500;
+    font-style: normal;
+    font-display: swap;
+}
+@font-face {
+    font-family: 'IBM Plex Mono';
+    src: url('/fonts/IBMPlexMono-SemiBold.woff2') format('woff2');
+    font-weight: 600;
+    font-style: normal;
+    font-display: swap;
+}
+
+/* ------------------------------------------------ design tokens (:root) */
+/* "Quiet Console" — docs/design_handoff/HANDOFF.md §1.1. Semantic first;
+   components never reference raw hexes. A light theme swaps this block only. */
+:root {
+    /* canvas + surfaces (cool blue-black ramp) */
+    --bg:             #0d1117;
+    --surface:        #0f1520;
+    --surface-card:   #111823;
+    --surface-raised: #121926;
+    --surface-active: #151d29;
+    --surface-chip:   #1a2230;
+
+    /* borders */
+    --border:         #1e2836;
+    --border-soft:    #161f2b;
+    --border-strong:  #243044;
+    --border-hover:   #2a3646;
+
+    /* text tiers */
+    --text-hi:        #e8eef6;
+    --text:           #dce3ec;
+    --text-body:      #c3cddb;
+    --text-2:         #9daabb;
+    --text-3:         #8b98a9;
+    --text-mute:      #5f6f83;
+    --text-faint:     #48566a;
+
+    /* THE accent — needs-you. Nothing else may use amber. */
+    --accent:         #e2a33b;
+    --accent-ink:     #181206;
+    --accent-border:  rgba(226, 163, 59, .55);
+    --accent-tint:    rgba(226, 163, 59, .10);
+    --accent-glow:    rgba(226, 163, 59, .60);
+
+    /* status */
+    --status-idle:    #3d4a5c;
+    --status-working: #579dd6;
+    --status-failed:  #e5645c;
+    --failed-text:    #ef8d86;
+    --failed-border:  rgba(229, 100, 92, .45);
+    --failed-tint:    rgba(229, 100, 92, .10);
+    --ok:             #4f9e6f;
+
+    /* diff */
+    --diff-add-bg:    rgba(63, 185, 80, .10);
+    --diff-add-text:  #8fd9a8;
+    --diff-del-bg:    rgba(229, 100, 92, .09);
+    --diff-del-text:  #efa39d;
+    --diff-hunk-bg:   #101724;
+    --diff-hunk-text: #579dd6;
+    --diff-plus:      #5fbf85;
+    --diff-minus:     #e5837c;
+
+    /* actor chips: tinted bg + toned text, all quiet */
+    --actor-architect-bg: rgba(122, 162, 247, .14);
+    --actor-architect:    #9db8f0;
+    --actor-builder-bg:   rgba(87, 157, 214, .12);
+    --actor-builder:      #79b4dd;
+    --actor-reviewer-bg:  rgba(158, 134, 220, .14);
+    --actor-reviewer:     #b3a2e3;
+    --actor-you-bg:       rgba(79, 158, 111, .16);
+    --actor-you:          #79c99a;
+    --actor-system-bg:    var(--surface-chip);
+    --actor-system:       #7c8a9c;
+}
+
+/* --------------------------------------------- Tailwind theme mapping */
+/* `inline` so utilities resolve the var at use site; a light theme still
+   only swaps the :root block above. Utilities read like the handoff:
+   bg-surface-card text-hi border-border text-accent bg-accent-tint … */
+@theme inline {
+    --font-sans: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+    --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+
+    --color-bg:             var(--bg);
+    --color-surface:        var(--surface);
+    --color-surface-card:   var(--surface-card);
+    --color-surface-raised: var(--surface-raised);
+    --color-surface-active: var(--surface-active);
+    --color-surface-chip:   var(--surface-chip);
+
+    --color-border:         var(--border);
+    --color-border-soft:    var(--border-soft);
+    --color-border-strong:  var(--border-strong);
+    --color-border-hover:   var(--border-hover);
+
+    --color-hi:             var(--text-hi);
+    --color-text:           var(--text);
+    --color-body:           var(--text-body);
+    --color-t2:             var(--text-2);
+    --color-t3:             var(--text-3);
+    --color-mute:           var(--text-mute);
+    --color-faint:          var(--text-faint);
+
+    --color-accent:         var(--accent);
+    --color-accent-ink:     var(--accent-ink);
+    --color-accent-border:  var(--accent-border);
+    --color-accent-tint:    var(--accent-tint);
+
+    --color-status-idle:    var(--status-idle);
+    --color-status-working: var(--status-working);
+    --color-status-failed:  var(--status-failed);
+    --color-failed-text:    var(--failed-text);
+    --color-failed-border:  var(--failed-border);
+    --color-failed-tint:    var(--failed-tint);
+    --color-ok:             var(--ok);
+
+    --color-diff-add-bg:    var(--diff-add-bg);
+    --color-diff-add-text:  var(--diff-add-text);
+    --color-diff-del-bg:    var(--diff-del-bg);
+    --color-diff-del-text:  var(--diff-del-text);
+    --color-diff-hunk-bg:   var(--diff-hunk-bg);
+    --color-diff-hunk-text: var(--diff-hunk-text);
+    --color-diff-plus:      var(--diff-plus);
+    --color-diff-minus:     var(--diff-minus);
+
+    --color-actor-architect-bg: var(--actor-architect-bg);
+    --color-actor-architect:    var(--actor-architect);
+    --color-actor-builder-bg:   var(--actor-builder-bg);
+    --color-actor-builder:      var(--actor-builder);
+    --color-actor-reviewer-bg:  var(--actor-reviewer-bg);
+    --color-actor-reviewer:     var(--actor-reviewer);
+    --color-actor-you-bg:       var(--actor-you-bg);
+    --color-actor-you:          var(--actor-you);
+    --color-actor-system-bg:    var(--actor-system-bg);
+    --color-actor-system:       var(--actor-system);
+
+    /* type scale — handoff §1.2 */
+    --text-micro:    10px;
+    --text-micro--line-height: 1.2;
+    --text-meta:     11px;
+    --text-meta--line-height: 1.2;
+    --text-caption:  12px;
+    --text-caption--line-height: 1.5;
+    --text-body-sm:  12.5px;
+    --text-body-sm--line-height: 1.5;
+    --text-body:     13.5px;
+    --text-body--line-height: 1.5;
+    --text-title-sm: 14.5px;
+    --text-title-sm--line-height: 1.2;
+    --text-title:    16px;
+    --text-title--line-height: 1.2;
+    --text-display:  20px;
+    --text-display--line-height: 1.2;
+}
+
+/* ------------------------------------------------------------- motion */
+/* Handoff §4. LED pulse is the only motion above 300 ms. Errors don't
+   breathe: the failed LED never pulses. */
+@keyframes led-pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: .35; }
+}
+@keyframes skeleton-pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: .55; }
+}
+
+.animate-led-pulse      { animation: led-pulse 2.4s ease-in-out infinite; }
+.animate-skeleton-pulse { animation: skeleton-pulse 1.6s ease-in-out infinite; }
+
+/* needs-you LED glow — the only glow in the app */
+.led-glow { box-shadow: 0 0 8px var(--accent-glow); }
+
+/* ---------------------------------------------------------------- base */
+body {
+    background-color: var(--bg);
+    color: var(--text-body);
+    font-family: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
 }

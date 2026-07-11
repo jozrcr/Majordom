@@ -28,3 +28,4 @@ Thumbs.db
 
 # agent working docs (task briefs, review notes) — never committed
 /agents
+.aider*

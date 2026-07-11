@@ -31,7 +31,7 @@ it('enforces slug uniqueness', function () {
 });
 
 it('casts last_activity_at to Carbon instance', function () {
-    $now = Carbon::now();
+    $now = Carbon::now()->startOfSecond();
     $project = Project::factory()->create(['last_activity_at' => $now]);
 
     expect($project->last_activity_at)->toBeInstanceOf(Carbon::class)

@@ -29,10 +29,10 @@ class ProjectDashboard extends Component
             })
             ->values();
 
-        $counts = $projects->groupBy('status')->map->count();
+        $counts = $projects->countBy(fn (Project $p) => $p->status->value);
         $summaryParts = [];
         foreach ([ProjectStatus::NeedsYou, ProjectStatus::Working, ProjectStatus::Idle, ProjectStatus::Parked] as $status) {
-            if (($count = $counts->get($status)) > 0) {
+            if (($count = $counts->get($status->value, 0)) > 0) {
                 $summaryParts[] = "{$count} {$status->label()}";
             }
         }

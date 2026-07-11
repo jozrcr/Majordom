@@ -24,7 +24,7 @@ test('POST /login with correct token redirects to / and subsequent GET / is 200'
 });
 
 test('POST /login with wrong token returns to login with error and session not authenticated', function () {
-    $this->post('/login', ['token' => 'wrong-token'])
+    $this->from('/login')->post('/login', ['token' => 'wrong-token'])
         ->assertRedirect('/login')
         ->assertSessionHasErrors(['token']);
     expect(session()->get('majordom_authenticated'))->not()->toBeTrue();
