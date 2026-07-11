@@ -33,4 +33,13 @@ return [
             'timeout' => (int) env('PROVIDER_TIMEOUT', 120),
         ],
     ],
+
+    // Frontier role bindings (Settings → Actors will make these DB-backed
+    // with per-project overrides later; env is the built-in default layer).
+    'architect' => [
+        'model' => env('MAJORDOM_ARCHITECT_MODEL', 'deepseek/deepseek-v4-flash'),
+        'max_tokens' => (int) env('MAJORDOM_ARCHITECT_MAX_TOKENS', 4000),
+        'plan_max_tokens' => (int) env('MAJORDOM_ARCHITECT_PLAN_MAX_TOKENS', 8000),
+        'temperature' => (float) env('MAJORDOM_ARCHITECT_TEMPERATURE', 0.3),
+    ],
 ];
