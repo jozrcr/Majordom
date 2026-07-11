@@ -20,11 +20,11 @@ final readonly class HarnessResult
         return [
             'status' => $this->status->value,
             'diff' => $this->diff,
-            'files_changed' => $this->filesChanged,
-            'tests_passed' => $this->testsPassed,
+            'filesChanged' => $this->filesChanged,
+            'testsPassed' => $this->testsPassed,
             'summary' => $this->summary,
-            'open_questions' => $this->openQuestions,
-            'raw_log' => $this->rawLog,
+            'openQuestions' => $this->openQuestions,
+            'rawLog' => $this->rawLog,
         ];
     }
 }
