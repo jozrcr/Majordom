@@ -26,12 +26,12 @@ afterEach(function () {
 
 it('runs happy path and returns completed', function () {
     Process::fake([
-        'git rev-parse HEAD' => Process::result(output: "abc123\n"),
-        'git diff abc123 HEAD' => Process::result(output: "diff --git a/app/File.php b/app/File.php\nnew file"),
-        'git diff HEAD' => Process::result(output: ""),
-        'git diff --name-only abc123 HEAD' => Process::result(output: "app/File.php\n"),
-        'git diff --name-only HEAD' => Process::result(output: ""),
-        'aider --model openai/test-model --yes-always --no-check-update --analytics-disable --no-show-model-warnings --no-stream --message-file' => Process::result(output: "aider output", exitCode: 0),
+        "'git' 'rev-parse' 'HEAD'" => Process::result(output: "abc123\n"),
+        "'git' 'diff' 'abc123' 'HEAD'" => Process::result(output: "diff --git a/app/File.php b/app/File.php\nnew file"),
+        "'git' 'diff' 'HEAD'" => Process::result(output: ""),
+        "'git' 'diff' '--name-only' 'abc123' 'HEAD'" => Process::result(output: "app/File.php\n"),
+        "'git' 'diff' '--name-only' 'HEAD'" => Process::result(output: ""),
+        "'aider' '--model'*" => Process::result(output: "aider output", exitCode: 0),
     ]);
 
     $harness = new AiderHarness('aider', 1800);
@@ -51,8 +51,8 @@ it('runs happy path and returns completed', function () {
         ->and($result->testsPassed)->toBeNull()
         ->and($result->summary)->toBe('1 file(s) changed.');
 
-    Process::assertRan(fn ($process) => 
-        $process->environment['OPENAI_API_BASE'] === 'http://127.0.0.1:8010/ollama/v1' &&
+    Process::assertRan(fn ($process) =>
+        ($process->environment['OPENAI_API_BASE'] ?? null) === 'http://127.0.0.1:8010/ollama/v1' &&
         in_array('--model', $process->command) &&
         in_array('openai/test-model', $process->command) &&
         in_array('--message-file', $process->command)
@@ -61,12 +61,12 @@ it('runs happy path and returns completed', function () {
 
 it('runs test command and passes', function () {
     Process::fake([
-        'git rev-parse HEAD' => Process::result(output: "abc123\n"),
-        'git diff abc123 HEAD' => Process::result(output: "diff --git a/app/File.php b/app/File.php\nnew file"),
-        'git diff HEAD' => Process::result(output: ""),
-        'git diff --name-only abc123 HEAD' => Process::result(output: "app/File.php\n"),
-        'git diff --name-only HEAD' => Process::result(output: ""),
-        'aider --model openai/test-model --yes-always --no-check-update --analytics-disable --no-show-model-warnings --no-stream --message-file' => Process::result(output: "aider output", exitCode: 0),
+        "'git' 'rev-parse' 'HEAD'" => Process::result(output: "abc123\n"),
+        "'git' 'diff' 'abc123' 'HEAD'" => Process::result(output: "diff --git a/app/File.php b/app/File.php\nnew file"),
+        "'git' 'diff' 'HEAD'" => Process::result(output: ""),
+        "'git' 'diff' '--name-only' 'abc123' 'HEAD'" => Process::result(output: "app/File.php\n"),
+        "'git' 'diff' '--name-only' 'HEAD'" => Process::result(output: ""),
+        "'aider' '--model'*" => Process::result(output: "aider output", exitCode: 0),
         'php artisan test' => Process::result(output: "Tests passed", exitCode: 0),
     ]);
 
@@ -85,7 +85,8 @@ it('runs test command and passes', function () {
     expect($result->status)->toBe(HarnessStatus::Completed)
         ->and($result->testsPassed)->toBeTrue();
         
-    Process::assertRan(fn ($process) => 
+    Process::assertRan(fn ($process) =>
+        is_array($process->command) &&
         in_array('--test-cmd', $process->command) &&
         in_array('php artisan test', $process->command)
     );
@@ -93,12 +94,12 @@ it('runs test command and passes', function () {
 
 it('fails when tests fail', function () {
     Process::fake([
-        'git rev-parse HEAD' => Process::result(output: "abc123\n"),
-        'git diff abc123 HEAD' => Process::result(output: "diff --git a/app/File.php b/app/File.php\nnew file"),
-        'git diff HEAD' => Process::result(output: ""),
-        'git diff --name-only abc123 HEAD' => Process::result(output: "app/File.php\n"),
-        'git diff --name-only HEAD' => Process::result(output: ""),
-        'aider --model openai/test-model --yes-always --no-check-update --analytics-disable --no-show-model-warnings --no-stream --message-file' => Process::result(output: "aider output", exitCode: 0),
+        "'git' 'rev-parse' 'HEAD'" => Process::result(output: "abc123\n"),
+        "'git' 'diff' 'abc123' 'HEAD'" => Process::result(output: "diff --git a/app/File.php b/app/File.php\nnew file"),
+        "'git' 'diff' 'HEAD'" => Process::result(output: ""),
+        "'git' 'diff' '--name-only' 'abc123' 'HEAD'" => Process::result(output: "app/File.php\n"),
+        "'git' 'diff' '--name-only' 'HEAD'" => Process::result(output: ""),
+        "'aider' '--model'*" => Process::result(output: "aider output", exitCode: 0),
         'php artisan test' => Process::result(output: "Tests failed", exitCode: 1),
     ]);
 
@@ -121,8 +122,8 @@ it('fails when tests fail', function () {
 
 it('fails when aider exits with non-zero', function () {
     Process::fake([
-        'git rev-parse HEAD' => Process::result(output: "abc123\n"),
-        'aider --model openai/test-model --yes-always --no-check-update --analytics-disable --no-show-model-warnings --no-stream --message-file' => Process::result(output: "error", exitCode: 1),
+        "'git' 'rev-parse' 'HEAD'" => Process::result(output: "abc123\n"),
+        "'aider' '--model'*" => Process::result(output: "error", exitCode: 1),
     ]);
 
     $harness = new AiderHarness('aider', 1800);
@@ -142,12 +143,12 @@ it('fails when aider exits with non-zero', function () {
 
 it('fails when diff is empty', function () {
     Process::fake([
-        'git rev-parse HEAD' => Process::result(output: "abc123\n"),
-        'git diff abc123 HEAD' => Process::result(output: ""),
-        'git diff HEAD' => Process::result(output: ""),
-        'git diff --name-only abc123 HEAD' => Process::result(output: ""),
-        'git diff --name-only HEAD' => Process::result(output: ""),
-        'aider --model openai/test-model --yes-always --no-check-update --analytics-disable --no-show-model-warnings --no-stream --message-file' => Process::result(output: "aider output", exitCode: 0),
+        "'git' 'rev-parse' 'HEAD'" => Process::result(output: "abc123\n"),
+        "'git' 'diff' 'abc123' 'HEAD'" => Process::result(output: ""),
+        "'git' 'diff' 'HEAD'" => Process::result(output: ""),
+        "'git' 'diff' '--name-only' 'abc123' 'HEAD'" => Process::result(output: ""),
+        "'git' 'diff' '--name-only' 'HEAD'" => Process::result(output: ""),
+        "'aider' '--model'*" => Process::result(output: "aider output", exitCode: 0),
     ]);
 
     $harness = new AiderHarness('aider', 1800);
@@ -191,12 +192,12 @@ it('fails when path is not a git repository', function () {
 
 it('includes file hints as trailing args', function () {
     Process::fake([
-        'git rev-parse HEAD' => Process::result(output: "abc123\n"),
-        'git diff abc123 HEAD' => Process::result(output: "diff"),
-        'git diff HEAD' => Process::result(output: ""),
-        'git diff --name-only abc123 HEAD' => Process::result(output: "app/File.php\n"),
-        'git diff --name-only HEAD' => Process::result(output: ""),
-        'aider --model openai/test-model --yes-always --no-check-update --analytics-disable --no-show-model-warnings --no-stream --message-file' => Process::result(output: "aider output", exitCode: 0),
+        "'git' 'rev-parse' 'HEAD'" => Process::result(output: "abc123\n"),
+        "'git' 'diff' 'abc123' 'HEAD'" => Process::result(output: "diff"),
+        "'git' 'diff' 'HEAD'" => Process::result(output: ""),
+        "'git' 'diff' '--name-only' 'abc123' 'HEAD'" => Process::result(output: "app/File.php\n"),
+        "'git' 'diff' '--name-only' 'HEAD'" => Process::result(output: ""),
+        "'aider' '--model'*" => Process::result(output: "aider output", exitCode: 0),
     ]);
 
     $harness = new AiderHarness('aider', 1800);

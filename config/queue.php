@@ -44,6 +44,18 @@ return [
             'after_commit' => false,
         ],
 
+        // Long-running workflow nodes (harness/Build runs take tens of
+        // minutes): retry_after must exceed the job timeout or the worker
+        // re-dispatches a run mid-flight (SPEC §4, long-running nodes).
+        'harness' => [
+            'driver' => 'database',
+            'connection' => env('DB_QUEUE_CONNECTION'),
+            'table' => env('DB_QUEUE_TABLE', 'jobs'),
+            'queue' => 'harness',
+            'retry_after' => 3900,
+            'after_commit' => false,
+        ],
+
         'beanstalkd' => [
             'driver' => 'beanstalkd',
             'host' => env('BEANSTALKD_QUEUE_HOST', 'localhost'),

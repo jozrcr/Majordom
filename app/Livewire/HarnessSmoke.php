@@ -49,7 +49,7 @@ class HarnessSmoke extends Component
             $this->repoPath,
             $this->taskPrompt,
             $this->testCommand ?: null,
-        )->onQueue('harness');
+        )->onConnection('harness')->onQueue('harness');
     }
 
     public function render()
