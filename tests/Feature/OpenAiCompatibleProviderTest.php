@@ -46,8 +46,8 @@ test('request shape excludes null parameters', function () {
             && $request->header('Authorization')[0] === 'Bearer test-key'
             && $request['model'] === 'test-model'
             && $request['messages'] === [['role' => 'user', 'content' => 'Hello']]
-            && !array_key_exists('max_tokens', $request)
-            && !array_key_exists('temperature', $request);
+            && !array_key_exists('max_tokens', $request->data())
+            && !array_key_exists('temperature', $request->data());
     });
 });
 
@@ -106,9 +106,7 @@ test('402 error throws ProviderRequestFailed with correct status and message', f
 });
 
 test('connection exception throws ProviderUnreachable', function () {
-    Http::fake([
-        'api.test.com/chat/completions' => Http::response(null, 0)->throw(fn () => throw new ConnectionException('Connection refused')),
-    ]);
+    Http::fake(fn () => throw new ConnectionException('Connection refused'));
 
     $provider = new OpenAiCompatibleProvider('https://api.test.com', 'test-key', 30);
     $request = new ProviderRequest('test-model', [['role' => 'user', 'content' => 'Hello']]);
