@@ -5,6 +5,7 @@ namespace App\Providers;
 use Illuminate\Support\ServiceProvider;
 use App\Runtime\Metallama\MetallamaClient;
 use App\Runtime\Metallama\ResourceCoordinator;
+use App\Projects\Memory\MemoryStore;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -18,6 +19,8 @@ class AppServiceProvider extends ServiceProvider
         
         $this->app->bind(\App\Agents\Harness\Harness::class, fn () => \App\Agents\Harness\AiderHarness::fromConfig());
         $this->app->bind(\App\Agents\Providers\Provider::class, fn () => \App\Agents\Providers\OpenAiCompatibleProvider::openrouter());
+        
+        $this->app->singleton(MemoryStore::class, fn () => MemoryStore::fromConfig());
     }
 
     /**
