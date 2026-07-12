@@ -104,15 +104,17 @@
                     <span class="font-mono text-meta text-mute">execution #{{ $this->latestExecution->id }}</span>
                     @foreach($this->latestExecution->nodes as $index => $node)
                         @if($index > 0)<span class="text-faint">·</span>@endif
-                        <div class="flex items-center gap-1.5">
-                            <span class="h-1.5 w-1.5 rounded-full {{ match((string) $node->status) {
-                                'pending' => 'bg-status-idle',
+                        @php
+                            $nodeLed = match ($node->status->value) {
                                 'running' => 'bg-status-working animate-led-pulse',
                                 'completed' => 'bg-ok',
                                 'failed' => 'bg-status-failed',
                                 'waiting_human' => 'bg-accent led-glow',
-                                default => 'bg-status-idle'
-                            }}}"></span>
+                                default => 'bg-status-idle',
+                            };
+                        @endphp
+                        <div class="flex items-center gap-1.5">
+                            <span class="h-1.5 w-1.5 rounded-full {{ $nodeLed }}"></span>
                             <span class="font-mono text-meta">{{ $node->type }}</span>
                         </div>
                     @endforeach

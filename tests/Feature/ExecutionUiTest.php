@@ -34,8 +34,7 @@ test('start-build card shows when plan exists and no execution', function () {
         'meta' => ['planWritten' => true, 'firstTaskId' => 'T-001'],
     ]);
 
-    $path = app(MemoryStore::class)->pathFor($project) . '/tasks/T-001/task.md';
-    file_put_contents($path, "# Add guard\n\nSome details.");
+    app(MemoryStore::class)->write($project, 'tasks/T-001/task.md', "# Add guard\n\nSome details.");
 
     Livewire::test(ProjectWorkspace::class, ['project' => $project])
         ->assertSee('Start build')
@@ -51,8 +50,7 @@ test('startBuild creates execution and task', function () {
         'content' => '',
         'meta' => ['planWritten' => true, 'firstTaskId' => 'T-001'],
     ]);
-    $path = app(MemoryStore::class)->pathFor($project) . '/tasks/T-001/task.md';
-    file_put_contents($path, "# Add guard");
+    app(MemoryStore::class)->write($project, 'tasks/T-001/task.md', "# Add guard");
 
     Livewire::test(ProjectWorkspace::class, ['project' => $project])
         ->call('startBuild');
@@ -69,8 +67,7 @@ test('start-build card hidden while execution is running', function () {
         'content' => '',
         'meta' => ['planWritten' => true, 'firstTaskId' => 'T-001'],
     ]);
-    $path = app(MemoryStore::class)->pathFor($project) . '/tasks/T-001/task.md';
-    file_put_contents($path, "# Add guard");
+    app(MemoryStore::class)->write($project, 'tasks/T-001/task.md', "# Add guard");
 
     Execution::create([
         'project_id' => $project->id,
@@ -130,13 +127,18 @@ test('rejectReview without comment errors and approval stays open', function () 
 test('approveReview resolves approval and moves execution', function () {
     $project = Project::factory()->create();
     $execution = Execution::create(['project_id' => $project->id, 'status' => ExecutionStatus::NeedsYou]);
+    $node = \App\Models\Node::create([
+        'execution_id' => $execution->id,
+        'type' => 'review',
+        'status' => \App\Enums\NodeStatus::WaitingHuman,
+    ]);
     $approval = Approval::create([
         'project_id' => $project->id,
         'execution_id' => $execution->id,
         'type' => ApprovalType::Review,
         'status' => ApprovalStatus::Open,
         'title' => 'Review PR #1',
-        'payload' => ['diff' => '', 'verdict' => ['summary' => ''], 'testsPassed' => null, 'filesChanged' => []],
+        'payload' => ['node_id' => $node->id, 'diff' => '', 'verdict' => ['summary' => ''], 'testsPassed' => null, 'filesChanged' => []],
     ]);
 
     Livewire::test(ProjectWorkspace::class, ['project' => $project])
@@ -146,13 +148,16 @@ test('approveReview resolves approval and moves execution', function () {
     $approval->refresh();
     expect($approval->status)->toBe(ApprovalStatus::Granted);
     $execution->refresh();
-    expect($execution->status)->toBe(ExecutionStatus::Running);
+    // No further pending nodes → the engine completes the execution.
+    expect($execution->status)->toBe(ExecutionStatus::Completed)
+        ->and($node->fresh()->output['comment'])->toBe('Looks fine');
 });
 
 test('commit-suggestion card shows message and branch', function () {
     $project = Project::factory()->create();
     $execution = Execution::create(['project_id' => $project->id, 'status' => ExecutionStatus::Completed]);
     CommitSuggestion::create([
+        'project_id' => $project->id,
         'execution_id' => $execution->id,
         'status' => 'suggested',
         'branch' => 'feat/add-guard',
