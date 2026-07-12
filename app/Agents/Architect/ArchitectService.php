@@ -27,11 +27,11 @@ class ArchitectService
 
     /**
      * One conversation turn. $userMessage may be null when re-prompting after
-     * answers were recorded. Returns the persisted Architect message; when the
-     * turn closed consensus, the plan has been written to project memory and
-     * 'planWritten' is true.
+     * answers were recorded. When the turn closed consensus,
+     * 'consensusPending' is true and the plan awaits the owner's explicit
+     * approval (approvePlan()) — nothing is written yet.
      *
-     * @return array{message: ConsensusMessage, planWritten: bool}
+     * @return array{message: ConsensusMessage, consensusPending: bool}
      */
     public function converse(Project $project, ?string $userMessage = null): array
     {
@@ -70,24 +70,24 @@ class ArchitectService
             ]);
         }
 
-        // The gate: consensus only counts with zero open questions — including
-        // ones raised this very turn.
-        $planWritten = false;
-        if ($envelope->consensusReached && $project->openQuestions()->count() === 0) {
-            $this->draftPlan($project);
-            $planWritten = true;
-        }
+        // The question gate: a consensus claim only stands with zero open
+        // questions — including ones raised this very turn. Even then the
+        // plan is NOT drafted here: that is the human's call (SPEC §3 phase 2
+        // plan-approval gate; always blocking until autonomy profiles land).
+        $consensusPending = $envelope->consensusReached
+            && $project->openQuestions()->count() === 0;
 
-        // Status light: open questions = the human is awaited. Direct writes
-        // for now; M4 moves these behind event listeners.
+        // Status light: open questions OR a plan awaiting approval = the
+        // human is awaited. Direct writes for now; M4 moves these behind
+        // event listeners.
         $project->update([
-            'status' => $project->openQuestions()->count() > 0
+            'status' => ($project->openQuestions()->count() > 0 || $consensusPending)
                 ? ProjectStatus::NeedsYou
                 : ProjectStatus::Idle,
             'last_activity_at' => now(),
         ]);
 
-        return ['message' => $message, 'planWritten' => $planWritten];
+        return ['message' => $message, 'consensusPending' => $consensusPending];
     }
 
     /**
@@ -111,9 +111,11 @@ class ArchitectService
     }
 
     /**
-     * Phase 2: distill the agreed intent into project memory files.
+     * Phase 2, on the owner's explicit approval: distill the agreed intent
+     * into project memory files. Called from the RunPlanDraft job — this
+     * makes a provider call and must never run inside a web request.
      */
-    private function draftPlan(Project $project): void
+    public function approvePlan(Project $project): void
     {
         $response = $this->provider->chat(new ProviderRequest(
             model: (string) config('majordom.architect.model'),
