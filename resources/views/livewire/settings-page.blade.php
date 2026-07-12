@@ -8,6 +8,9 @@
             <button wire:click="$set('section', 'workflow')" class="rounded px-3 py-2 text-left text-sm font-medium transition-colors {{ $section === 'workflow' ? 'bg-surface-active text-hi' : 'text-t3 hover:text-hi' }}">
                 Workflow
             </button>
+            <button wire:click="$set('section', 'workflows')" class="rounded px-3 py-2 text-left text-sm font-medium transition-colors {{ $section === 'workflows' ? 'bg-surface-active text-hi' : 'text-t3 hover:text-hi' }}">
+                Workflows
+            </button>
             <button wire:click="$set('section', 'integrations')" class="rounded px-3 py-2 text-left text-sm font-medium transition-colors {{ $section === 'integrations' ? 'bg-surface-active text-hi' : 'text-t3 hover:text-hi' }}">
                 Integrations
             </button>
@@ -103,7 +106,79 @@
                             @error('workflow.overnight_spend_cap_usd') <span class="text-xs text-status-failed">{{ $message }}</span> @enderror
                         </div>
                     </div>
-                    <button wire:click="saveWorkflow" class="rounded bg-accent px-4 py-2 text-sm font-medium text-accent-ink hover:opacity-90 transition-opacity">Save</button>
+                    <button wire:click="saveWorkflowSettings" class="rounded bg-accent px-4 py-2 text-sm font-medium text-accent-ink hover:opacity-90 transition-opacity">Save</button>
+                </div>
+            @elseif($section === 'workflows')
+                <h2 class="mb-6 text-lg font-semibold text-hi">Workflows</h2>
+                <div class="space-y-6">
+                    @foreach($workflows as $wf)
+                        <div class="flex items-center justify-between border-b border-border pb-4">
+                            <div>
+                                <div class="flex items-center gap-2">
+                                    <span class="font-medium text-hi">{{ $wf->name }}</span>
+                                    @if($wf->is_builtin)
+                                        <span class="rounded-[5px] bg-surface-chip px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[.1em] text-t3">builtin</span>
+                                    @endif
+                                </div>
+                                <p class="mt-1 font-mono text-xs text-t3">{{ implode(' → ', $wf->chain) }}</p>
+                            </div>
+                            <div class="flex gap-2">
+                                @if(!$wf->is_builtin)
+                                    <button wire:click="loadWorkflowForEdit({{ $wf->id }})" class="rounded border border-border px-3 py-1.5 text-xs font-medium text-hi hover:bg-surface-chip transition-colors">Load into builder</button>
+                                    <button wire:click="deleteWorkflow({{ $wf->id }})" wire:confirm="Delete this workflow?" class="rounded border border-status-failed px-3 py-1.5 text-xs font-medium text-status-failed hover:bg-status-failed/10 transition-colors">Delete</button>
+                                @endif
+                            </div>
+                        </div>
+                    @endforeach
+                </div>
+
+                <div class="mt-8 border-t border-border pt-6">
+                    <p class="mb-3 text-xs font-medium text-t3">{{ $editingId ? 'EDIT WORKFLOW' : 'CREATE WORKFLOW' }}</p>
+                    <div class="space-y-4">
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="text-xs font-medium text-t3">Name</label>
+                                <input type="text" wire:model.live="workflowName" class="w-full rounded border border-border bg-surface px-2 py-1.5 font-mono text-sm text-hi" />
+                                @error('workflowName') <span class="text-xs text-status-failed">{{ $message }}</span> @enderror
+                            </div>
+                            <div>
+                                <label class="text-xs font-medium text-t3">Description</label>
+                                <input type="text" wire:model.live="workflowDescription" class="w-full rounded border border-border bg-surface px-2 py-1.5 font-mono text-sm text-hi" />
+                            </div>
+                        </div>
+
+                        <div>
+                            <label class="text-xs font-medium text-t3">Chain</label>
+                            <div class="mt-2 space-y-2">
+                                @foreach($chainDraft as $i => $step)
+                                    <div class="flex items-center gap-2 font-mono text-sm text-hi">
+                                        <button wire:click="moveStep({{ $i }}, 'up')" class="text-t3 hover:text-hi disabled:opacity-30" @disabled($i === 0)">↑</button>
+                                        <button wire:click="moveStep({{ $i }}, 'down')" class="text-t3 hover:text-hi disabled:opacity-30" @disabled($i === count($chainDraft) - 1)">↓</button>
+                                        <button wire:click="removeStep({{ $i }})" class="text-status-failed hover:underline">×</button>
+                                        <span>{{ $step }}</span>
+                                    </div>
+                                @endforeach
+                            </div>
+                            <div class="mt-3 flex items-center gap-2">
+                                <select wire:model.live="chainPick" class="rounded border border-border bg-surface px-2 py-1.5 text-sm text-hi">
+                                    <option value="">Select step…</option>
+                                    @foreach($knownTypes as $type)
+                                        <option value="{{ $type }}">{{ $type }}</option>
+                                    @endforeach
+                                </select>
+                                <button wire:click="addStep" class="rounded border border-border px-3 py-1.5 text-xs font-medium text-hi hover:bg-surface-chip transition-colors">Add step</button>
+                            </div>
+                            @error('chainDraft') <span class="text-xs text-status-failed">{{ $message }}</span> @enderror
+                        </div>
+
+                        <button wire:click="saveWorkflow" class="rounded bg-accent px-4 py-2 text-sm font-medium text-accent-ink hover:opacity-90 transition-opacity">
+                            {{ $editingId ? 'Save' : 'Create workflow' }}
+                        </button>
+                        @if($editingId)
+                            <button wire:click="resetWorkflowDraft" class="ml-2 rounded border border-border px-3 py-1.5 text-xs font-medium text-t3 hover:bg-surface-chip transition-colors">Cancel</button>
+                        @endif
+                    </div>
+                    <p class="mt-4 font-mono text-xs text-t3">gates & autonomy come from the run profile; custom AI roles become chain steps in a later milestone</p>
                 </div>
             @elseif($section === 'integrations')
                 <h2 class="mb-6 text-lg font-semibold text-hi">Integrations</h2>

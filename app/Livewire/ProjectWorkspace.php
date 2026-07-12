@@ -20,10 +20,17 @@ class ProjectWorkspace extends Component
     public array $customDrafts = [];
     public ?string $gateComment = null;
     public ?int $selectedEventId = null;
+    public ?int $workflowId = null;
 
     public function mount(Project $project): void
     {
         $this->project = $project;
+        $this->workflowId = $project->workflow_id;
+    }
+
+    public function updatedWorkflowId(?int $value): void
+    {
+        $this->project->update(['workflow_id' => $value]);
     }
 
     public function send(): void
@@ -386,6 +393,7 @@ class ProjectWorkspace extends Component
             'questionsByMessage' => $questionsByMessage,
             'openCount' => $openCount,
             'timelineGroups' => $orderedTimelineGroups,
+            'workflows' => \App\Models\Workflow::orderBy('is_builtin', 'desc')->orderBy('name')->get(),
         ])->title("Majordom — {$this->project->name}");
     }
 }

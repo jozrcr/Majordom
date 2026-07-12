@@ -23,6 +23,11 @@ class WorkflowEngine
     /** @param array<string, class-string<NodeJob>> $nodeMap */
     public function __construct(private array $nodeMap = []) {}
 
+    public function knownTypes(): array
+    {
+        return array_keys($this->nodeMap);
+    }
+
     /** @param string[] $nodeTypes ordered chain, keys of the node map */
     public function start(Execution $execution, array $nodeTypes): void
     {

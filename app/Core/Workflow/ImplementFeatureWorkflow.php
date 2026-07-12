@@ -39,12 +39,15 @@ class ImplementFeatureWorkflow
      */
     public static function startForTask(Project $project, string $taskKey, string $title, string $profile = 'attended'): Task
     {
+        $chain = $project->workflow?->chain ?: self::CHAIN;
+
         $execution = $project->executions()->create([
             'status' => ExecutionStatus::Running,
             'profile' => $profile,
             'spend_cap_usd' => $profile === 'overnight'
                 ? Setting::get('workflow.overnight_spend_cap_usd', config('majordom.workflow.overnight_spend_cap_usd'))
                 : null,
+            'meta' => ['workflow' => $project->workflow?->name ?? 'Implement Feature'],
         ]);
 
         // Reuse the task across restarts so its revision (and the v{n}
@@ -57,7 +60,7 @@ class ImplementFeatureWorkflow
         $task->project_id = $project->id;
         $task->save();
 
-        app(WorkflowEngine::class)->start($execution, self::CHAIN);
+        app(WorkflowEngine::class)->start($execution, $chain);
 
         return $task;
     }

@@ -3,6 +3,7 @@
 namespace App\Livewire;
 
 use App\Models\Role;
+use App\Models\Workflow;
 use App\Support\Setting;
 use Illuminate\Support\Facades\Cache;
 use Livewire\Attributes\Layout;
@@ -26,6 +27,13 @@ class SettingsPage extends Component
     public bool $metallamaOk = false;
     public bool $telegramConfigured = false;
     public string $reverbHost = '';
+
+    // Workflow builder state
+    public string $workflowName = '';
+    public string $workflowDescription = '';
+    public array $chainDraft = [];
+    public string $chainPick = '';
+    public ?int $editingId = null;
 
     public function mount(): void
     {
@@ -120,7 +128,7 @@ class SettingsPage extends Component
         $this->reset('newRole');
     }
 
-    public function saveWorkflow(): void
+    public function saveWorkflowSettings(): void
     {
         $validated = $this->validate([
             'workflow.max_revisions' => 'required|integer|min:1|max:10',
@@ -131,8 +139,107 @@ class SettingsPage extends Component
         Setting::put('workflow.overnight_spend_cap_usd', data_get($validated, 'workflow.overnight_spend_cap_usd'));
     }
 
+    // Workflow CRUD
+    public function saveWorkflow(): void
+    {
+        $validated = $this->validate([
+            'workflowName' => 'required|string|unique:workflows,name,' . ($this->editingId ?? 0),
+            'workflowDescription' => 'nullable|string',
+            'chainDraft' => 'required|array|min:1',
+        ]);
+
+        $engine = app(\App\Core\Workflow\WorkflowEngine::class);
+        foreach ($validated['chainDraft'] as $type) {
+            if (!$engine->knows($type)) {
+                $this->addError('chainDraft', "Unknown node type '{$type}'.");
+                return;
+            }
+        }
+
+        if ($this->editingId) {
+            $wf = Workflow::findOrFail($this->editingId);
+            $wf->update([
+                'name' => $validated['workflowName'],
+                'description' => $validated['workflowDescription'],
+                'chain' => $validated['chainDraft'],
+            ]);
+        } else {
+            Workflow::create([
+                'name' => $validated['workflowName'],
+                'description' => $validated['workflowDescription'],
+                'chain' => $validated['chainDraft'],
+                'is_builtin' => false,
+            ]);
+        }
+
+        $this->resetWorkflowDraft();
+    }
+
+    public function resetWorkflowDraft(): void
+    {
+        $this->workflowName = '';
+        $this->workflowDescription = '';
+        $this->chainDraft = [];
+        $this->chainPick = '';
+        $this->editingId = null;
+    }
+
+    public function loadWorkflowForEdit(int $id): void
+    {
+        $wf = Workflow::findOrFail($id);
+        $this->editingId = $id;
+        $this->workflowName = $wf->name;
+        $this->workflowDescription = $wf->description ?? '';
+        $this->chainDraft = $wf->chain;
+    }
+
+    public function deleteWorkflow(int $id): void
+    {
+        $wf = Workflow::findOrFail($id);
+        if ($wf->is_builtin) {
+            $this->addError('workflow', 'Cannot delete builtin workflows.');
+            return;
+        }
+        if ($wf->projects()->exists()) {
+            $this->addError('workflow', 'Cannot delete workflows in use by projects.');
+            return;
+        }
+        $wf->delete();
+    }
+
+    public function addStep(): void
+    {
+        if ($this->chainPick !== '' && app(\App\Core\Workflow\WorkflowEngine::class)->knows($this->chainPick)) {
+            $this->chainDraft[] = $this->chainPick;
+            $this->chainPick = '';
+        }
+    }
+
+    public function moveStep(int $index, string $dir): void
+    {
+        $count = count($this->chainDraft);
+        if ($dir === 'up' && $index > 0) {
+            $tmp = $this->chainDraft[$index];
+            $this->chainDraft[$index] = $this->chainDraft[$index - 1];
+            $this->chainDraft[$index - 1] = $tmp;
+        } elseif ($dir === 'down' && $index < $count - 1) {
+            $tmp = $this->chainDraft[$index];
+            $this->chainDraft[$index] = $this->chainDraft[$index + 1];
+            $this->chainDraft[$index + 1] = $tmp;
+        }
+    }
+
+    public function removeStep(int $index): void
+    {
+        unset($this->chainDraft[$index]);
+        $this->chainDraft = array_values($this->chainDraft);
+    }
+
     public function render()
     {
-        return view('livewire.settings-page');
+        return view('livewire.settings-page', [
+            'workflows' => Workflow::orderBy('is_builtin', 'desc')->orderBy('name')->get(),
+            'knownTypes' => app(\App\Core\Workflow\WorkflowEngine::class)->knownTypes(),
+        ]);
     }
 }
