@@ -19,6 +19,7 @@ class ProjectWorkspace extends Component
     /** Free-text answers; when non-empty they win over a picked option. */
     public array $customDrafts = [];
     public ?string $gateComment = null;
+    public ?int $selectedEventId = null;
 
     public function mount(Project $project): void
     {
@@ -113,6 +114,26 @@ class ProjectWorkspace extends Component
     {
         $this->project->update(['archived_at' => $this->project->archived_at ? null : now()]);
         $this->redirectRoute('home', navigate: false);
+    }
+
+    /**
+     * execution id → session index: the session whose closing plan preceded
+     * the execution's start (timeline headers deep-link into the chat).
+     */
+    private function executionSessionMap(array $sessions): array
+    {
+        $map = [];
+        foreach ($this->project->executions()->orderBy('id')->get() as $execution) {
+            $index = count($sessions) - 1; // default: current session
+            foreach ($sessions as $i => $session) {
+                if ($session['closed'] && $session['endedAt'] && $session['endedAt']->lte($execution->created_at)) {
+                    $index = min($i + 1, count($sessions) - 1);
+                }
+            }
+            $map[$execution->id] = $index;
+        }
+
+        return $map;
     }
 
     public function getThinkingProperty(): bool
@@ -280,6 +301,34 @@ class ProjectWorkspace extends Component
         $this->gateComment = null;
     }
 
+    public function selectEvent(int $eventId): void
+    {
+        $this->selectedEventId = $this->selectedEventId === $eventId ? null : $eventId;
+    }
+
+    public function getSelectedEventDetailProperty(): ?array
+    {
+        if ($this->selectedEventId === null) {
+            return null;
+        }
+
+        $event = $this->project->events()->find($this->selectedEventId);
+        if (!$event) {
+            return null;
+        }
+
+        $node = null;
+        if ($event->execution_id && str_contains($event->name, '.')) {
+            $type = explode('.', $event->name)[0];
+            $node = \App\Models\Node::where('execution_id', $event->execution_id)
+                ->where('type', $type)
+                ->orderByDesc('id')
+                ->first();
+        }
+
+        return ['event' => $event, 'node' => $node];
+    }
+
     #[On('timeline-bump')]
     public function bumpTimeline(): void {}
 
@@ -288,13 +337,53 @@ class ProjectWorkspace extends Component
         $messages = $this->project->consensusMessages()->orderBy('id')->get();
         $questionsByMessage = $this->project->questions()->get()->groupBy('consensus_message_id');
         $openCount = $this->project->openQuestions()->count();
-        $timeline = $this->project->events()->orderByDesc('id')->limit(50)->get();
+
+        $sessions = [];
+        $currentSessionMessages = collect();
+        foreach ($messages as $message) {
+            $currentSessionMessages->push($message);
+            $isDelimiter = $message->role === \App\Enums\MessageRole::System && ($message->meta['planWritten'] ?? false) === true;
+            if ($isDelimiter) {
+                $sessions[] = [
+                    'messages' => $currentSessionMessages,
+                    'closed' => true,
+                    'endedAt' => $message->created_at,
+                ];
+                $currentSessionMessages = collect();
+            }
+        }
+        if ($currentSessionMessages->isNotEmpty()) {
+            $sessions[] = [
+                'messages' => $currentSessionMessages,
+                'closed' => false,
+                'endedAt' => null,
+            ];
+        }
+
+        $timelineEvents = $this->project->events()->orderByDesc('id')->limit(50)->get();
+        $timelineGroups = [];
+        $groupOrder = [];
+        foreach ($timelineEvents as $event) {
+            $key = $event->execution_id ?? 'consensus';
+            if (!isset($timelineGroups[$key])) {
+                $timelineGroups[$key] = collect();
+                $groupOrder[] = $key;
+            }
+            $timelineGroups[$key]->push($event);
+        }
+        $orderedTimelineGroups = [];
+        foreach ($groupOrder as $key) {
+            $orderedTimelineGroups[] = [
+                'key' => $key,
+                'events' => $timelineGroups[$key],
+            ];
+        }
 
         return view('livewire.project-workspace', [
-            'messages' => $messages,
+            'sessions' => $sessions,
             'questionsByMessage' => $questionsByMessage,
             'openCount' => $openCount,
-            'timeline' => $timeline,
+            'timelineGroups' => $orderedTimelineGroups,
         ])->title("Majordom — {$this->project->name}");
     }
 }

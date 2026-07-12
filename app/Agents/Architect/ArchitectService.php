@@ -86,6 +86,7 @@ class ArchitectService
             [
                 'questionsRaised' => count($envelope->questions),
                 'consensusClaimed' => $envelope->consensusReached,
+                'messageId' => $message->id,
             ],
             null,
             'architect'
