@@ -65,4 +65,9 @@ class Project extends Model
     {
         return $this->hasMany(Approval::class)->where('status', ApprovalStatus::Open);
     }
+
+    public function events(): HasMany
+    {
+        return $this->hasMany(Event::class);
+    }
 }

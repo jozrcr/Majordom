@@ -8,6 +8,7 @@ use App\Enums\QuestionStatus;
 use App\Jobs\RunArchitectTurn;
 use App\Models\Project;
 use Illuminate\Support\Facades\Cache;
+use Livewire\Attributes\On;
 use Livewire\Component;
 
 class ProjectWorkspace extends Component
@@ -224,16 +225,21 @@ class ProjectWorkspace extends Component
         $this->gateComment = null;
     }
 
+    #[On('timeline-bump')]
+    public function bumpTimeline(): void {}
+
     public function render()
     {
         $messages = $this->project->consensusMessages()->orderBy('id')->get();
         $questionsByMessage = $this->project->questions()->get()->groupBy('consensus_message_id');
         $openCount = $this->project->openQuestions()->count();
+        $timeline = $this->project->events()->orderByDesc('id')->limit(50)->get();
 
         return view('livewire.project-workspace', [
             'messages' => $messages,
             'questionsByMessage' => $questionsByMessage,
             'openCount' => $openCount,
+            'timeline' => $timeline,
         ])->title("Majordom — {$this->project->name}");
     }
 }
