@@ -38,16 +38,18 @@
                         default => 'bg-surface-chip text-t3',
                     };
                 @endphp
-                <article class="rounded-xl border p-4 transition-colors duration-120 {{ $cardClasses }}">
-                    <div class="flex items-center gap-2.5">
-                        <span class="h-2 w-2 rounded-full {{ $ledClasses }}"></span>
-                        <h2 class="text-title-sm font-medium text-text">{{ $project->name }}</h2>
-                        <span class="ml-auto rounded-full px-2.5 py-0.5 font-mono text-[10.5px] font-semibold tracking-[.06em] {{ $pillClasses }}">{{ $project->status->label() }}</span>
-                    </div>
-                    <p class="mt-3 text-body-sm text-t2">No milestones yet</p>
-                    <p class="mt-2 font-mono text-meta text-mute truncate">{{ $project->repo_path }}</p>
-                    <p class="mt-1 font-mono text-meta text-faint">{{ $project->last_activity_at?->diffForHumans() ?? '—' }}</p>
-                </article>
+                <a href="{{ route('project.workspace', $project) }}" class="block">
+                    <article class="rounded-xl border p-4 transition-colors duration-120 hover:border-border-hover hover:bg-surface-active {{ $cardClasses }}">
+                        <div class="flex items-center gap-2.5">
+                            <span class="h-2 w-2 rounded-full {{ $ledClasses }}"></span>
+                            <h2 class="text-title-sm font-medium text-text">{{ $project->name }}</h2>
+                            <span class="ml-auto rounded-full px-2.5 py-0.5 font-mono text-[10.5px] font-semibold tracking-[.06em] {{ $pillClasses }}">{{ $project->status->label() }}</span>
+                        </div>
+                        <p class="mt-3 text-body-sm text-t2">No milestones yet</p>
+                        <p class="mt-2 font-mono text-meta text-mute truncate">{{ $project->repo_path }}</p>
+                        <p class="mt-1 font-mono text-meta text-faint">{{ $project->last_activity_at?->diffForHumans() ?? '—' }}</p>
+                    </article>
+                </a>
             @endforeach
 
             @if (!$showForm)

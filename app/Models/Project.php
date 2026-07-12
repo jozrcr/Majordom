@@ -3,8 +3,10 @@
 namespace App\Models;
 
 use App\Enums\ProjectStatus;
+use App\Enums\QuestionStatus;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Project extends Model
 {
@@ -25,5 +27,20 @@ class Project extends Model
             'status' => ProjectStatus::class,
             'last_activity_at' => 'datetime',
         ];
+    }
+
+    public function consensusMessages(): HasMany
+    {
+        return $this->hasMany(ConsensusMessage::class);
+    }
+
+    public function questions(): HasMany
+    {
+        return $this->hasMany(Question::class);
+    }
+
+    public function openQuestions(): HasMany
+    {
+        return $this->hasMany(Question::class)->where('status', QuestionStatus::Open);
     }
 }

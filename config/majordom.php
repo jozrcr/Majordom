@@ -2,6 +2,7 @@
 
 return [
     'token' => env('MAJORDOM_TOKEN'),
+    'memory_root' => env('MAJORDOM_MEMORY_ROOT'),
     'metallama' => [
         'base_url' => env('METALLAMA_BASE_URL', 'http://127.0.0.1:8010'),
         'token' => env('METALLAMA_TOKEN'),
@@ -23,5 +24,22 @@ return [
     'harness' => [
         'aider_bin' => env('MAJORDOM_AIDER_BIN', 'aider'),
         'timeout' => (int) env('MAJORDOM_HARNESS_TIMEOUT', 1800), // seconds
+    ],
+
+    'providers' => [
+        'openrouter' => [
+            'base_url' => env('OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1'),
+            'api_key' => env('OPENROUTER_API_KEY'),
+            'timeout' => (int) env('PROVIDER_TIMEOUT', 120),
+        ],
+    ],
+
+    // Frontier role bindings (Settings → Actors will make these DB-backed
+    // with per-project overrides later; env is the built-in default layer).
+    'architect' => [
+        'model' => env('MAJORDOM_ARCHITECT_MODEL', 'deepseek/deepseek-v4-flash'),
+        'max_tokens' => (int) env('MAJORDOM_ARCHITECT_MAX_TOKENS', 4000),
+        'plan_max_tokens' => (int) env('MAJORDOM_ARCHITECT_PLAN_MAX_TOKENS', 8000),
+        'temperature' => (float) env('MAJORDOM_ARCHITECT_TEMPERATURE', 0.3),
     ],
 ];
