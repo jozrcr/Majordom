@@ -62,7 +62,8 @@ class ReviewerService
             'reviewer',
             (string) config('majordom.reviewer.model'),
             $response->promptTokens,
-            $response->completionTokens
+            $response->completionTokens,
+            $task->execution, // links the cost to the run — the spend cap reads this
         );
 
         return ReviewVerdict::fromContent($response->content);
