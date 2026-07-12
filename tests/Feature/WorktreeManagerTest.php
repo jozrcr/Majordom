@@ -4,7 +4,6 @@ use App\Models\Project;
 use App\Models\Task;
 use App\Projects\Repositories\WorktreeManager;
 use Illuminate\Support\Facades\Process;
-use RuntimeException;
 
 uses(\Illuminate\Foundation\Testing\RefreshDatabase::class);
 

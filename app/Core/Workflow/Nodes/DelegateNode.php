@@ -13,10 +13,6 @@ use App\Projects\Repositories\WorktreeManager;
 
 class DelegateNode extends NodeJob
 {
-    public function __construct(protected int $nodeId)
-    {
-    }
-
     protected function run(Node $node, Execution $execution): NodeResult
     {
         /** @var Task|null $task */

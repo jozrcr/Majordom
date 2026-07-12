@@ -9,14 +9,10 @@ use App\Models\Execution;
 use App\Models\Node;
 use App\Models\Task;
 use App\Projects\Memory\MemoryStore;
-use Symfony\Component\Process\Process;
+use Illuminate\Support\Facades\Process;
 
 class TestNode extends NodeJob
 {
-    public function __construct(protected int $nodeId)
-    {
-    }
-
     protected function run(Node $node, Execution $execution): NodeResult
     {
         /** @var Task|null $task */
@@ -34,8 +30,8 @@ class TestNode extends NodeJob
         }
 
         $process = Process::path($task->worktree_path)->timeout(600)->run($command);
-        $exitCode = $process->getExitCode();
-        $output = substr($process->getOutput() . $process->getErrorOutput(), 0, 4000);
+        $exitCode = $process->exitCode();
+        $output = substr($process->output() . $process->errorOutput(), 0, 4000);
 
         if ($exitCode === 0) {
             $task->status = TaskStatus::Reviewing;

@@ -16,10 +16,6 @@ use App\Runtime\Metallama\ResourceCoordinator;
 
 class BuildNode extends NodeJob
 {
-    public function __construct(protected int $nodeId)
-    {
-    }
-
     protected function run(Node $node, Execution $execution): NodeResult
     {
         /** @var Task|null $task */

@@ -76,7 +76,9 @@ function createExecutionWithTask(array $taskAttrs = [], array $projectAttrs = []
 
 test('DelegateNode writes role.md, creates worktree, and sets task to Building', function () {
     setupMemoryRoot();
-    [$execution, $task, $node, $project] = createExecutionWithTask();
+    $repoDir = sys_get_temp_dir().'/majordom-noderepo-'.uniqid();
+    mkdir($repoDir.'/.git', 0755, true);
+    [$execution, $task, $node, $project] = createExecutionWithTask([], ['repo_path' => $repoDir]);
     
     $memory = app(MemoryStore::class);
     $memory->write($project, "tasks/{$task->task_key}/task.md", "Build something.");
@@ -86,10 +88,11 @@ test('DelegateNode writes role.md, creates worktree, and sets task to Building',
     ]);
 
     $job = new DelegateNode($node->id);
-    $result = $job->handle();
+    $job->handle();
 
-    expect($result)->toBeInstanceOf(NodeResult::class);
-    expect($result->output['worktree'])->not->toBeNull();
+    $node->refresh();
+    expect($node->status)->toBe(\App\Enums\NodeStatus::Completed);
+    expect($node->output['worktree'])->not->toBeNull();
     $task->refresh();
     expect($task->status)->toBe(TaskStatus::Building);
     expect($memory->read($project, "tasks/{$task->task_key}/role.md"))->toContain('You are the Builder');
@@ -102,9 +105,9 @@ test('DelegateNode fails when task.md is missing', function () {
     Process::fake();
 
     $job = new DelegateNode($node->id);
-    $result = $job->handle();
+    $job->handle();
 
-    expect($result->status)->toBe('failed');
+    expect($node->refresh()->status)->toBe(\App\Enums\NodeStatus::Failed);
     $execution->refresh();
     expect($execution->meta['parked_reason'] ?? '')->toContain('task brief');
 });
@@ -137,9 +140,9 @@ test('BuildNode coordinates, runs harness, writes handoff, and sets task to Test
     app()->instance(ResourceCoordinator::class, new FakeCoordinator());
 
     $job = new BuildNode($node->id);
-    $result = $job->handle();
+    $job->handle();
 
-    expect($result->output['diff'])->toBe('diff --git');
+    expect($node->refresh()->output['diff'])->toBe('diff --git');
     $task->refresh();
     expect($task->status)->toBe(TaskStatus::Testing);
     expect($memory->read($project, "tasks/{$task->task_key}/handoff.md"))->toContain('Done');
@@ -175,9 +178,9 @@ test('BuildNode failure parks execution and sets task to Failed', function () {
     app()->instance(ResourceCoordinator::class, new FakeCoordinator());
 
     $job = new BuildNode($node->id);
-    $result = $job->handle();
+    $job->handle();
 
-    expect($result->status)->toBe('failed');
+    expect($node->refresh()->status)->toBe(\App\Enums\NodeStatus::Failed);
     $task->refresh();
     expect($task->status)->toBe(TaskStatus::Failed);
     $execution->refresh();
@@ -226,9 +229,9 @@ test('TestNode skips when no test_command', function () {
     $project->update(['test_command' => null]);
 
     $job = new TestNode($node->id);
-    $result = $job->handle();
+    $job->handle();
 
-    expect($result->output['skipped'])->toBeTrue();
+    expect($node->refresh()->output['skipped'])->toBeTrue();
     $task->refresh();
     expect($task->status)->toBe(TaskStatus::Reviewing);
 });
@@ -245,9 +248,9 @@ test('TestNode passes and sets task to Reviewing', function () {
     ]);
 
     $job = new TestNode($node->id);
-    $result = $job->handle();
+    $job->handle();
 
-    expect($result->output['testsPassed'])->toBeTrue();
+    expect($node->refresh()->output['testsPassed'])->toBeTrue();
     $task->refresh();
     expect($task->status)->toBe(TaskStatus::Reviewing);
 });
@@ -268,9 +271,9 @@ test('TestNode failure writes revision brief and increments revision', function 
     ]);
 
     $job = new TestNode($node->id);
-    $result = $job->handle();
+    $job->handle();
 
-    expect($result->status)->toBe('failed');
+    expect($node->refresh()->status)->toBe(\App\Enums\NodeStatus::Failed);
     $task->refresh();
     expect($task->revision)->toBe(2);
     expect($task->status)->toBe(TaskStatus::Failed);
