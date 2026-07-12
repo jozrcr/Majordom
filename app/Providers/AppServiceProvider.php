@@ -9,6 +9,7 @@ use App\Projects\Memory\MemoryStore;
 use App\Projects\Repositories\WorktreeManager;
 use App\Core\Events\EventRecorder;
 use App\Core\Usage\UsageLedger;
+use App\Support\RoleResolver;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -36,6 +37,8 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(UsageLedger::class, fn () => new UsageLedger());
 
         $this->app->singleton(\App\Integrations\Telegram\TelegramClient::class, fn () => \App\Integrations\Telegram\TelegramClient::fromConfig());
+
+        $this->app->singleton(RoleResolver::class);
     }
 
     /**

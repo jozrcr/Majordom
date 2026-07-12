@@ -12,6 +12,7 @@ use App\Models\ConsensusMessage;
 use App\Models\Project;
 use App\Models\Question;
 use App\Projects\Memory\MemoryStore;
+use App\Support\RoleResolver;
 
 /**
  * The Architect's consensus orchestration (SPEC §3 phase 1–2, M2 slice).
@@ -44,18 +45,20 @@ class ArchitectService
             ]);
         }
 
+        $binding = app(RoleResolver::class)->resolve('architect', $project);
+
         $response = $this->provider->chat(new ProviderRequest(
-            model: (string) config('majordom.architect.model'),
+            model: $binding->model,
             messages: $this->buildMessages($project),
-            maxTokens: (int) config('majordom.architect.max_tokens', 4000),
-            temperature: (float) config('majordom.architect.temperature', 0.3),
+            maxTokens: $binding->maxTokens,
+            temperature: $binding->temperature,
             jsonMode: true,
         ));
 
         app(UsageLedger::class)->record(
             $project,
             'architect',
-            (string) config('majordom.architect.model'),
+            $binding->model,
             $response->promptTokens,
             $response->completionTokens
         );
@@ -147,21 +150,23 @@ class ArchitectService
      */
     public function approvePlan(Project $project): void
     {
+        $binding = app(RoleResolver::class)->resolve('architect', $project);
+
         $response = $this->provider->chat(new ProviderRequest(
-            model: (string) config('majordom.architect.model'),
+            model: $binding->model,
             messages: array_merge($this->buildMessages($project), [[
                 'role' => 'user',
                 'content' => self::PLAN_PROMPT,
             ]]),
             maxTokens: (int) config('majordom.architect.plan_max_tokens', 8000),
-            temperature: (float) config('majordom.architect.temperature', 0.3),
+            temperature: $binding->temperature,
             jsonMode: true,
         ));
 
         app(UsageLedger::class)->record(
             $project,
             'architect',
-            (string) config('majordom.architect.model'),
+            $binding->model,
             $response->promptTokens,
             $response->completionTokens
         );
