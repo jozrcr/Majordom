@@ -3,6 +3,7 @@
 namespace App\Livewire;
 
 use App\Agents\Architect\ArchitectService;
+use App\Core\Events\EventRecorder;
 use App\Enums\QuestionStatus;
 use App\Jobs\RunArchitectTurn;
 use App\Models\Project;
@@ -172,6 +173,14 @@ class ProjectWorkspace extends Component
         if ($this->plannedTask === null) {
             return;
         }
+
+        app(EventRecorder::class)->record(
+            $this->project,
+            'task.delegated',
+            ['task_key' => $this->plannedTask['key']],
+            null,
+            'you'
+        );
 
         app(\App\Core\Workflow\ImplementFeatureWorkflow::class)->startForTask(
             $this->project,

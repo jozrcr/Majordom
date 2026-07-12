@@ -2,6 +2,7 @@
 
 namespace App\Core\Workflow;
 
+use App\Core\Events\EventRecorder;
 use App\Enums\ApprovalStatus;
 use App\Enums\ExecutionStatus;
 use App\Enums\NodeStatus;
@@ -33,6 +34,14 @@ class WorkflowEngine
         $execution->update(['status' => ExecutionStatus::Running]);
         $execution->project->update(['status' => ProjectStatus::Working, 'last_activity_at' => now()]);
 
+        app(EventRecorder::class)->record(
+            $execution->project,
+            'workflow.started',
+            ['nodeTypes' => $nodeTypes],
+            $execution,
+            'system'
+        );
+
         $this->advance($execution);
     }
 
@@ -51,6 +60,14 @@ class WorkflowEngine
         if ($next === null) {
             $execution->update(['status' => ExecutionStatus::Completed, 'current_node' => null]);
             $execution->project->update(['status' => ProjectStatus::Idle, 'last_activity_at' => now()]);
+
+            app(EventRecorder::class)->record(
+                $execution->project,
+                'workflow.completed',
+                [],
+                $execution,
+                'system'
+            );
 
             return;
         }
@@ -90,6 +107,14 @@ class WorkflowEngine
             'decision' => $granted ? 'granted' : 'rejected',
             'comment' => $comment,
         ];
+
+        app(EventRecorder::class)->record(
+            $execution->project,
+            $granted ? 'approval.granted' : 'approval.rejected',
+            ['title' => $approval->title, 'comment' => $comment],
+            $execution,
+            'you'
+        );
 
         if ($granted) {
             $node->finish(($node->output ?? []) + $decision);

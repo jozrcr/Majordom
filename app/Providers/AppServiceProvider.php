@@ -7,6 +7,7 @@ use App\Runtime\Metallama\MetallamaClient;
 use App\Runtime\Metallama\ResourceCoordinator;
 use App\Projects\Memory\MemoryStore;
 use App\Projects\Repositories\WorktreeManager;
+use App\Core\Events\EventRecorder;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -28,6 +29,8 @@ class AppServiceProvider extends ServiceProvider
             \App\Core\Workflow\WorkflowEngine::class,
             fn () => new \App\Core\Workflow\WorkflowEngine(\App\Core\Workflow\ImplementFeatureWorkflow::nodeMap()),
         );
+
+        $this->app->singleton(EventRecorder::class, fn () => new EventRecorder());
     }
 
     /**

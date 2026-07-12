@@ -4,6 +4,7 @@ namespace App\Agents\Architect;
 
 use App\Agents\Providers\Provider;
 use App\Agents\Providers\ProviderRequest;
+use App\Core\Events\EventRecorder;
 use App\Enums\MessageRole;
 use App\Enums\ProjectStatus;
 use App\Models\ConsensusMessage;
@@ -70,6 +71,17 @@ class ArchitectService
             ]);
         }
 
+        app(EventRecorder::class)->record(
+            $project,
+            'consensus.message',
+            [
+                'questionsRaised' => count($envelope->questions),
+                'consensusClaimed' => $envelope->consensusReached,
+            ],
+            null,
+            'architect'
+        );
+
         // The question gate: a consensus claim only stands with zero open
         // questions — including ones raised this very turn. Even then the
         // plan is NOT drafted here: that is the human's call (SPEC §3 phase 2
@@ -103,6 +115,14 @@ class ArchitectService
             'content' => "**Answer** — {$question->text}\n\n{$answer}",
             'meta' => ['questionId' => $question->id],
         ]);
+
+        app(EventRecorder::class)->record(
+            $question->project,
+            'question.answered',
+            ['questionId' => $question->id],
+            null,
+            'you'
+        );
 
         if ($question->project->openQuestions()->count() === 0) {
             // All answered; the follow-up turn is about to run.
@@ -155,6 +175,14 @@ class ArchitectService
                 .(string) ($data['summary'] ?? ''),
             'meta' => ['planWritten' => true, 'firstTaskId' => $taskId],
         ]);
+
+        app(EventRecorder::class)->record(
+            $project,
+            'plan.written',
+            ['firstTaskId' => $taskId],
+            null,
+            'architect'
+        );
     }
 
     /** @return array<int, array{role: string, content: string}> */

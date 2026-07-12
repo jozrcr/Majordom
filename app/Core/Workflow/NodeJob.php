@@ -2,6 +2,7 @@
 
 namespace App\Core\Workflow;
 
+use App\Core\Events\EventRecorder;
 use App\Enums\ExecutionStatus;
 use App\Enums\NodeStatus;
 use App\Enums\ProjectStatus;
@@ -41,6 +42,14 @@ abstract class NodeJob implements ShouldQueue
         $node->start();
         $execution->update(['current_node' => $node->type]);
 
+        app(EventRecorder::class)->record(
+            $execution->project,
+            "{$node->type}.started",
+            [],
+            $execution,
+            $this->actorFor($node)
+        );
+
         try {
             $result = $this->run($node, $execution);
         } catch (\Throwable $e) {
@@ -70,6 +79,19 @@ abstract class NodeJob implements ShouldQueue
     private function completeAndAdvance(Node $node, Execution $execution, NodeResult $result): void
     {
         $node->finish($result->output);
+        
+        $payload = [];
+        if (isset($result->output['summary'])) $payload['summary'] = $result->output['summary'];
+        if (isset($result->output['filesChanged'])) $payload['filesChanged'] = $result->output['filesChanged'];
+
+        app(EventRecorder::class)->record(
+            $execution->project,
+            "{$node->type}.completed",
+            $payload,
+            $execution,
+            $this->actorFor($node)
+        );
+
         app(WorkflowEngine::class)->advance($execution->fresh());
     }
 
@@ -84,6 +106,14 @@ abstract class NodeJob implements ShouldQueue
             'payload' => $result->approvalPayload + ['node_id' => $node->id],
         ]);
 
+        app(EventRecorder::class)->record(
+            $execution->project,
+            "{$node->type}.waiting_human",
+            ['title' => $result->approvalTitle],
+            $execution,
+            $this->actorFor($node)
+        );
+
         $execution->update(['status' => ExecutionStatus::NeedsYou]);
         $execution->project->update(['status' => ProjectStatus::NeedsYou, 'last_activity_at' => now()]);
     }
@@ -93,5 +123,20 @@ abstract class NodeJob implements ShouldQueue
         $node->fail($output + ['reason' => $reason]);
         $execution->park($reason);
         $execution->project->update(['status' => ProjectStatus::Parked, 'last_activity_at' => now()]);
+
+        app(EventRecorder::class)->record(
+            $execution->project,
+            "{$node->type}.failed",
+            ['reason' => $reason],
+            $execution,
+            $this->actorFor($node)
+        );
+    }
+
+    private function actorFor(Node $node): string
+    {
+        if (str_contains($node->type, 'build')) return 'builder';
+        if (str_contains($node->type, 'review')) return 'reviewer';
+        return 'system';
     }
 }
