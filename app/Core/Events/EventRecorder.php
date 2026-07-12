@@ -35,6 +35,16 @@ class EventRecorder
             ]));
         } catch (\Throwable $e) {
             report($e);
+
+            return;
+        }
+
+        // Telegram mirror: separately guarded — a notifier failure must not
+        // be confused with a recording failure, and neither may propagate.
+        try {
+            app(\App\Integrations\Telegram\TelegramNotifier::class)->handle($event);
+        } catch (\Throwable $e) {
+            report($e);
         }
     }
 }

@@ -73,9 +73,7 @@ it('throws TelegramRequestFailed on ok=false', function () {
 })->throws(TelegramRequestFailed::class, 'Bad Request: chat not found');
 
 it('throws TelegramUnreachable on connection failure', function () {
-    Http::fake([
-        'api.telegram.org/*' => Http::response()->throw(new ConnectionException()),
-    ]);
+    Http::fake(fn () => throw new ConnectionException('down'));
 
     $client = new TelegramClient('test-token', '42', 30);
     
