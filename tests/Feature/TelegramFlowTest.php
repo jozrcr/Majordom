@@ -9,6 +9,7 @@ use App\Integrations\Telegram\TelegramClient;
 use App\Integrations\Telegram\TelegramNotifier;
 use App\Integrations\Telegram\UpdateHandler;
 use App\Models\Approval;
+use App\Models\CommitSuggestion;
 use App\Models\ConsensusMessage;
 use App\Models\Event;
 use App\Models\Execution;
@@ -172,4 +173,21 @@ it('poll --once processes updates and advances the offset', function () {
     $this->artisan('majordom:telegram-poll', ['--once' => true])->assertSuccessful();
 
     expect((int) \Illuminate\Support\Facades\Cache::get('telegram:update_offset'))->toBe(91);
+});
+
+it('overnight executions notify silently', function () {
+    $execution = Execution::factory()->create(['project_id' => $this->project->id, 'profile' => 'overnight']);
+    CommitSuggestion::factory()->create([
+        'project_id' => $this->project->id, 'execution_id' => $execution->id,
+        'status' => 'suggested', 'branch' => 'majordom/T-001',
+    ]);
+    $event = Event::create([
+        'project_id' => $this->project->id, 'execution_id' => $execution->id,
+        'name' => 'commit_suggestion.completed', 'actor' => 'system', 'payload' => [],
+    ]);
+
+    $this->notifier->handle($event);
+
+    Http::assertSent(fn ($r) => str_contains($r->url(), 'sendMessage')
+        && ($r['disable_notification'] ?? false) === true);
 });

@@ -36,9 +36,15 @@ class ImplementFeatureWorkflow
      * Start the build loop for one planned task (its task.md must exist in
      * the project memory).
      */
-    public static function startForTask(Project $project, string $taskKey, string $title): Task
+    public static function startForTask(Project $project, string $taskKey, string $title, string $profile = 'attended'): Task
     {
-        $execution = $project->executions()->create(['status' => ExecutionStatus::Running]);
+        $execution = $project->executions()->create([
+            'status' => ExecutionStatus::Running,
+            'profile' => $profile,
+            'spend_cap_usd' => $profile === 'overnight'
+                ? config('majordom.workflow.overnight_spend_cap_usd')
+                : null,
+        ]);
 
         // Reuse the task across restarts so its revision (and the v{n}
         // briefs behind it) survive a park — a fresh row would silently

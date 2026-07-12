@@ -29,7 +29,7 @@ class TelegramClient
         return !empty($this->botToken) && !empty($this->chatId);
     }
 
-    public function sendMessage(string $text, ?array $replyMarkup = null): ?int
+    public function sendMessage(string $text, ?array $replyMarkup = null, bool $silent = false): ?int
     {
         if (!$this->configured()) {
             return null;
@@ -40,7 +40,7 @@ class TelegramClient
             $payload['reply_markup'] = $replyMarkup;
         }
 
-        if (config('majordom.telegram.silent', false)) {
+        if ($silent || config('majordom.telegram.silent', false)) {
             $payload['disable_notification'] = true;
         }
 
