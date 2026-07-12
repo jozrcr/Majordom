@@ -40,6 +40,10 @@ class TelegramClient
             $payload['reply_markup'] = $replyMarkup;
         }
 
+        if (config('majordom.telegram.silent', false)) {
+            $payload['disable_notification'] = true;
+        }
+
         return $this->post('sendMessage', $payload)->json('result.message_id');
     }
 

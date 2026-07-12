@@ -94,3 +94,12 @@ it('answers callback query', function () {
             && $request['text'] === 'Done';
     });
 });
+
+it('sends silently when majordom.telegram.silent is on', function () {
+    config(['majordom.telegram.silent' => true]);
+    Http::fake(['api.telegram.org/*' => Http::response(['ok' => true, 'result' => ['message_id' => 1]], 200)]);
+
+    (new TelegramClient('test-token', '42', 30))->sendMessage('Hi');
+
+    Http::assertSent(fn ($r) => ($r['disable_notification'] ?? false) === true);
+});
