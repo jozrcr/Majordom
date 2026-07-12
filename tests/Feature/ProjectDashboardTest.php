@@ -96,3 +96,31 @@ test('unauthenticated GET / redirects to login', function () {
     $this->get('/')
         ->assertRedirect('/login');
 });
+
+test('archived projects hide from the dashboard behind the toggle', function () {
+    config(['majordom.token' => 'secret']);
+    $active = \App\Models\Project::factory()->create(['name' => 'Active One']);
+    $archived = \App\Models\Project::factory()->create(['name' => 'Old One', 'archived_at' => now()]);
+
+    \Livewire\Livewire::test(\App\Livewire\ProjectDashboard::class)
+        ->assertSee('Active One')
+        ->assertDontSee('Old One')
+        ->assertSee('archived (1)')
+        ->set('showArchived', true)
+        ->assertSee('Old One')
+        ->assertDontSee('Active One');
+});
+
+test('workspace archive toggle sets and clears archived_at', function () {
+    $project = \App\Models\Project::factory()->create();
+
+    \Livewire\Livewire::test(\App\Livewire\ProjectWorkspace::class, ['project' => $project])
+        ->call('toggleArchive');
+
+    expect($project->fresh()->archived_at)->not->toBeNull();
+
+    \Livewire\Livewire::test(\App\Livewire\ProjectWorkspace::class, ['project' => $project->fresh()])
+        ->call('toggleArchive');
+
+    expect($project->fresh()->archived_at)->toBeNull();
+});

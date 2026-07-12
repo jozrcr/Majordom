@@ -67,6 +67,12 @@ class ProjectWorkspace extends Component
         }
     }
 
+    public function toggleArchive(): void
+    {
+        $this->project->update(['archived_at' => $this->project->archived_at ? null : now()]);
+        $this->redirectRoute('home', navigate: false);
+    }
+
     public function getThinkingProperty(): bool
     {
         return Cache::has("architect-turn:{$this->project->id}");

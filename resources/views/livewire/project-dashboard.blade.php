@@ -2,6 +2,11 @@
     <div class="flex items-baseline gap-4 mb-5">
         <h1 class="text-title font-semibold text-hi">Projects</h1>
         <span class="font-mono text-meta text-mute">{{ $summary }}</span>
+        @if($archivedCount > 0 || $showArchived)
+            <button wire:click="$toggle('showArchived')" class="ml-auto font-mono text-meta {{ $showArchived ? 'text-hi' : 'text-faint hover:text-t3' }}">
+                {{ $showArchived ? '← back to active' : "archived ({$archivedCount})" }}
+            </button>
+        @endif
     </div>
 
     @if ($projects->isEmpty() && !$showForm)

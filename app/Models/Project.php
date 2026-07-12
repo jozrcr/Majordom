@@ -21,6 +21,7 @@ class Project extends Model
         'status',
         'last_activity_at',
         'test_command',
+        'archived_at',
     ];
 
     protected function casts(): array
@@ -28,6 +29,7 @@ class Project extends Model
         return [
             'status' => ProjectStatus::class,
             'last_activity_at' => 'datetime',
+            'archived_at' => 'datetime',
         ];
     }
 

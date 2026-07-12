@@ -5,7 +5,10 @@
     <div wire:poll.3s class="hidden"></div>
     <div class="flex h-full min-w-0 flex-1 flex-col">
         <div class="py-4 flex items-center gap-3 border-b border-border">
-            <h1 class="text-title font-semibold text-hi">{{ $project->name }}</h1>
+            <div class="min-w-0">
+            <h1 class="truncate text-title font-semibold text-hi">{{ $project->name }}</h1>
+            <p class="truncate font-mono text-meta text-mute" title="{{ $project->repo_path }}">{{ $project->repo_path }}</p>
+        </div>
             <span class="rounded-[5px] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[.1em]" style="background: var(--actor-architect-bg); color: var(--actor-architect)">Architect</span>
             <span class="font-mono text-meta text-mute">{{ config('majordom.architect.model') }}</span>
             @if($openCount > 0)
