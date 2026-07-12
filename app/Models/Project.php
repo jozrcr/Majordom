@@ -63,6 +63,11 @@ class Project extends Model
         return $this->hasMany(Approval::class);
     }
 
+    public function commitSuggestions(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(CommitSuggestion::class);
+    }
+
     public function openApprovals(): HasMany
     {
         return $this->hasMany(Approval::class)->where('status', ApprovalStatus::Open);

@@ -11,9 +11,9 @@ use Illuminate\Support\Str;
 use Livewire\Attributes\Title;
 use Livewire\Component;
 
+#[Title('Majordom — Inbox')]
 class Inbox extends Component
 {
-    #[Title('Majordom — Inbox')]
     public ?int $projectFilter = null;
 
     public function render()
@@ -24,7 +24,7 @@ class Inbox extends Component
             ->map(fn($q) => [
                 'type' => 'question',
                 'label' => 'QUESTION',
-                'title' => Str::limit($q->question ?? $q->text ?? '', 120),
+                'title' => Str::limit($q->text ?? '', 120),
                 'project' => $q->project,
                 'at' => $q->created_at,
                 'action' => 'Answer ›',
@@ -55,7 +55,7 @@ class Inbox extends Component
             ]);
 
         $items = Collection::make([$questions, $approvals, $commits])
-            ->flatten()
+            ->flatten(1)
             ->when($this->projectFilter, fn($col) => $col->where('project.id', $this->projectFilter))
             ->sortByDesc(fn($item) => $item['at'])
             ->values();

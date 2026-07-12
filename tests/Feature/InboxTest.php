@@ -10,7 +10,10 @@ use Livewire\Livewire;
 uses(\Illuminate\Foundation\Testing\RefreshDatabase::class);
 
 test('page renders 200 with Needs you', function () {
-    $this->get(route('inbox'))
+    config(['majordom.token' => 'secret']);
+
+    $this->withHeader('Authorization', 'Bearer secret')
+        ->get(route('inbox'))
         ->assertStatus(200)
         ->assertSee('Needs you');
 });
@@ -39,13 +42,13 @@ test('archived project items excluded', function () {
 test('projectFilter narrows to one project items', function () {
     $p1 = Project::factory()->create();
     $p2 = Project::factory()->create();
-    Question::factory()->create(['project_id' => $p1->id]);
-    Question::factory()->create(['project_id' => $p2->id]);
+    $q1 = Question::factory()->create(['project_id' => $p1->id, 'text' => 'Only in project one?']);
+    $q2 = Question::factory()->create(['project_id' => $p2->id, 'text' => 'Only in project two?']);
 
     Livewire::test(Inbox::class)
         ->set('projectFilter', $p1->id)
-        ->assertSee($p1->name)
-        ->assertDontSee($p2->name);
+        ->assertSee('Only in project one?')
+        ->assertDontSee('Only in project two?');
 });
 
 test('resolved answered committed items dont appear', function () {
