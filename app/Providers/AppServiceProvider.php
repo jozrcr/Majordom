@@ -8,6 +8,7 @@ use App\Runtime\Metallama\ResourceCoordinator;
 use App\Projects\Memory\MemoryStore;
 use App\Projects\Repositories\WorktreeManager;
 use App\Core\Events\EventRecorder;
+use App\Core\Usage\UsageLedger;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -31,6 +32,8 @@ class AppServiceProvider extends ServiceProvider
         );
 
         $this->app->singleton(EventRecorder::class, fn () => new EventRecorder());
+        
+        $this->app->singleton(UsageLedger::class, fn () => new UsageLedger());
     }
 
     /**

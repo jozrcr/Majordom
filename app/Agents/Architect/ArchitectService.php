@@ -5,6 +5,7 @@ namespace App\Agents\Architect;
 use App\Agents\Providers\Provider;
 use App\Agents\Providers\ProviderRequest;
 use App\Core\Events\EventRecorder;
+use App\Core\Usage\UsageLedger;
 use App\Enums\MessageRole;
 use App\Enums\ProjectStatus;
 use App\Models\ConsensusMessage;
@@ -50,6 +51,14 @@ class ArchitectService
             temperature: (float) config('majordom.architect.temperature', 0.3),
             jsonMode: true,
         ));
+
+        app(UsageLedger::class)->record(
+            $project,
+            'architect',
+            (string) config('majordom.architect.model'),
+            $response->promptTokens,
+            $response->completionTokens
+        );
 
         $envelope = ArchitectEnvelope::fromContent($response->content);
 
@@ -147,6 +156,14 @@ class ArchitectService
             temperature: (float) config('majordom.architect.temperature', 0.3),
             jsonMode: true,
         ));
+
+        app(UsageLedger::class)->record(
+            $project,
+            'architect',
+            (string) config('majordom.architect.model'),
+            $response->promptTokens,
+            $response->completionTokens
+        );
 
         $data = json_decode(trim($response->content), true);
         if (! is_array($data)) {
