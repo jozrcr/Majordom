@@ -6,6 +6,7 @@ use Illuminate\Support\ServiceProvider;
 use App\Runtime\Metallama\MetallamaClient;
 use App\Runtime\Metallama\ResourceCoordinator;
 use App\Projects\Memory\MemoryStore;
+use App\Projects\Repositories\WorktreeManager;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -21,6 +22,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(\App\Agents\Providers\Provider::class, fn () => \App\Agents\Providers\OpenAiCompatibleProvider::openrouter());
         
         $this->app->singleton(MemoryStore::class, fn () => MemoryStore::fromConfig());
+        $this->app->singleton(WorktreeManager::class, fn () => WorktreeManager::fromConfig());
     }
 
     /**

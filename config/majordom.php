@@ -3,6 +3,7 @@
 return [
     'token' => env('MAJORDOM_TOKEN'),
     'memory_root' => env('MAJORDOM_MEMORY_ROOT'),
+    'worktrees_root' => env('MAJORDOM_WORKTREES_ROOT'), // null => $HOME/.majordom/worktrees
     'metallama' => [
         'base_url' => env('METALLAMA_BASE_URL', 'http://127.0.0.1:8010'),
         'token' => env('METALLAMA_TOKEN'),
