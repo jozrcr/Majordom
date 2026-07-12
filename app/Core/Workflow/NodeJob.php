@@ -39,6 +39,18 @@ abstract class NodeJob implements ShouldQueue
             return;
         }
 
+        // Frontier-spend cap (SPEC §8): exceeding it parks like any gate.
+        if ($execution->spend_cap_usd !== null) {
+            $spent = (float) \App\Models\UsageRecord::where('execution_id', $execution->id)->sum('cost_usd');
+            if ($spent > (float) $execution->spend_cap_usd) {
+                $node->fail(['reason' => 'spend cap']);
+                $execution->park(sprintf('Frontier spend cap exceeded ($%.4f of $%.4f) — parked for the owner.', $spent, $execution->spend_cap_usd));
+                $execution->project->update(['status' => \App\Enums\ProjectStatus::NeedsYou, 'last_activity_at' => now()]);
+
+                return;
+            }
+        }
+
         $node->start();
         $execution->update(['current_node' => $node->type]);
 

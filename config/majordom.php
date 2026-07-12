@@ -26,6 +26,17 @@ return [
         // Bounded revise loop: test failures / review changes re-arm the
         // build this many times before the execution parks for the human.
         'max_revisions' => (int) env('MAJORDOM_MAX_REVISIONS', 3),
+        // Overnight executions carry a frontier-spend ceiling (SPEC §8).
+        'overnight_spend_cap_usd' => (float) env('MAJORDOM_OVERNIGHT_SPEND_CAP', 1.00),
+    ],
+
+    // Autonomy profiles are DATA (SPEC §8): per gate, 'block' pings the
+    // human, 'auto' proceeds-and-collects. Consensus questions always
+    // block (never listed here); commit NEVER auto-runs (not a gate the
+    // engine can open — the CommitSuggestion just waits).
+    'profiles' => [
+        'attended' => ['review' => 'block'],
+        'overnight' => ['review' => 'auto'],
     ],
 
     'harness' => [

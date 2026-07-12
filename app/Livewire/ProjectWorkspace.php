@@ -69,6 +69,7 @@ class ProjectWorkspace extends Component
     }
 
     public ?string $commitComment = null;
+    public string $buildProfile = 'attended';
 
     public function applyCommit(): void
     {
@@ -259,10 +260,11 @@ class ProjectWorkspace extends Component
             'you'
         );
 
-        app(\App\Core\Workflow\ImplementFeatureWorkflow::class)->startForTask(
+        \App\Core\Workflow\ImplementFeatureWorkflow::startForTask(
             $this->project,
             $this->plannedTask['key'],
-            $this->plannedTask['title']
+            $this->plannedTask['title'],
+            in_array($this->buildProfile, ['attended', 'overnight'], true) ? $this->buildProfile : 'attended',
         );
     }
 

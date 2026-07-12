@@ -16,6 +16,8 @@ class Execution extends Model
         'project_id',
         'status',
         'current_node',
+        'profile',
+        'spend_cap_usd',
         'meta',
     ];
 
@@ -45,6 +47,12 @@ class Execution extends Model
     public function approvals(): HasMany
     {
         return $this->hasMany(Approval::class);
+    }
+
+    /** SPEC §8: the engine only asks "is this gate blocking under my profile?" */
+    public function gateBehavior(string $gate): string
+    {
+        return config("majordom.profiles.{$this->profile}.{$gate}", 'block');
     }
 
     public function park(string $reason): void

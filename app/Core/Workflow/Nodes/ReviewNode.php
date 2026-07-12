@@ -64,6 +64,17 @@ class ReviewNode extends NodeJob
             );
         }
 
+        // Overnight: the Reviewer's approval stands without arbitration —
+        // the diff still ends as a CommitSuggestion the human must apply.
+        if ($execution->gateBehavior('review') === 'auto') {
+            $task->update(['status' => TaskStatus::Approved]);
+
+            return NodeResult::done([
+                'verdict' => $verdict->toArray(),
+                'autoApproved' => true,
+            ]);
+        }
+
         $task->update(['status' => TaskStatus::NeedsYou]);
 
         return NodeResult::waitHuman(
