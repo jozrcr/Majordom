@@ -44,6 +44,15 @@ class WorktreeManager
             return $task->worktree_path;
         }
 
+        // Unborn HEAD (git init, zero commits): nothing to branch from, and
+        // Majordom never creates commits in the user's repo — ask instead.
+        $head = Process::path($repoPath)->run(['git', 'rev-parse', '--verify', 'HEAD']);
+        if (! $head->successful()) {
+            throw new RuntimeException(
+                'The repository has no commits yet — make an initial commit, then start the build again.'
+            );
+        }
+
         $path = $this->pathFor($task);
         $branch = $this->branchFor($task);
 

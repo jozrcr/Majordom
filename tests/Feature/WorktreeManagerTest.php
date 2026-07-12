@@ -64,6 +64,7 @@ it('retries without -b on already exists stderr', function () {
     $expectedPath = $manager->pathFor($task);
 
     Process::fake([
+        "'git' 'rev-parse' '--verify' 'HEAD'" => Process::result(output: "abc123\n"),
         "'git' 'worktree' 'add'*" => Process::sequence()
             ->push(Process::result(exitCode: 128, errorOutput: 'fatal: a branch named majordom/T-001 already exists'))
             ->push(Process::result(exitCode: 0)),
@@ -111,6 +112,7 @@ it('throws on other git failure with stderr', function () {
     $manager = app(WorktreeManager::class);
 
     Process::fake([
+        "'git' 'rev-parse' '--verify' 'HEAD'" => Process::result(output: "abc123\n"),
         "'git' 'worktree' 'add'*" => Process::result(exitCode: 1, errorOutput: 'fatal: some other error'),
     ]);
 
@@ -155,4 +157,19 @@ it('does nothing on remove with null worktree_path', function () {
     $manager->remove($task);
 
     Process::assertNothingRan();
+});
+
+it('refuses a repo with no commits with a human message', function () {
+    $repoDir = sys_get_temp_dir().'/majordom-test-repo-'.uniqid();
+    mkdir($repoDir.'/.git', 0755, true);
+
+    $project = Project::factory()->create(['slug' => 'test-project', 'repo_path' => $repoDir]);
+    $task = Task::factory()->create(['task_key' => 'T-001', 'project_id' => $project->id]);
+
+    Process::fake([
+        "'git' 'rev-parse' '--verify' 'HEAD'" => Process::result(exitCode: 128, errorOutput: 'fatal: Needed a single revision'),
+    ]);
+
+    expect(fn () => app(WorktreeManager::class)->create($task))
+        ->toThrow(RuntimeException::class, 'no commits yet');
 });

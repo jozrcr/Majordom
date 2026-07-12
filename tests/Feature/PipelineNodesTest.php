@@ -84,6 +84,7 @@ test('DelegateNode writes role.md, creates worktree, and sets task to Building',
     $memory->write($project, "tasks/{$task->task_key}/task.md", "Build something.");
     
     Process::fake([
+        "'git' 'rev-parse' '--verify' 'HEAD'" => Process::result(output: "abc123\n"),
         "'git' 'worktree' 'add'*" => Process::result(output: 'ok'),
     ]);
 
