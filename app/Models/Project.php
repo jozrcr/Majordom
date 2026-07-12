@@ -20,6 +20,7 @@ class Project extends Model
         'memory_path',
         'status',
         'last_activity_at',
+        'test_command',
     ];
 
     protected function casts(): array

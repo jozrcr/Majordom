@@ -1,0 +1,283 @@
+<?php
+
+use App\Agents\Harness\Harness;
+use App\Agents\Harness\HarnessRequest;
+use App\Agents\Harness\HarnessResult;
+use App\Agents\Harness\HarnessStatus;
+use App\Core\Workflow\Nodes\BuildNode;
+use App\Core\Workflow\Nodes\DelegateNode;
+use App\Core\Workflow\Nodes\TestNode;
+use App\Core\Workflow\NodeResult;
+use App\Enums\TaskStatus;
+use App\Models\Execution;
+use App\Models\Node;
+use App\Models\Project;
+use App\Models\Task;
+use App\Projects\Memory\MemoryStore;
+use App\Runtime\Metallama\ModelState;
+use App\Runtime\Metallama\ServerStatus;
+use App\Runtime\Metallama\ResourceCoordinator;
+use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\Process;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+
+uses(RefreshDatabase::class);
+
+class FakeHarness implements Harness
+{
+    public array $requests = [];
+    public HarnessResult $presetResult;
+
+    public function __construct(HarnessResult $result)
+    {
+        $this->presetResult = $result;
+    }
+
+    public function runTask(HarnessRequest $request): HarnessResult
+    {
+        $this->requests[] = $request;
+        return $this->presetResult;
+    }
+}
+
+class FakeCoordinator extends ResourceCoordinator
+{
+    public array $ensured = [];
+    public function __construct() { }
+    public function ensure(string $id): ModelState
+    {
+        $this->ensured[] = $id;
+        return new ModelState(id: $id, status: ServerStatus::Online);
+    }
+}
+
+function setupMemoryRoot(): string
+{
+    $root = sys_get_temp_dir().'/majordom-test-'.uniqid();
+    Config::set('majordom.memory_root', $root);
+    return $root;
+}
+
+function createExecutionWithTask(array $taskAttrs = [], array $projectAttrs = []): array
+{
+    $project = Project::factory()->create($projectAttrs);
+    $task = Task::factory()->create(array_merge([
+        'project_id' => $project->id,
+        'task_key' => 'feat-1',
+        'branch' => 'feat/branch-1',
+        'status' => TaskStatus::Pending,
+        'revision' => 1,
+    ], $taskAttrs));
+    $execution = Execution::factory()->create(['project_id' => $project->id]);
+    $execution->tasks()->save($task);
+    $node = Node::factory()->create(['execution_id' => $execution->id]);
+    return [$execution, $task, $node, $project];
+}
+
+test('DelegateNode writes role.md, creates worktree, and sets task to Building', function () {
+    setupMemoryRoot();
+    [$execution, $task, $node, $project] = createExecutionWithTask();
+    
+    $memory = app(MemoryStore::class);
+    $memory->write($project, "tasks/{$task->task_key}/task.md", "Build something.");
+    
+    Process::fake([
+        "'git' 'worktree' 'add'*" => Process::result(output: 'ok'),
+    ]);
+
+    $job = new DelegateNode($node->id);
+    $result = $job->handle();
+
+    expect($result)->toBeInstanceOf(NodeResult::class);
+    expect($result->output['worktree'])->not->toBeNull();
+    $task->refresh();
+    expect($task->status)->toBe(TaskStatus::Building);
+    expect($memory->read($project, "tasks/{$task->task_key}/role.md"))->toContain('You are the Builder');
+});
+
+test('DelegateNode fails when task.md is missing', function () {
+    setupMemoryRoot();
+    [$execution, $task, $node, $project] = createExecutionWithTask();
+    
+    Process::fake();
+
+    $job = new DelegateNode($node->id);
+    $result = $job->handle();
+
+    expect($result->status)->toBe('failed');
+    $execution->refresh();
+    expect($execution->meta['parked_reason'] ?? '')->toContain('task brief');
+});
+
+test('BuildNode coordinates, runs harness, writes handoff, and sets task to Testing', function () {
+    setupMemoryRoot();
+    [$execution, $task, $node, $project] = createExecutionWithTask([
+        'worktree_path' => '/tmp/worktree',
+    ]);
+    
+    $memory = app(MemoryStore::class);
+    $memory->write($project, "tasks/{$task->task_key}/role.md", "Role prompt");
+    $memory->write($project, "tasks/{$task->task_key}/task.md", "Task prompt");
+    
+    Config::set('metallama.base_url', 'http://localhost:11434');
+    Config::set('majordom.builder.gateway_model', 'codellama');
+    Config::set('majordom.builder.model', 'builder-model-id');
+    Config::set('queue.connections.harness.driver', 'sync');
+
+    $fakeHarness = new FakeHarness(new HarnessResult(
+        status: HarnessStatus::Completed,
+        diff: 'diff --git',
+        filesChanged: ['a.php'],
+        testsPassed: true,
+        summary: 'Done',
+        openQuestions: [],
+        rawLog: 'log line 1'
+    ));
+    app()->instance(Harness::class, $fakeHarness);
+    app()->instance(ResourceCoordinator::class, new FakeCoordinator());
+
+    $job = new BuildNode($node->id);
+    $result = $job->handle();
+
+    expect($result->output['diff'])->toBe('diff --git');
+    $task->refresh();
+    expect($task->status)->toBe(TaskStatus::Testing);
+    expect($memory->read($project, "tasks/{$task->task_key}/handoff.md"))->toContain('Done');
+    expect($fakeHarness->requests[0]->rolePrompt)->toBe('Role prompt');
+    expect($fakeHarness->requests[0]->taskPrompt)->toBe('Task prompt');
+    expect($fakeHarness->requests[0]->repoPath)->toBe('/tmp/worktree');
+});
+
+test('BuildNode failure parks execution and sets task to Failed', function () {
+    setupMemoryRoot();
+    [$execution, $task, $node, $project] = createExecutionWithTask([
+        'worktree_path' => '/tmp/worktree',
+    ]);
+    
+    $memory = app(MemoryStore::class);
+    $memory->write($project, "tasks/{$task->task_key}/role.md", "Role");
+    $memory->write($project, "tasks/{$task->task_key}/task.md", "Task");
+    
+    Config::set('metallama.base_url', 'http://localhost:11434');
+    Config::set('majordom.builder.gateway_model', 'codellama');
+    Config::set('majordom.builder.model', 'builder-model-id');
+
+    $fakeHarness = new FakeHarness(new HarnessResult(
+        status: HarnessStatus::Failed,
+        diff: '',
+        filesChanged: [],
+        testsPassed: false,
+        summary: 'Crashed',
+        openQuestions: [],
+        rawLog: 'err'
+    ));
+    app()->instance(Harness::class, $fakeHarness);
+    app()->instance(ResourceCoordinator::class, new FakeCoordinator());
+
+    $job = new BuildNode($node->id);
+    $result = $job->handle();
+
+    expect($result->status)->toBe('failed');
+    $task->refresh();
+    expect($task->status)->toBe(TaskStatus::Failed);
+    $execution->refresh();
+    expect($execution->meta['parked_reason'] ?? '')->toContain('Build failed');
+});
+
+test('BuildNode uses task.v2.md when revision is 2', function () {
+    setupMemoryRoot();
+    [$execution, $task, $node, $project] = createExecutionWithTask([
+        'worktree_path' => '/tmp/worktree',
+        'revision' => 2,
+    ]);
+    
+    $memory = app(MemoryStore::class);
+    $memory->write($project, "tasks/{$task->task_key}/role.md", "Role");
+    $memory->write($project, "tasks/{$task->task_key}/task.md", "Original");
+    $memory->write($project, "tasks/{$task->task_key}/task.v2.md", "Revised v2 marker");
+    
+    Config::set('metallama.base_url', 'http://localhost:11434');
+    Config::set('majordom.builder.gateway_model', 'codellama');
+    Config::set('majordom.builder.model', 'builder-model-id');
+
+    $fakeHarness = new FakeHarness(new HarnessResult(
+        status: HarnessStatus::Completed,
+        diff: '',
+        filesChanged: [],
+        testsPassed: true,
+        summary: 'Ok',
+        openQuestions: [],
+        rawLog: ''
+    ));
+    app()->instance(Harness::class, $fakeHarness);
+    app()->instance(ResourceCoordinator::class, new FakeCoordinator());
+
+    $job = new BuildNode($node->id);
+    $job->handle();
+
+    expect($fakeHarness->requests[0]->taskPrompt)->toContain('Revised v2 marker');
+});
+
+test('TestNode skips when no test_command', function () {
+    setupMemoryRoot();
+    [$execution, $task, $node, $project] = createExecutionWithTask([
+        'worktree_path' => '/tmp/worktree',
+    ]);
+    $project->update(['test_command' => null]);
+
+    $job = new TestNode($node->id);
+    $result = $job->handle();
+
+    expect($result->output['skipped'])->toBeTrue();
+    $task->refresh();
+    expect($task->status)->toBe(TaskStatus::Reviewing);
+});
+
+test('TestNode passes and sets task to Reviewing', function () {
+    setupMemoryRoot();
+    [$execution, $task, $node, $project] = createExecutionWithTask([
+        'worktree_path' => '/tmp/worktree',
+    ]);
+    $project->update(['test_command' => 'php artisan test']);
+
+    Process::fake([
+        'php artisan test' => Process::result(output: 'OK', exitCode: 0),
+    ]);
+
+    $job = new TestNode($node->id);
+    $result = $job->handle();
+
+    expect($result->output['testsPassed'])->toBeTrue();
+    $task->refresh();
+    expect($task->status)->toBe(TaskStatus::Reviewing);
+});
+
+test('TestNode failure writes revision brief and increments revision', function () {
+    setupMemoryRoot();
+    [$execution, $task, $node, $project] = createExecutionWithTask([
+        'worktree_path' => '/tmp/worktree',
+        'revision' => 1,
+    ]);
+    $project->update(['test_command' => 'php artisan test']);
+    
+    $memory = app(MemoryStore::class);
+    $memory->write($project, "tasks/{$task->task_key}/task.md", "Original brief");
+
+    Process::fake([
+        'php artisan test' => Process::result(output: 'FAIL', exitCode: 1),
+    ]);
+
+    $job = new TestNode($node->id);
+    $result = $job->handle();
+
+    expect($result->status)->toBe('failed');
+    $task->refresh();
+    expect($task->revision)->toBe(2);
+    expect($task->status)->toBe(TaskStatus::Failed);
+    $brief = $memory->read($project, "tasks/{$task->task_key}/task.v2.md");
+    expect($brief)->toContain('Original brief');
+    expect($brief)->toContain('## Test failure (revision 2)');
+    expect($brief)->toContain('FAIL');
+    $execution->refresh();
+    expect($execution->meta['parked_reason'] ?? '')->toContain('Tests failed');
+});
