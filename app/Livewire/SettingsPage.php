@@ -79,10 +79,10 @@ class SettingsPage extends Component
         ]);
 
         $role->update([
-            'provider' => $validated["roleDrafts.{$id}.provider"],
-            'model' => $validated["roleDrafts.{$id}.model"],
-            'temperature' => $validated["roleDrafts.{$id}.temperature"],
-            'max_tokens' => $validated["roleDrafts.{$id}.max_tokens"],
+            'provider' => data_get($validated, "roleDrafts.{$id}.provider"),
+            'model' => data_get($validated, "roleDrafts.{$id}.model"),
+            'temperature' => data_get($validated, "roleDrafts.{$id}.temperature"),
+            'max_tokens' => data_get($validated, "roleDrafts.{$id}.max_tokens"),
         ]);
     }
 
@@ -104,9 +104,9 @@ class SettingsPage extends Component
         ]);
 
         $role = Role::make([
-            'name' => strtolower($validated['newRole.name']),
-            'provider' => $validated['newRole.provider'],
-            'model' => $validated['newRole.model'],
+            'name' => strtolower(data_get($validated, 'newRole.name')),
+            'provider' => data_get($validated, 'newRole.provider'),
+            'model' => data_get($validated, 'newRole.model'),
             'is_builtin' => false,
         ]);
         $role->save();
@@ -127,8 +127,8 @@ class SettingsPage extends Component
             'workflow.overnight_spend_cap_usd' => 'required|numeric|min:0.05|max:100',
         ]);
 
-        Setting::put('workflow.max_revisions', $validated['workflow.max_revisions']);
-        Setting::put('workflow.overnight_spend_cap_usd', $validated['workflow.overnight_spend_cap_usd']);
+        Setting::put('workflow.max_revisions', data_get($validated, 'workflow.max_revisions'));
+        Setting::put('workflow.overnight_spend_cap_usd', data_get($validated, 'workflow.overnight_spend_cap_usd'));
     }
 
     public function render()

@@ -5,7 +5,7 @@ use Illuminate\Support\Facades\Route;
 Route::get('/', \App\Livewire\ProjectDashboard::class)->name('home');
 Route::get('/inbox', \App\Livewire\Inbox::class)->name('inbox');
 Route::get('/projects/{project}', \App\Livewire\ProjectWorkspace::class)->name('project.workspace');
-Route::get('/settings', \App\Livewire\SettingsPage::class)->middleware('auth')->name('settings');
+Route::get('/settings', \App\Livewire\SettingsPage::class)->name('settings');
 
 // Dev-only M1 de-risk surface; gone once the real workflow exists (M3).
 if (config('app.debug')) {

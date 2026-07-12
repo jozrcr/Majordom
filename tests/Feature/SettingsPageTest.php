@@ -13,11 +13,12 @@ beforeEach(function () {
 });
 
 test('page loads and shows actors section with builtins', function () {
+    config(['majordom.token' => 'test-token']);
     $response = $this->withHeaders(['Authorization' => 'Bearer test-token'])
         ->get(route('settings'));
         
     $response->assertStatus(200);
-    $response->assertSee('Actors & roles');
+    $response->assertSee('Actors & roles', false);
     
     $builtins = Role::whereNull('project_id')->where('is_builtin', true)->pluck('name');
     foreach ($builtins as $name) {
