@@ -169,3 +169,23 @@ test('commit-suggestion card shows message and branch', function () {
         ->assertSee('feat: add guard clause')
         ->assertSee('feat/add-guard');
 });
+
+test('start-build card hides while a plan approval is pending', function () {
+    config(['majordom.memory_root' => sys_get_temp_dir().'/majordom-ui-'.uniqid()]);
+    $project = Project::factory()->create();
+    // Older written plan…
+    ConsensusMessage::create([
+        'project_id' => $project->id, 'role' => 'system',
+        'content' => 'memory written', 'meta' => ['planWritten' => true, 'firstTaskId' => 'T-001'],
+    ]);
+    app(MemoryStore::class)->write($project, 'tasks/T-001/task.md', '# Old scope');
+    // …then a NEW consensus claim awaiting approval.
+    ConsensusMessage::create([
+        'project_id' => $project->id, 'role' => 'architect',
+        'content' => 'Re-scoped.', 'meta' => ['consensusClaimed' => true],
+    ]);
+
+    Livewire::test(ProjectWorkspace::class, ['project' => $project])
+        ->assertSee('Plan approval')
+        ->assertDontSee('Start build');
+});

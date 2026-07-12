@@ -106,6 +106,13 @@ class ProjectWorkspace extends Component
 
     public function getPlannedTaskProperty(): ?array
     {
+        // A pending plan approval supersedes an older written plan: offering
+        // Start build from the stale brief while a re-scoped plan awaits
+        // approval is the wrong-brief trap (owner-reported).
+        if ($this->consensusPending) {
+            return null;
+        }
+
         $lastSystem = $this->project->consensusMessages()
             ->where('role', \App\Enums\MessageRole::System)
             ->orderByDesc('id')
