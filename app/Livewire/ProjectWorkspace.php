@@ -19,6 +19,7 @@ class ProjectWorkspace extends Component
     /** Free-text answers; when non-empty they win over a picked option. */
     public array $customDrafts = [];
     public ?string $gateComment = null;
+    public ?int $selectedEventId = null;
 
     public function mount(Project $project): void
     {
@@ -278,6 +279,34 @@ class ProjectWorkspace extends Component
             $this->gateComment
         );
         $this->gateComment = null;
+    }
+
+    public function selectEvent(int $eventId): void
+    {
+        $this->selectedEventId = $this->selectedEventId === $eventId ? null : $eventId;
+    }
+
+    public function getSelectedEventDetailProperty(): ?array
+    {
+        if ($this->selectedEventId === null) {
+            return null;
+        }
+
+        $event = $this->project->events()->find($this->selectedEventId);
+        if (!$event) {
+            return null;
+        }
+
+        $node = null;
+        if ($event->execution_id && str_contains($event->name, '.')) {
+            $type = explode('.', $event->name)[0];
+            $node = \App\Models\Node::where('execution_id', $event->execution_id)
+                ->where('type', $type)
+                ->orderByDesc('id')
+                ->first();
+        }
+
+        return ['event' => $event, 'node' => $node];
     }
 
     #[On('timeline-bump')]

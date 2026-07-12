@@ -267,18 +267,45 @@
         </div>
         <div class="flex-1 overflow-y-auto">
             @forelse($timeline as $ev)
-                <div class="border-b border-border-soft px-4 py-2.5 {{ str_contains($ev->name, 'waiting_human') || str_contains($ev->name, 'question') ? 'bg-accent-tint' : '' }}">
-                    <div class="flex items-baseline gap-2">
-                        <span class="font-mono text-meta text-mute">{{ $ev->created_at->format('H:i:s') }}</span>
-                        <span class="font-mono text-[11.5px] font-medium text-text">{{ $ev->name }}</span>
-                        @php $actor = $ev->actor; @endphp
-                        <span class="ml-auto rounded-[5px] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[.1em]"
-                              style="background: var(--actor-{{ in_array($actor,['architect','builder','reviewer','you']) ? $actor : 'system' }}-bg); color: var(--actor-{{ in_array($actor,['architect','builder','reviewer','you']) ? $actor : 'system' }})">{{ $actor }}</span>
-                    </div>
-                    @if(!empty($ev->payload))
-                        <p class="mt-0.5 truncate text-caption" style="color: var(--actor-system)">{{ collect($ev->payload)->map(fn ($v, $k) => is_scalar($v) ? "{$k}: {$v}" : null)->filter()->take(2)->implode(' · ') }}</p>
-                    @endif
+                <div class="border-b border-border-soft px-4 py-2.5 cursor-pointer {{ str_contains($ev->name, 'waiting_human') || str_contains($ev->name, 'question') ? 'bg-accent-tint' : '' }} {{ $selectedEventId === $ev->id ? 'bg-surface-active' : '' }}">
+                    <button type="button" wire:click="selectEvent({{ $ev->id }})" class="block w-full text-left">
+                        <div class="flex items-baseline gap-2">
+                            <span class="font-mono text-meta text-mute">{{ $ev->created_at->format('H:i:s') }}</span>
+                            <span class="font-mono text-[11.5px] font-medium text-text">{{ $ev->name }}</span>
+                            @php $actor = $ev->actor; @endphp
+                            <span class="ml-auto rounded-[5px] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[.1em]"
+                                  style="background: var(--actor-{{ in_array($actor,['architect','builder','reviewer','you']) ? $actor : 'system' }}-bg); color: var(--actor-{{ in_array($actor,['architect','builder','reviewer','you']) ? $actor : 'system' }})">{{ $actor }}</span>
+                        </div>
+                        @if(!empty($ev->payload))
+                            <p class="mt-0.5 truncate text-caption" style="color: var(--actor-system)">{{ collect($ev->payload)->map(fn ($v, $k) => is_scalar($v) ? "{$k}: {$v}" : null)->filter()->take(2)->implode(' · ') }}</p>
+                        @endif
+                    </button>
                 </div>
+                @if($selectedEventId === $ev->id)
+                    <div class="border-b border-border-soft bg-surface px-4 py-3 space-y-2">
+                        @php $detail = $this->selectedEventDetail; @endphp
+                        @if($detail)
+                            <p class="font-mono text-micro uppercase tracking-[.14em] text-mute">payload</p>
+                            <pre class="max-h-[200px] overflow-auto rounded-md border border-border-soft bg-bg p-2 font-mono text-[11px] leading-relaxed text-t3">{{ json_encode($detail['event']->payload ?: new stdClass, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) }}</pre>
+                            @if($detail['node'])
+                                <p class="font-mono text-micro uppercase tracking-[.14em] text-mute">node · {{ $detail['node']->status->value }}@if($detail['node']->started_at) · {{ $detail['node']->started_at->format('H:i:s') }}@endif @if($detail['node']->finished_at)→ {{ $detail['node']->finished_at->format('H:i:s') }}@endif</p>
+                                @php $out = collect($detail['node']->output ?? []); @endphp
+                                @if($out->has('rawLog'))
+                                    <details><summary class="cursor-pointer font-mono text-meta text-mute">raw log</summary>
+                                    <pre class="mt-1 max-h-[260px] overflow-auto rounded-md border border-border-soft bg-bg p-2 font-mono text-[11px] text-mute">{{ $out['rawLog'] }}</pre></details>
+                                @endif
+                                @if($out->has('diff') && $out['diff'])
+                                    <details><summary class="cursor-pointer font-mono text-meta text-mute">diff</summary>
+                                    <pre class="mt-1 max-h-[260px] overflow-auto rounded-md border border-border-soft bg-bg p-2 font-mono text-[11px] text-t3">{{ $out['diff'] }}</pre></details>
+                                @endif
+                                @php $rest = $out->except(['rawLog', 'diff']); @endphp
+                                @if($rest->isNotEmpty())
+                                    <pre class="max-h-[200px] overflow-auto rounded-md border border-border-soft bg-bg p-2 font-mono text-[11px] leading-relaxed text-t3">{{ json_encode($rest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) }}</pre>
+                                @endif
+                            @endif
+                        @endif
+                    </div>
+                @endif
             @empty
                 <p class="px-4 py-6 font-mono text-meta text-faint">no activity yet</p>
             @endforelse
