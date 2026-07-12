@@ -88,6 +88,9 @@
     /* status */
     --status-idle:    #3d4a5c;
     --status-working: #579dd6;
+    --working-text:   #82b8e6;
+    --working-border: rgba(87, 157, 214, .45);
+    --working-tint:   rgba(87, 157, 214, .10);
     --status-failed:  #e5645c;
     --failed-text:    #ef8d86;
     --failed-border:  rgba(229, 100, 92, .45);
@@ -152,6 +155,9 @@
 
     --color-status-idle:    var(--status-idle);
     --color-status-working: var(--status-working);
+    --color-working-text:   var(--working-text);
+    --color-working-border: var(--working-border);
+    --color-working-tint:   var(--working-tint);
     --color-status-failed:  var(--status-failed);
     --color-failed-text:    var(--failed-text);
     --color-failed-border:  var(--failed-border);

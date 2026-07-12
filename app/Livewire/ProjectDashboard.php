@@ -42,10 +42,17 @@ class ProjectDashboard extends Component
         }
         $summary = implode(' · ', $summaryParts);
 
+        $lastEvents = \App\Models\Event::whereIn('project_id', $projects->pluck('id'))
+            ->orderByDesc('id')
+            ->get()
+            ->unique('project_id')
+            ->keyBy('project_id');
+
         return view('livewire.project-dashboard', [
             'projects' => $projects,
             'summary' => $summary,
             'archivedCount' => Project::whereNotNull('archived_at')->count(),
+            'lastEvents' => $lastEvents,
         ]);
     }
 

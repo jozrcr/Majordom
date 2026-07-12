@@ -19,15 +19,15 @@
     @if($items->isNotEmpty())
         <div class="divide-y divide-border-soft">
             @foreach($items as $item)
-                <div class="flex items-center gap-4 px-2 py-3 hover:bg-surface transition-colors duration-120">
+                <a href="{{ route('project.workspace', $item['project']) }}" class="cusor-pointer flex items-center gap-4 px-2 py-3 hover:bg-surface transition-colors duration-120">
                     <span class="h-2 w-2 shrink-0 rounded-full bg-accent led-glow animate-led-pulse"></span>
                     <span class="w-[118px] shrink-0 font-mono text-[10px] font-semibold uppercase tracking-[.1em] {{ $item['type'] === 'question' ? 'text-accent' : 'text-mute' }}">{{ $item['label'] }}</span>
                     <div class="min-w-0 flex-1">
                         <div class="text-body-sm text-text truncate">{{ $item['title'] }}</div>
                         <div class="text-meta text-mute">{{ $item['project']->name }} · {{ $item['at']->diffForHumans() }}</div>
                     </div>
-                    <a href="{{ route('project.workspace', $item['project']) }}" class="shrink-0 rounded-lg border border-border-hover px-3 py-1.5 text-body-sm font-semibold text-[#c7d2df] hover:bg-surface-active">{{ $item['action'] }}</a>
-                </div>
+                    <span  class="shrink-0 rounded-lg border border-border-hover px-3 py-1.5 text-body-sm font-semibold text-[#c7d2df] hover:bg-surface-active">{{ $item['action'] }}</a>
+                </a>
             @endforeach
         </div>
     @else

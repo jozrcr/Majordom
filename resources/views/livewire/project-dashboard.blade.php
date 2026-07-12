@@ -28,7 +28,8 @@
                 @php
                     $cardClasses = match ($project->status) {
                         \App\Enums\ProjectStatus::NeedsYou => 'border-accent-border bg-accent-tint',
-                        \App\Enums\ProjectStatus::Parked => 'border-failed-border bg-surface-card',
+                        \App\Enums\ProjectStatus::Working => 'border-working-border bg-working-tint',
+                        \App\Enums\ProjectStatus::Parked => 'border-failed-border bg-failed-tint',
                         default => 'border-border bg-surface-card',
                     };
                     $ledClasses = match ($project->status) {
@@ -38,8 +39,9 @@
                         \App\Enums\ProjectStatus::Parked => 'bg-status-failed',
                     };
                     $pillClasses = match ($project->status) {
-                        \App\Enums\ProjectStatus::NeedsYou => 'bg-accent-tint text-accent',
-                        \App\Enums\ProjectStatus::Parked => 'bg-failed-tint text-failed-text',
+                        \App\Enums\ProjectStatus::NeedsYou => 'bg-accent-tint text-accent border border-accent-border',
+                        \App\Enums\ProjectStatus::Working => 'bg-working-tint text-working-text border border-working-border',
+                        \App\Enums\ProjectStatus::Parked => 'bg-failed-tint text-failed-text border border-failed-border',
                         default => 'bg-surface-chip text-t3',
                     };
                 @endphp
@@ -50,7 +52,10 @@
                             <h2 class="text-title-sm font-medium text-text">{{ $project->name }}</h2>
                             <span class="ml-auto rounded-full px-2.5 py-0.5 font-mono text-[10.5px] font-semibold tracking-[.06em] {{ $pillClasses }}">{{ $project->status->label() }}</span>
                         </div>
-                        <p class="mt-3 text-body-sm text-t2">No milestones yet</p>
+                        @php $lastEvent = $lastEvents[$project->id] ?? null; @endphp
+                    <p class="mt-3 truncate font-mono text-caption {{ $lastEvent ? 'text-t2' : 'text-faint' }}">
+                        {{ $lastEvent ? $lastEvent->name.' · '.$lastEvent->created_at->diffForHumans(short: true) : 'no activity yet' }}
+                    </p>
                         <p class="mt-2 font-mono text-meta text-mute truncate">{{ $project->repo_path }}</p>
                         <p class="mt-1 font-mono text-meta text-faint">{{ $project->last_activity_at?->diffForHumans() ?? '—' }}</p>
                     </article>
