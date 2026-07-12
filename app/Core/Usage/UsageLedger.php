@@ -53,6 +53,10 @@ class UsageLedger
 
     protected function pricingMap(): array
     {
+        if (empty(config('majordom.providers.openrouter.api_key'))) {
+            return []; // offline/tests: unknown prices, never a network call
+        }
+
         $cached = Cache::get('openrouter-pricing');
         if ($cached !== null) {
             return $cached;

@@ -28,6 +28,10 @@ class TelegramNotifier
         $name = $event->name;
         $payload = $event->payload ?? [];
 
+        // Overnight cooking must not buzz the phone: the pile accumulates
+        // silently and is read in the morning (SPEC §8).
+        $silent = $event->execution?->profile === 'overnight';
+
         // Architect raised questions → one force-reply message per question.
         if ($name === 'consensus.message' && ($payload['questionsRaised'] ?? 0) > 0 && isset($payload['messageId'])) {
             foreach (Question::open()->where('consensus_message_id', $payload['messageId'])->get() as $question) {
@@ -37,7 +41,7 @@ class TelegramNotifier
                 }
                 $text .= "\n\nReply to this message to answer.";
 
-                $messageId = $this->telegram->sendMessage($text, ['force_reply' => true]);
+                $messageId = $this->telegram->sendMessage($text, ['force_reply' => true], silent: $silent);
                 $this->map($project->id, 'question', $question->id, $messageId);
             }
 
@@ -51,6 +55,7 @@ class TelegramNotifier
                 ['inline_keyboard' => [[
                     ['text' => 'Approve plan', 'callback_data' => "plan:approve:{$project->id}"],
                 ]]],
+                silent: $silent,
             );
 
             return;
@@ -73,6 +78,7 @@ class TelegramNotifier
                         ['text' => 'Approve', 'callback_data' => "approval:grant:{$approval->id}"],
                         ['text' => 'Reject…', 'callback_data' => "approval:reject:{$approval->id}"],
                     ]]],
+                    silent: $silent,
                 );
             }
 
@@ -91,6 +97,7 @@ class TelegramNotifier
                         ['text' => 'Commit', 'callback_data' => "commit:apply:{$suggestion->id}"],
                         ['text' => 'Reject…', 'callback_data' => "commit:reject:{$suggestion->id}"],
                     ]]],
+                    silent: $silent,
                 );
             }
 
@@ -99,7 +106,7 @@ class TelegramNotifier
 
         // Anything parked → plain info line.
         if (str_ends_with($name, '.failed') && isset($payload['reason'])) {
-            $this->telegram->sendMessage("[{$project->name}] parked — {$payload['reason']}");
+            $this->telegram->sendMessage("[{$project->name}] parked — {$payload['reason']}", silent: $silent);
         }
     }
 

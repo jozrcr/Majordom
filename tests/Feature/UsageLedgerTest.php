@@ -17,6 +17,7 @@ uses(RefreshDatabase::class)->group('usage');
 beforeEach(function () {
     Cache::flush();
     config(['majordom.providers.openrouter.base_url' => 'https://openrouter.ai/api']);
+    config(['majordom.providers.openrouter.api_key' => 'test-key']);
     config(['majordom.builder.gateway_model' => 'local/gateway']);
 });
 
