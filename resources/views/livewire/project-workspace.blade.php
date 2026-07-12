@@ -1,202 +1,172 @@
-<div class="mx-auto flex h-[calc(100vh-52px)] max-w-3xl flex-col px-6" @if($this->thinking || $this->latestExecution?->status === \App\Enums\ExecutionStatus::Running) wire:poll.2s @endif>
-    <div class="py-4 flex items-center gap-3 border-b border-border">
-        <h1 class="text-title font-semibold text-hi">{{ $project->name }}</h1>
-        <span class="rounded-[5px] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[.1em]" style="background: var(--actor-architect-bg); color: var(--actor-architect)">Architect</span>
-        <span class="font-mono text-meta text-mute">{{ config('majordom.architect.model') }}</span>
-        @if($openCount > 0)
-            <span class="ml-auto rounded-full border px-2.5 py-0.5 font-mono text-[10.5px] font-semibold tracking-[.06em] text-accent" style="border-color: var(--accent-border)">{{ $openCount }} question{{ $openCount > 1 ? 's' : '' }} remaining</span>
-        @endif
-    </div>
-
-    <div class="flex-1 space-y-4 overflow-y-auto py-5">
-        @forelse($messages as $message)
-            @if($message->role === \App\Enums\MessageRole::User)
-                <div class="max-w-[640px] ml-auto">
-                    <p class="font-mono text-micro uppercase tracking-[.14em] text-mute">You</p>
-                    <div class="mt-1 text-body text-body whitespace-pre-wrap">{{ $message->content }}</div>
-                </div>
-            @elseif($message->role === \App\Enums\MessageRole::Architect)
-                <div class="max-w-[640px]">
-                    <p class="font-mono text-micro uppercase tracking-[.14em] text-mute">Architect</p>
-                    <div class="mt-1 space-y-2 text-body text-body [&_p]:leading-relaxed [&_code]:font-mono [&_code]:text-[12px]">
-                        {!! \Illuminate\Support\Str::markdown($message->content, ['html_input' => 'strip', 'allow_unsafe_links' => false]) !!}
-                    </div>
-                </div>
-                @foreach($questionsByMessage[$message->id] ?? [] as $question)
-                    @if($question->status === \App\Enums\QuestionStatus::Open)
-                        <div class="max-w-[640px] rounded-lg border bg-surface-raised p-4 space-y-3" style="border-color: var(--accent-border)">
-                            <p class="font-mono text-micro uppercase tracking-[.14em] text-accent">Open question</p>
-                            <p class="text-body-sm text-text">{{ $question->text }}</p>
-                            @if($question->options)
-                                @foreach($question->options as $option)
-                                    <label class="flex cursor-pointer items-center gap-2.5 rounded-md border border-border-strong bg-surface px-3 py-2 text-body-sm text-text">
-                                        <input type="radio" wire:model="answerDrafts.{{ $question->id }}" value="{{ $option }}" class="accent-[#e2a33b]">
-                                        <span>{{ $option }}</span>
-                                    </label>
-                                @endforeach
-                            @endif
-                            {{-- Always offer free text — clarify, push back, or defer
-                                 ("your call"); when filled it wins over the radio. --}}
-                            <input type="text" wire:model="customDrafts.{{ $question->id }}"
-                                   placeholder="{{ $question->options ? 'Or answer in your own words — “your call” works too…' : 'Answer…' }}"
-                                   class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-body text-hi placeholder:text-faint">
-                            @error("answer-{$question->id}") <p class="text-caption text-failed-text">{{ $message }}</p> @enderror
-                            <div class="flex items-center gap-3">
-                                <button wire:click="answerQuestion({{ $question->id }})" wire:loading.attr="disabled" class="rounded-lg px-3 py-1.5 text-body-sm font-semibold disabled:opacity-55" style="background: var(--accent); color: var(--accent-ink)">Answer</button>
-                                <span class="font-mono text-meta text-faint">sends to Architect</span>
-                            </div>
-                        </div>
-                    @else
-                        <div class="max-w-[640px] flex items-center gap-2.5 rounded-lg border border-border-strong px-4 py-2.5 opacity-75">
-                            <span class="text-ok">✓</span>
-                            <p class="flex-1 truncate text-body-sm text-t3">{{ $question->text }}</p>
-                            <span class="font-mono text-meta text-mute">answered</span>
-                        </div>
-                    @endif
-                @endforeach
-            @elseif($message->role === \App\Enums\MessageRole::System)
-                <p class="text-center font-mono text-meta text-mute">{{ $message->content }}</p>
+<div class="mx-auto flex h-[calc(100vh-52px)] max-w-6xl gap-0 px-6">
+    {{-- Static poll (reliability floor): a conditional wire:poll on the root
+         never initializes when morphed in later. Echo pushes are the fast
+         path; this catches anything the socket misses. --}}
+    <div wire:poll.3s class="hidden"></div>
+    <div class="flex h-full min-w-0 flex-1 flex-col justify-start">
+        <div class="py-4 flex items-center gap-3 border-b border-border pr-4">
+            <div class="min-w-0">
+                <h1 class="truncate text-title font-semibold text-hi">{{ $project->name }}</h1>
+                <p class="truncate font-mono text-meta text-mute" title="{{ $project->repo_path }}">{{ $project->repo_path }}</p>
+            </div>
+            <div class="min-w-0 flex flex-col">
+                <span class="w-fit rounded-[5px] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[.1em]" style="background: var(--actor-architect-bg); color: var(--actor-architect)">Architect</span>
+                <span class="pl-1 font-mono text-meta text-mute">{{ config('majordom.architect.model') }}</span>
+            </div>
+                @if($openCount > 0)
+                <span class="ml-auto rounded-full border px-2.5 py-0.5 font-mono text-[10.5px] font-semibold tracking-[.06em] text-accent" style="border-color: var(--accent-border)">{{ $openCount }} question{{ $openCount > 1 ? 's' : '' }} remaining</span>
             @endif
-        @empty
-            <div class="py-24 text-center space-y-3">
-                <div class="inline-flex gap-2 justify-center">
-                    <span class="h-2 w-2 rounded-full bg-status-idle"></span>
-                    <span class="h-2 w-2 rounded-full bg-status-idle"></span>
-                    <span class="h-2 w-2 rounded-full bg-status-idle"></span>
-                </div>
-                <p class="text-display font-semibold text-hi">{{ $project->name }}</p>
-                <p class="text-body text-t2">No memory yet. Describe the first feature to wake the Architect.</p>
-            </div>
-        @endforelse
+        </div>
 
-        @if($this->consensusPending && !$this->thinking)
-            {{-- Plan-approval moment (design §2.6): the human owns this gate. --}}
-            <div class="max-w-[640px] rounded-lg border bg-surface-raised p-4 space-y-3" style="border-color: var(--accent-border)">
-                <p class="font-mono text-micro uppercase tracking-[.14em] text-accent">Plan approval</p>
-                <p class="text-body-sm text-text">Consensus reached. Approve to let the Architect write the project memory — architecture.md, roadmap.md and the first task brief. Not confident yet? Keep talking below; the scope stays open.</p>
-                <div class="flex items-center gap-3">
-                    <button wire:click="approvePlan" wire:loading.attr="disabled" class="rounded-lg px-3 py-1.5 text-body-sm font-semibold disabled:opacity-55" style="background: var(--accent); color: var(--accent-ink)">
-                        <span wire:loading.remove wire:target="approvePlan">Approve plan</span>
-                        <span wire:loading wire:target="approvePlan">Approving…</span>
-                    </button>
-                    <span class="font-mono text-meta text-faint">writes project memory · nothing touches your repo</span>
-                </div>
-            </div>
-        @endif
-
-        @if($this->plannedTask)
-            <div class="max-w-[640px] rounded-lg border border-border-strong bg-surface-raised p-4 space-y-3">
-                <p class="font-mono text-micro uppercase tracking-[.14em] text-mute">PLAN READY</p>
-                <p class="text-body-sm text-text">First task: <span class="font-mono">{{ $this->plannedTask['key'] }}</span> — {{ $this->plannedTask['title'] }}</p>
-                <div class="flex items-center gap-3">
-                    <button wire:click="startBuild" wire:loading.attr="disabled" class="rounded-lg px-3 py-1.5 text-body-sm font-semibold disabled:opacity-55" style="background: var(--accent); color: var(--accent-ink)">
-                        <span wire:loading.remove wire:target="startBuild">Start build</span>
-                        <span wire:loading wire:target="startBuild">Starting…</span>
-                    </button>
-                    <span class="font-mono text-meta text-faint">Builder runs in an isolated worktree</span>
-                </div>
-            </div>
-        @endif
-
-        @if($this->latestExecution)
-            <div class="max-w-[640px] rounded-lg border border-border bg-surface-card px-4 py-3">
-                <div class="flex items-center gap-2 flex-wrap">
-                    <span class="font-mono text-meta text-mute">execution #{{ $this->latestExecution->id }}</span>
-                    @foreach($this->latestExecution->nodes as $index => $node)
-                        @if($index > 0)<span class="text-faint">·</span>@endif
-                        @php
-                            $nodeLed = match ($node->status->value) {
-                                'running' => 'bg-status-working animate-led-pulse',
-                                'completed' => 'bg-ok',
-                                'failed' => 'bg-status-failed',
-                                'waiting_human' => 'bg-accent led-glow',
-                                default => 'bg-status-idle',
-                            };
-                        @endphp
-                        <div class="flex items-center gap-1.5">
-                            <span class="h-1.5 w-1.5 rounded-full {{ $nodeLed }}"></span>
-                            <span class="font-mono text-meta">{{ $node->type }}</span>
+        <div class="flex-1 space-y-4 overflow-y-auto py-5">
+            @forelse($messages as $message)
+                @if($message->role === \App\Enums\MessageRole::User)
+                    <div class="max-w-[640px] ml-auto">
+                        <p class="font-mono text-micro uppercase tracking-[.14em] text-mute">You</p>
+                        <div class="mt-1 text-body text-body whitespace-pre-wrap">{{ $message->content }}</div>
+                    </div>
+                @elseif($message->role === \App\Enums\MessageRole::Architect)
+                    <div class="max-w-[640px]">
+                        <p class="font-mono text-micro uppercase tracking-[.14em] text-mute">Architect</p>
+                        <div class="mt-1 space-y-2 text-body text-body [&_p]:leading-relaxed [&_code]:font-mono [&_code]:text-[12px]">
+                            {!! \Illuminate\Support\Str::markdown($message->content, ['html_input' => 'strip', 'allow_unsafe_links' => false]) !!}
                         </div>
-                    @endforeach
-                </div>
-                @if($this->latestExecution->status === \App\Enums\ExecutionStatus::Parked)
-                    <p class="mt-2 font-mono text-meta text-failed-text">parked · {{ $this->latestExecution->meta['parked_reason'] ?? 'unknown' }}</p>
-                @endif
-            </div>
-        @endif
-
-        @if($this->reviewApproval)
-            <div class="max-w-[640px] rounded-lg border bg-surface-raised p-4 space-y-3" style="border-color: var(--accent-border)">
-                <div class="flex items-center gap-2">
-                    <span class="rounded-[5px] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[.1em]" style="background: var(--actor-system-bg); color: var(--actor-system)">Gate</span>
-                    <p class="text-body-sm text-text">{{ $this->reviewApproval->title }}</p>
-                    <div class="ml-auto font-mono text-meta">
-                        @if($this->reviewApproval->payload['testsPassed'] === true)
-                            <span class="text-ok">tests ✓</span>
-                        @elseif($this->reviewApproval->payload['testsPassed'] === false)
-                            <span class="text-failed-text">tests ✗</span>
+                    </div>
+                    @foreach($questionsByMessage[$message->id] ?? [] as $question)
+                        @if($question->status === \App\Enums\QuestionStatus::Open)
+                            <div class="max-w-[640px] rounded-lg border bg-surface-raised p-4 space-y-3" style="border-color: var(--accent-border)">
+                                <p class="font-mono text-micro uppercase tracking-[.14em] text-accent">Open question</p>
+                                <p class="text-body-sm text-text">{{ $question->text }}</p>
+                                @if($question->options)
+                                    @foreach($question->options as $option)
+                                        <label class="flex cursor-pointer items-center gap-2.5 rounded-md border border-border-strong bg-surface px-3 py-2 text-body-sm text-text">
+                                            <input type="radio" wire:model="answerDrafts.{{ $question->id }}" value="{{ $option }}" class="accent-[#e2a33b]">
+                                            <span>{{ $option }}</span>
+                                        </label>
+                                    @endforeach
+                                @endif
+                                {{-- Always offer free text — clarify, push back, or defer
+                                     ("your call"); when filled it wins over the radio. --}}
+                                <input type="text" wire:model="customDrafts.{{ $question->id }}"
+                                       placeholder="{{ $question->options ? 'Or answer in your own words — “your call” works too…' : 'Answer…' }}"
+                                       class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-body text-hi placeholder:text-faint">
+                                @error("answer-{$question->id}") <p class="text-caption text-failed-text">{{ $message }}</p> @enderror
+                                <div class="flex items-center gap-3">
+                                    <button wire:click="answerQuestion({{ $question->id }})" wire:loading.attr="disabled" class="rounded-lg px-3 py-1.5 text-body-sm font-semibold disabled:opacity-55" style="background: var(--accent); color: var(--accent-ink)">Answer</button>
+                                    <span class="font-mono text-meta text-faint">sends to Architect</span>
+                                </div>
+                            </div>
                         @else
-                            <span class="text-mute">no tests</span>
+                            <div class="max-w-[640px] flex items-center gap-2.5 rounded-lg border border-border-strong px-4 py-2.5 opacity-75">
+                                <span class="text-ok">✓</span>
+                                <p class="flex-1 truncate text-body-sm text-t3">{{ $question->text }}</p>
+                                <span class="font-mono text-meta text-mute">answered</span>
+                            </div>
                         @endif
+                    @endforeach
+                @elseif($message->role === \App\Enums\MessageRole::System)
+                    <p class="text-center font-mono text-meta text-mute">{{ $message->content }}</p>
+                @endif
+            @empty
+                <div class="py-24 text-center space-y-3">
+                    <div class="inline-flex gap-2 justify-center">
+                        <span class="h-2 w-2 rounded-full bg-status-idle"></span>
+                        <span class="h-2 w-2 rounded-full bg-status-idle"></span>
+                        <span class="h-2 w-2 rounded-full bg-status-idle"></span>
+                    </div>
+                    <p class="text-display font-semibold text-hi">{{ $project->name }}</p>
+                    <p class="text-body text-t2">No memory yet. Describe the first feature to wake the Architect.</p>
+                </div>
+            @endforelse
+
+            @if($this->consensusPending && !$this->thinking)
+                {{-- Plan-approval moment (design §2.6): the human owns this gate. --}}
+                <div class="max-w-[640px] rounded-lg border bg-surface-raised p-4 space-y-3" style="border-color: var(--accent-border)">
+                    <p class="font-mono text-micro uppercase tracking-[.14em] text-accent">Plan approval</p>
+                    <p class="text-body-sm text-text">Consensus reached. Approve to let the Architect write the project memory — architecture.md, roadmap.md and the first task brief. Not confident yet? Keep talking below; the scope stays open.</p>
+                    <div class="flex items-center gap-3">
+                        <button wire:click="approvePlan" wire:loading.attr="disabled" class="rounded-lg px-3 py-1.5 text-body-sm font-semibold disabled:opacity-55" style="background: var(--accent); color: var(--accent-ink)">
+                            <span wire:loading.remove wire:target="approvePlan">Approve plan</span>
+                            <span wire:loading wire:target="approvePlan">Approving…</span>
+                        </button>
+                        <span class="font-mono text-meta text-faint">writes project memory · nothing touches your repo</span>
                     </div>
                 </div>
+            @endif
 
-                <p class="font-mono text-meta text-mute">{{ count($this->reviewApproval->payload['filesChanged'] ?? []) }} file(s) · builder: {{ config('majordom.builder.gateway_model') }}</p>
+            @if($this->plannedTask)
+                <div class="max-w-[640px] rounded-lg border border-border-strong bg-surface-raised p-4 space-y-3">
+                    <p class="font-mono text-micro uppercase tracking-[.14em] text-mute">PLAN READY</p>
+                    <p class="text-body-sm text-text">First task: <span class="font-mono">{{ $this->plannedTask['key'] }}</span> — {{ $this->plannedTask['title'] }}</p>
+                    <div class="flex items-center gap-3">
+                        <button wire:click="startBuild" wire:loading.attr="disabled" class="rounded-lg px-3 py-1.5 text-body-sm font-semibold disabled:opacity-55" style="background: var(--accent); color: var(--accent-ink)">
+                            <span wire:loading.remove wire:target="startBuild">Start build</span>
+                            <span wire:loading wire:target="startBuild">Starting…</span>
+                        </button>
+                        <span class="font-mono text-meta text-faint">Builder runs in an isolated worktree</span>
+                    </div>
+                </div>
+            @endif
 
-                <p class="text-body-sm text-t2">{{ $this->reviewApproval->payload['verdict']['summary'] ?? '' }}</p>
-                @if(!empty($this->reviewApproval->payload['verdict']['comments']))
-                    <ul class="text-caption text-t3 list-disc pl-4 space-y-1">
-                        @foreach($this->reviewApproval->payload['verdict']['comments'] as $comment)
-                            <li>{{ $comment }}</li>
+            @if($this->latestExecution)
+                <div class="max-w-[640px] rounded-lg border border-border bg-surface-card px-4 py-3">
+                    <div class="flex items-center gap-2 flex-wrap">
+                        <span class="font-mono text-meta text-mute">execution #{{ $this->latestExecution->id }}</span>
+                        @foreach($this->latestExecution->nodes as $index => $node)
+                            @if($index > 0)<span class="text-faint">·</span>@endif
+                            @php
+                                $nodeLed = match ($node->status->value) {
+                                    'running' => 'bg-status-working animate-led-pulse',
+                                    'completed' => 'bg-ok',
+                                    'failed' => 'bg-status-failed',
+                                    'waiting_human' => 'bg-accent led-glow',
+                                    default => 'bg-status-idle',
+                                };
+                            @endphp
+                            <div class="flex items-center gap-1.5">
+                                <span class="h-1.5 w-1.5 rounded-full {{ $nodeLed }}"></span>
+                                <span class="font-mono text-meta">{{ $node->type }}</span>
+                            </div>
                         @endforeach
-                    </ul>
-                @endif
-
-                <div class="max-h-[420px] overflow-auto rounded-md border border-border-soft bg-surface font-mono text-[12px] leading-[1.75]">
-                    @php
-                        $diffLines = explode("\n", $this->reviewApproval->payload['diff'] ?? '');
-                    @endphp
-                    @foreach($diffLines as $line)
-                        @php
-                            $cls = 'text-t3';
-                            if (str_starts_with($line, '+++') || str_starts_with($line, '---')) { $cls = 'text-t3'; }
-                            elseif (str_starts_with($line, '+')) { $cls = 'bg-diff-add-bg text-diff-add-text'; }
-                            elseif (str_starts_with($line, '-')) { $cls = 'bg-diff-del-bg text-diff-del-text'; }
-                            elseif (str_starts_with($line, '@@')) { $cls = 'bg-diff-hunk-bg text-diff-hunk-text'; }
-                            elseif (str_starts_with($line, 'diff --git')) { $cls = 'text-t2 font-semibold'; }
-                        @endphp
-                        <div class="whitespace-pre px-4 {{ $cls }}">{{ $line }}</div>
-                    @endforeach
+                    </div>
+                    @if($this->latestExecution->status === \App\Enums\ExecutionStatus::Parked)
+                        <p class="mt-2 font-mono text-meta text-failed-text">parked · {{ $this->latestExecution->meta['parked_reason'] ?? 'unknown' }}</p>
+                    @endif
                 </div>
+            @endif
 
-                <input type="text" wire:model="gateComment" placeholder="Comment (required to reject)…" class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-body text-hi placeholder:text-faint">
-                @error('gateComment') <p class="text-caption text-failed-text">{{ $message }}</p> @enderror
+            @if($this->reviewApproval)
+                <div class="max-w-[640px] rounded-lg border bg-surface-raised p-4 space-y-3" style="border-color: var(--accent-border)">
+                    <div class="flex items-center gap-2">
+                        <span class="rounded-[5px] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[.1em]" style="background: var(--actor-system-bg); color: var(--actor-system)">Gate</span>
+                        <p class="text-body-sm text-text">{{ $this->reviewApproval->title }}</p>
+                        <div class="ml-auto font-mono text-meta">
+                            @if($this->reviewApproval->payload['testsPassed'] === true)
+                                <span class="text-ok">tests ✓</span>
+                            @elseif($this->reviewApproval->payload['testsPassed'] === false)
+                                <span class="text-failed-text">tests ✗</span>
+                            @else
+                                <span class="text-mute">no tests</span>
+                            @endif
+                        </div>
+                    </div>
 
-                <div class="flex items-center gap-3">
-                    <button wire:click="approveReview" wire:loading.attr="disabled" class="rounded-lg px-3 py-1.5 text-body-sm font-semibold disabled:opacity-55" style="background: var(--accent); color: var(--accent-ink)">
-                        <span wire:loading.remove wire:target="approveReview">Approve</span>
-                        <span wire:loading wire:target="approveReview">Approving…</span>
-                    </button>
-                    <button wire:click="rejectReview" wire:loading.attr="disabled" class="rounded-lg border px-3 py-1.5 text-body-sm font-semibold text-failed-text disabled:opacity-55 hover:bg-failed-tint" style="border-color: var(--failed-border)">
-                        <span wire:loading.remove wire:target="rejectReview">Reject</span>
-                        <span wire:loading wire:target="rejectReview">Rejecting…</span>
-                    </button>
-                </div>
-            </div>
-        @endif
+                    <p class="font-mono text-meta text-mute">{{ count($this->reviewApproval->payload['filesChanged'] ?? []) }} file(s) · builder: {{ config('majordom.builder.gateway_model') }}</p>
 
-        @if($this->commitSuggestion)
-            <div class="max-w-[640px] rounded-lg border border-border bg-surface-card p-4 space-y-3">
-                <p class="font-mono text-micro uppercase tracking-[.14em] text-ok">COMMIT READY</p>
-                <p class="font-mono text-meta text-mute">branch {{ $this->commitSuggestion->branch }} · you commit — Majordom never does</p>
-                <textarea readonly rows="6" class="w-full rounded-md border border-border-soft bg-surface p-3 font-mono text-[12px] text-body">{{ $this->commitSuggestion->message }}</textarea>
-                <details>
-                    <summary class="cursor-pointer font-mono text-meta text-mute">view diff</summary>
-                    <div class="mt-2 max-h-[420px] overflow-auto rounded-md border border-border-soft bg-surface font-mono text-[12px] leading-[1.75]">
+                    <p class="text-body-sm text-t2">{{ $this->reviewApproval->payload['verdict']['summary'] ?? '' }}</p>
+                    @if(!empty($this->reviewApproval->payload['verdict']['comments']))
+                        <ul class="text-caption text-t3 list-disc pl-4 space-y-1">
+                            @foreach($this->reviewApproval->payload['verdict']['comments'] as $comment)
+                                <li>{{ $comment }}</li>
+                            @endforeach
+                        </ul>
+                    @endif
+
+                    <div class="max-h-[420px] overflow-auto rounded-md border border-border-soft bg-surface font-mono text-[12px] leading-[1.75]">
                         @php
-                            $commitDiffLines = explode("\n", $this->commitSuggestion->diff ?? '');
+                            $diffLines = explode("\n", $this->reviewApproval->payload['diff'] ?? '');
                         @endphp
-                        @foreach($commitDiffLines as $line)
+                        @foreach($diffLines as $line)
                             @php
                                 $cls = 'text-t3';
                                 if (str_starts_with($line, '+++') || str_starts_with($line, '---')) { $cls = 'text-t3'; }
@@ -208,26 +178,119 @@
                             <div class="whitespace-pre px-4 {{ $cls }}">{{ $line }}</div>
                         @endforeach
                     </div>
-                </details>
-            </div>
-        @endif
 
-        @if($this->thinking)
-            <div class="flex items-center gap-2.5">
-                <span class="h-2 w-2 rounded-full bg-status-working animate-led-pulse"></span>
-                <span class="font-mono text-meta text-mute">architect is thinking…</span>
-            </div>
-        @endif
+                    <input type="text" wire:model="gateComment" placeholder="Comment (required to reject)…" class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-body text-hi placeholder:text-faint">
+                    @error('gateComment') <p class="text-caption text-failed-text">{{ $message }}</p> @enderror
+
+                    <div class="flex items-center gap-3">
+                        <button wire:click="approveReview" wire:loading.attr="disabled" class="rounded-lg px-3 py-1.5 text-body-sm font-semibold disabled:opacity-55" style="background: var(--accent); color: var(--accent-ink)">
+                            <span wire:loading.remove wire:target="approveReview">Approve</span>
+                            <span wire:loading wire:target="approveReview">Approving…</span>
+                        </button>
+                        <button wire:click="rejectReview" wire:loading.attr="disabled" class="rounded-lg border px-3 py-1.5 text-body-sm font-semibold text-failed-text disabled:opacity-55 hover:bg-failed-tint" style="border-color: var(--failed-border)">
+                            <span wire:loading.remove wire:target="rejectReview">Reject</span>
+                            <span wire:loading wire:target="rejectReview">Rejecting…</span>
+                        </button>
+                    </div>
+                </div>
+            @endif
+
+            @if($this->commitSuggestion)
+                <div class="max-w-[640px] rounded-lg border border-border bg-surface-card p-4 space-y-3">
+                    <p class="font-mono text-micro uppercase tracking-[.14em] text-ok">COMMIT READY</p>
+                    <p class="font-mono text-meta text-mute">branch {{ $this->commitSuggestion->branch }} · you commit — Majordom never does</p>
+                    <textarea readonly rows="6" class="w-full rounded-md border border-border-soft bg-surface p-3 font-mono text-[12px] text-body">{{ $this->commitSuggestion->message }}</textarea>
+                    <details>
+                        <summary class="cursor-pointer font-mono text-meta text-mute">view diff</summary>
+                        <div class="mt-2 max-h-[420px] overflow-auto rounded-md border border-border-soft bg-surface font-mono text-[12px] leading-[1.75]">
+                            @php
+                                $commitDiffLines = explode("\n", $this->commitSuggestion->diff ?? '');
+                            @endphp
+                            @foreach($commitDiffLines as $line)
+                                @php
+                                    $cls = 'text-t3';
+                                    if (str_starts_with($line, '+++') || str_starts_with($line, '---')) { $cls = 'text-t3'; }
+                                    elseif (str_starts_with($line, '+')) { $cls = 'bg-diff-add-bg text-diff-add-text'; }
+                                    elseif (str_starts_with($line, '-')) { $cls = 'bg-diff-del-bg text-diff-del-text'; }
+                                    elseif (str_starts_with($line, '@@')) { $cls = 'bg-diff-hunk-bg text-diff-hunk-text'; }
+                                    elseif (str_starts_with($line, 'diff --git')) { $cls = 'text-t2 font-semibold'; }
+                                @endphp
+                                <div class="whitespace-pre px-4 {{ $cls }}">{{ $line }}</div>
+                            @endforeach
+                        </div>
+                    </details>
+                    <input type="text" wire:model="commitComment" placeholder="Comment (required for rework / reject)…"
+                           class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-body-sm text-hi placeholder:text-faint">
+                    @error('commitComment') <p class="text-caption text-failed-text">{{ $message }}</p> @enderror
+                    <div class="flex items-center gap-2">
+                        <button wire:click="applyCommit" wire:confirm="Squash-merge {{ $this->commitSuggestion->branch }} into your current branch and commit?" wire:loading.attr="disabled"
+                                class="rounded-lg bg-accent px-3 py-1.5 text-body-sm font-semibold text-accent-ink disabled:opacity-55">
+                            <span wire:loading.remove wire:target="applyCommit">Commit</span>
+                            <span wire:loading wire:target="applyCommit">Committing…</span>
+                        </button>
+                        <button wire:click="reworkCommit" wire:loading.attr="disabled"
+                                class="rounded-lg border border-border-hover px-3 py-1.5 text-body-sm font-semibold text-[#c7d2df] hover:bg-surface-active disabled:opacity-55">
+                            <span wire:loading.remove wire:target="reworkCommit">Rework</span>
+                            <span wire:loading wire:target="reworkCommit">Restarting…</span>
+                        </button>
+                        <button wire:click="rejectCommit" wire:loading.attr="disabled"
+                                class="rounded-lg border border-failed-border px-3 py-1.5 text-body-sm font-semibold text-failed-text hover:bg-failed-tint disabled:opacity-55">Reject</button>
+                    </div>
+                </div>
+            @endif
+
+            @if($this->thinking)
+                <div class="flex items-center gap-2.5">
+                    <span class="spinner"></span>
+                    <span class="font-mono text-meta text-mute">{{ $this->thinkingLabel }}</span>
+                </div>
+            @endif
+        </div>
+
+        <div class="border-t border-border py-4">
+            <form wire:submit="send" class="flex gap-2">
+                <textarea wire:model="draft" rows="2" placeholder="Describe what to build…" class="flex-1 rounded-lg border border-border-strong bg-surface px-3 py-2 text-body text-hi placeholder:text-faint" @disabled($this->thinking)></textarea>
+                <button type="submit" wire:loading.attr="disabled" class="rounded-lg border border-border-hover px-3 py-1.5 text-body-sm font-semibold text-[#c7d2df] hover:bg-surface-active disabled:opacity-55" @disabled($this->thinking)>
+                    <span wire:loading.remove wire:target="send">Send</span>
+                    <span wire:loading wire:target="send">Sending…</span>
+                </button>
+            </form>
+            @error('draft') <p class="text-caption text-failed-text mt-1">{{ $message }}</p> @enderror
+        </div>
     </div>
 
-    <div class="border-t border-border py-4">
-        <form wire:submit="send" class="flex gap-2">
-            <textarea wire:model="draft" rows="2" placeholder="Describe what to build…" class="flex-1 rounded-lg border border-border-strong bg-surface px-3 py-2 text-body text-hi placeholder:text-faint" @disabled($this->thinking)></textarea>
-            <button type="submit" wire:loading.attr="disabled" class="rounded-lg border border-border-hover px-3 py-1.5 text-body-sm font-semibold text-[#c7d2df] hover:bg-surface-active disabled:opacity-55" @disabled($this->thinking)>
-                <span wire:loading.remove wire:target="send">Send</span>
-                <span wire:loading wire:target="send">Sending…</span>
-            </button>
-        </form>
-        @error('draft') <p class="text-caption text-failed-text mt-1">{{ $message }}</p> @enderror
-    </div>
+    <aside class="hidden w-[330px] shrink-0 flex-col border-l border-border lg:flex">
+        <div class="flex items-center gap-2 px-4 py-4">
+            <span class="font-mono text-micro uppercase tracking-[.14em] text-mute">Activity</span>
+            <span class="h-2 w-2 rounded-full bg-status-working animate-led-pulse"></span>
+            <span class="font-mono text-meta text-faint">live</span>
+        </div>
+        <div class="flex-1 overflow-y-auto">
+            @forelse($timeline as $ev)
+                <div class="border-b border-border-soft px-4 py-2.5 {{ str_contains($ev->name, 'waiting_human') || str_contains($ev->name, 'question') ? 'bg-accent-tint' : '' }}">
+                    <div class="flex items-baseline gap-2">
+                        <span class="font-mono text-meta text-mute">{{ $ev->created_at->format('H:i:s') }}</span>
+                        <span class="font-mono text-[11.5px] font-medium text-text">{{ $ev->name }}</span>
+                        @php $actor = $ev->actor; @endphp
+                        <span class="ml-auto rounded-[5px] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[.1em]"
+                              style="background: var(--actor-{{ in_array($actor,['architect','builder','reviewer','you']) ? $actor : 'system' }}-bg); color: var(--actor-{{ in_array($actor,['architect','builder','reviewer','you']) ? $actor : 'system' }})">{{ $actor }}</span>
+                    </div>
+                    @if(!empty($ev->payload))
+                        <p class="mt-0.5 truncate text-caption" style="color: var(--actor-system)">{{ collect($ev->payload)->map(fn ($v, $k) => is_scalar($v) ? "{$k}: {$v}" : null)->filter()->take(2)->implode(' · ') }}</p>
+                    @endif
+                </div>
+            @empty
+                <p class="px-4 py-6 font-mono text-meta text-faint">no activity yet</p>
+            @endforelse
+        </div>
+    </aside>
 </div>
+
+@script
+<script>
+    if (window.Echo) {
+        window.Echo.channel('project.{{ $project->id }}')
+            .listen('.domain-event', () => { $wire.dispatch('timeline-bump'); });
+    }
+</script>
+@endscript

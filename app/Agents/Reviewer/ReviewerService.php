@@ -4,6 +4,7 @@ namespace App\Agents\Reviewer;
 
 use App\Agents\Providers\Provider;
 use App\Agents\Providers\ProviderRequest;
+use App\Core\Usage\UsageLedger;
 use App\Models\Task;
 use App\Projects\Memory\MemoryStore;
 
@@ -55,6 +56,14 @@ class ReviewerService
             temperature: (float) config('majordom.reviewer.temperature', 0.2),
             jsonMode: true,
         ));
+
+        app(UsageLedger::class)->record(
+            $project,
+            'reviewer',
+            (string) config('majordom.reviewer.model'),
+            $response->promptTokens,
+            $response->completionTokens
+        );
 
         return ReviewVerdict::fromContent($response->content);
     }

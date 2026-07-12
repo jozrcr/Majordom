@@ -21,6 +21,7 @@ class Project extends Model
         'status',
         'last_activity_at',
         'test_command',
+        'archived_at',
     ];
 
     protected function casts(): array
@@ -28,6 +29,7 @@ class Project extends Model
         return [
             'status' => ProjectStatus::class,
             'last_activity_at' => 'datetime',
+            'archived_at' => 'datetime',
         ];
     }
 
@@ -61,8 +63,18 @@ class Project extends Model
         return $this->hasMany(Approval::class);
     }
 
+    public function commitSuggestions(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(CommitSuggestion::class);
+    }
+
     public function openApprovals(): HasMany
     {
         return $this->hasMany(Approval::class)->where('status', ApprovalStatus::Open);
+    }
+
+    public function events(): HasMany
+    {
+        return $this->hasMany(Event::class);
     }
 }

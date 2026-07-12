@@ -46,10 +46,21 @@ class ReviewNode extends NodeJob
 
         if (! $verdict->approved) {
             $this->writeRevisionBrief($task, $verdict);
+            $revision = $task->fresh()->revision;
 
-            return NodeResult::failed(
-                "Reviewer requested changes — revision brief written (task.v".($task->fresh()->revision).".md).",
-                ['verdict' => $verdict->toArray()],
+            if ($revision > (int) config('majordom.workflow.max_revisions', 3)) {
+                return NodeResult::failed(
+                    "Reviewer still requesting changes after {$revision} revisions — parked for the owner (task.v{$revision}.md).",
+                    ['verdict' => $verdict->toArray()],
+                );
+            }
+
+            $task->update(['status' => \App\Enums\TaskStatus::Pending]);
+
+            return NodeResult::retry(
+                ['build', 'test'],
+                "Reviewer requested changes — rebuilding with task.v{$revision}.md.",
+                ['verdict' => $verdict->toArray(), 'revision' => $revision],
             );
         }
 

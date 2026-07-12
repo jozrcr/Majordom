@@ -14,10 +14,14 @@ class ProjectDashboard extends Component
     public ?string $name = null;
     public ?string $repoPath = null;
     public bool $showForm = false;
+    public bool $showArchived = false;
 
     public function render()
     {
-        $projects = Project::all()
+        $projects = Project::query()
+            ->when(! $this->showArchived, fn ($q) => $q->whereNull('archived_at'))
+            ->when($this->showArchived, fn ($q) => $q->whereNotNull('archived_at'))
+            ->get()
             ->sortByDesc('last_activity_at')
             ->sortBy(function ($project) {
                 return match ($project->status) {
@@ -38,9 +42,17 @@ class ProjectDashboard extends Component
         }
         $summary = implode(' · ', $summaryParts);
 
+        $lastEvents = \App\Models\Event::whereIn('project_id', $projects->pluck('id'))
+            ->orderByDesc('id')
+            ->get()
+            ->unique('project_id')
+            ->keyBy('project_id');
+
         return view('livewire.project-dashboard', [
             'projects' => $projects,
             'summary' => $summary,
+            'archivedCount' => Project::whereNotNull('archived_at')->count(),
+            'lastEvents' => $lastEvents,
         ]);
     }
 

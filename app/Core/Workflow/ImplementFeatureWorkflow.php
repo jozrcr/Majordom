@@ -40,11 +40,15 @@ class ImplementFeatureWorkflow
     {
         $execution = $project->executions()->create(['status' => ExecutionStatus::Running]);
 
-        $task = $project->tasks()->create([
-            'execution_id' => $execution->id,
-            'task_key' => $taskKey,
-            'title' => $title,
-        ]);
+        // Reuse the task across restarts so its revision (and the v{n}
+        // briefs behind it) survive a park — a fresh row would silently
+        // rebuild the original brief.
+        $task = $project->tasks()->where('task_key', $taskKey)->latest('id')->first()
+            ?? $project->tasks()->make(['task_key' => $taskKey, 'title' => $title]);
+        $task->fill(['execution_id' => $execution->id, 'status' => \App\Enums\TaskStatus::Pending]);
+        $task->title = $task->title ?: $title;
+        $task->project_id = $project->id;
+        $task->save();
 
         app(WorkflowEngine::class)->start($execution, self::CHAIN);
 

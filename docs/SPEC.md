@@ -83,9 +83,8 @@ notify* vs *auto-proceed & collect*.
    - Reviewer reads diff + criteria + style + handoff + test result. Emits
      `ReviewRequested` → `ReviewApproved` / `ReviewChangesRequested`. On changes,
      comments become the next task revision (`task.v2.md`, …) → back to Build
-     (bounded loop). *(M3 status: the revision brief is written and the
-     execution parks for the owner to restart; the automated back-to-Build
-     re-arm ships with the M4 event bus. Same for test failures in phase 6.)*
+     (bounded loop — `workflow.max_revisions`, default 3; exhausting the
+     budget parks the execution with the last revision brief written).
    - **[gate]** Human may be asked to arbitrate or approve the review.
 8. **Accept** *(Human: Manual test)* — configurable, on by default
    - **[gate]** Human is invited to test the feature. `HumanTestRequested` →

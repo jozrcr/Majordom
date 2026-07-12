@@ -3,6 +3,7 @@
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', \App\Livewire\ProjectDashboard::class)->name('home');
+Route::get('/inbox', \App\Livewire\Inbox::class)->name('inbox');
 Route::get('/projects/{project}', \App\Livewire\ProjectWorkspace::class)->name('project.workspace');
 
 // Dev-only M1 de-risk surface; gone once the real workflow exists (M3).

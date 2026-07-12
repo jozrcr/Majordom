@@ -4,6 +4,8 @@ namespace App\Agents\Architect;
 
 use App\Agents\Providers\Provider;
 use App\Agents\Providers\ProviderRequest;
+use App\Core\Events\EventRecorder;
+use App\Core\Usage\UsageLedger;
 use App\Enums\MessageRole;
 use App\Enums\ProjectStatus;
 use App\Models\ConsensusMessage;
@@ -50,6 +52,14 @@ class ArchitectService
             jsonMode: true,
         ));
 
+        app(UsageLedger::class)->record(
+            $project,
+            'architect',
+            (string) config('majordom.architect.model'),
+            $response->promptTokens,
+            $response->completionTokens
+        );
+
         $envelope = ArchitectEnvelope::fromContent($response->content);
 
         $message = $project->consensusMessages()->create([
@@ -69,6 +79,17 @@ class ArchitectService
                 'options' => $q['options'],
             ]);
         }
+
+        app(EventRecorder::class)->record(
+            $project,
+            'consensus.message',
+            [
+                'questionsRaised' => count($envelope->questions),
+                'consensusClaimed' => $envelope->consensusReached,
+            ],
+            null,
+            'architect'
+        );
 
         // The question gate: a consensus claim only stands with zero open
         // questions — including ones raised this very turn. Even then the
@@ -104,6 +125,14 @@ class ArchitectService
             'meta' => ['questionId' => $question->id],
         ]);
 
+        app(EventRecorder::class)->record(
+            $question->project,
+            'question.answered',
+            ['questionId' => $question->id],
+            null,
+            'you'
+        );
+
         if ($question->project->openQuestions()->count() === 0) {
             // All answered; the follow-up turn is about to run.
             $question->project->update(['status' => ProjectStatus::Working, 'last_activity_at' => now()]);
@@ -127,6 +156,14 @@ class ArchitectService
             temperature: (float) config('majordom.architect.temperature', 0.3),
             jsonMode: true,
         ));
+
+        app(UsageLedger::class)->record(
+            $project,
+            'architect',
+            (string) config('majordom.architect.model'),
+            $response->promptTokens,
+            $response->completionTokens
+        );
 
         $data = json_decode(trim($response->content), true);
         if (! is_array($data)) {
@@ -155,6 +192,14 @@ class ArchitectService
                 .(string) ($data['summary'] ?? ''),
             'meta' => ['planWritten' => true, 'firstTaskId' => $taskId],
         ]);
+
+        app(EventRecorder::class)->record(
+            $project,
+            'plan.written',
+            ['firstTaskId' => $taskId],
+            null,
+            'architect'
+        );
     }
 
     /** @return array<int, array{role: string, content: string}> */

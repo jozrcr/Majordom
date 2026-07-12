@@ -5,6 +5,7 @@ namespace App\Core\Workflow\Nodes;
 use App\Agents\Harness\Harness;
 use App\Agents\Harness\HarnessRequest;
 use App\Agents\Harness\HarnessStatus;
+use App\Core\Usage\UsageLedger;
 use App\Core\Workflow\NodeJob;
 use App\Core\Workflow\NodeResult;
 use App\Enums\TaskStatus;
@@ -53,6 +54,18 @@ class BuildNode extends NodeJob
             taskPrompt: $taskPrompt,
             testCommand: $project->test_command,
         ));
+
+        [$sent, $received] = UsageLedger::parseAiderTokens($result->rawLog);
+        if ($sent + $received > 0) {
+            app(UsageLedger::class)->record(
+                $project,
+                'builder',
+                config('majordom.builder.gateway_model'),
+                $sent,
+                $received,
+                $execution
+            );
+        }
 
         $handoff = "# Build Handoff\n\n";
         $handoff .= "## Summary\n{$result->summary}\n\n";

@@ -3,10 +3,12 @@
 namespace App\Livewire;
 
 use App\Agents\Architect\ArchitectService;
+use App\Core\Events\EventRecorder;
 use App\Enums\QuestionStatus;
 use App\Jobs\RunArchitectTurn;
 use App\Models\Project;
 use Illuminate\Support\Facades\Cache;
+use Livewire\Attributes\On;
 use Livewire\Component;
 
 class ProjectWorkspace extends Component
@@ -65,9 +67,64 @@ class ProjectWorkspace extends Component
         }
     }
 
+    public ?string $commitComment = null;
+
+    public function applyCommit(): void
+    {
+        $suggestion = $this->commitSuggestion;
+        if (! $suggestion) return;
+
+        try {
+            app(\App\Projects\Repositories\CommitService::class)->apply($suggestion);
+        } catch (\RuntimeException $e) {
+            $this->addError('commitComment', $e->getMessage());
+        }
+    }
+
+    public function reworkCommit(): void
+    {
+        $suggestion = $this->commitSuggestion;
+        if (! $suggestion) return;
+
+        if (trim((string) $this->commitComment) === '') {
+            $this->addError('commitComment', 'Say what to change — the comment becomes the revision brief.');
+            return;
+        }
+
+        app(\App\Projects\Repositories\CommitService::class)->rework($suggestion, $this->commitComment);
+        $this->commitComment = null;
+    }
+
+    public function rejectCommit(): void
+    {
+        $suggestion = $this->commitSuggestion;
+        if (! $suggestion) return;
+
+        if (trim((string) $this->commitComment) === '') {
+            $this->addError('commitComment', 'Say why — rejections need a reason.');
+            return;
+        }
+
+        app(\App\Projects\Repositories\CommitService::class)->reject($suggestion, $this->commitComment);
+        $this->commitComment = null;
+    }
+
+    public function toggleArchive(): void
+    {
+        $this->project->update(['archived_at' => $this->project->archived_at ? null : now()]);
+        $this->redirectRoute('home', navigate: false);
+    }
+
     public function getThinkingProperty(): bool
     {
         return Cache::has("architect-turn:{$this->project->id}");
+    }
+
+    public function getThinkingLabelProperty(): string
+    {
+        return Cache::get("architect-turn:{$this->project->id}") === 'planning'
+            ? 'architect is writing the plan…'
+            : 'architect is thinking…';
     }
 
     /**
@@ -173,6 +230,14 @@ class ProjectWorkspace extends Component
             return;
         }
 
+        app(EventRecorder::class)->record(
+            $this->project,
+            'task.delegated',
+            ['task_key' => $this->plannedTask['key']],
+            null,
+            'you'
+        );
+
         app(\App\Core\Workflow\ImplementFeatureWorkflow::class)->startForTask(
             $this->project,
             $this->plannedTask['key'],
@@ -215,16 +280,21 @@ class ProjectWorkspace extends Component
         $this->gateComment = null;
     }
 
+    #[On('timeline-bump')]
+    public function bumpTimeline(): void {}
+
     public function render()
     {
         $messages = $this->project->consensusMessages()->orderBy('id')->get();
         $questionsByMessage = $this->project->questions()->get()->groupBy('consensus_message_id');
         $openCount = $this->project->openQuestions()->count();
+        $timeline = $this->project->events()->orderByDesc('id')->limit(50)->get();
 
         return view('livewire.project-workspace', [
             'messages' => $messages,
             'questionsByMessage' => $questionsByMessage,
             'openCount' => $openCount,
+            'timeline' => $timeline,
         ])->title("Majordom — {$this->project->name}");
     }
 }

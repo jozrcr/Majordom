@@ -12,12 +12,14 @@ use App\Enums\ApprovalType;
 final readonly class NodeResult
 {
     private function __construct(
-        public string $status, // done | waiting | failed
+        public string $status, // done | waiting | failed | retry
         public array $output,
         public ?ApprovalType $approvalType = null,
         public string $approvalTitle = '',
         public array $approvalPayload = [],
         public string $failureReason = '',
+        /** @var string[] node types to reset to pending, in-chain, incl. self */
+        public array $retryResets = [],
     ) {}
 
     public static function done(array $output = []): self
@@ -33,5 +35,15 @@ final readonly class NodeResult
     public static function failed(string $reason, array $output = []): self
     {
         return new self('failed', $output, failureReason: $reason);
+    }
+
+    /**
+     * The bounded revise loop (SPEC §3 phases 6-7): reset the named node
+     * types (and this node) to pending so the chain re-runs them — the
+     * revision brief carries the why.
+     */
+    public static function retry(array $resetTypes, string $reason, array $output = []): self
+    {
+        return new self('retry', $output, failureReason: $reason, retryResets: $resetTypes);
     }
 }
