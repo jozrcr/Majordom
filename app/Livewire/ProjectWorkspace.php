@@ -317,13 +317,53 @@ class ProjectWorkspace extends Component
         $messages = $this->project->consensusMessages()->orderBy('id')->get();
         $questionsByMessage = $this->project->questions()->get()->groupBy('consensus_message_id');
         $openCount = $this->project->openQuestions()->count();
-        $timeline = $this->project->events()->orderByDesc('id')->limit(50)->get();
+
+        $sessions = [];
+        $currentSessionMessages = collect();
+        foreach ($messages as $message) {
+            $currentSessionMessages->push($message);
+            $isDelimiter = $message->role === \App\Enums\MessageRole::System && ($message->meta['planWritten'] ?? false) === true;
+            if ($isDelimiter) {
+                $sessions[] = [
+                    'messages' => $currentSessionMessages,
+                    'closed' => true,
+                    'endedAt' => $message->created_at,
+                ];
+                $currentSessionMessages = collect();
+            }
+        }
+        if ($currentSessionMessages->isNotEmpty()) {
+            $sessions[] = [
+                'messages' => $currentSessionMessages,
+                'closed' => false,
+                'endedAt' => null,
+            ];
+        }
+
+        $timelineEvents = $this->project->events()->orderByDesc('id')->limit(50)->get();
+        $timelineGroups = [];
+        $groupOrder = [];
+        foreach ($timelineEvents as $event) {
+            $key = $event->execution_id ?? 'consensus';
+            if (!isset($timelineGroups[$key])) {
+                $timelineGroups[$key] = collect();
+                $groupOrder[] = $key;
+            }
+            $timelineGroups[$key]->push($event);
+        }
+        $orderedTimelineGroups = [];
+        foreach ($groupOrder as $key) {
+            $orderedTimelineGroups[] = [
+                'key' => $key,
+                'events' => $timelineGroups[$key],
+            ];
+        }
 
         return view('livewire.project-workspace', [
-            'messages' => $messages,
+            'sessions' => $sessions,
             'questionsByMessage' => $questionsByMessage,
             'openCount' => $openCount,
-            'timeline' => $timeline,
+            'timelineGroups' => $orderedTimelineGroups,
         ])->title("Majordom — {$this->project->name}");
     }
 }
