@@ -97,16 +97,14 @@ test('ArchitectService uses a DB role', function () {
         };
     });
 
-    // We need to actually capture the request. We'll use a simple static holder for the test.
-    $fakeProvider = new class {
+    $fakeProvider = new class implements \App\Agents\Providers\Provider {
         public static $lastRequest = null;
-        public function chat($request) {
+        public function chat(\App\Agents\Providers\ProviderRequest $request): \App\Agents\Providers\ProviderResponse {
             self::$lastRequest = $request;
-            return (object)[
-                'content' => json_encode(['reply' => 'ok', 'questions' => [], 'consensus_reached' => false]),
-                'promptTokens' => 10,
-                'completionTokens' => 20,
-            ];
+            return new \App\Agents\Providers\ProviderResponse(
+                json_encode(['reply' => 'ok', 'questions' => [], 'consensus_reached' => false]),
+                'stop', 10, 20,
+            );
         }
     };
     app()->instance(\App\Agents\Providers\Provider::class, $fakeProvider);
