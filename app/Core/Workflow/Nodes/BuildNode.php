@@ -47,7 +47,7 @@ class BuildNode extends NodeJob
 
         $result = app(Harness::class)->runTask(new HarnessRequest(
             repoPath: $task->worktree_path,
-            endpointBaseUrl: config('metallama.base_url') . '/ollama/v1',
+            endpointBaseUrl: config('majordom.metallama.base_url') . '/ollama/v1',
             modelName: config('majordom.builder.gateway_model'),
             rolePrompt: $rolePrompt,
             taskPrompt: $taskPrompt,

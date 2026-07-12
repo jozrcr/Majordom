@@ -122,7 +122,7 @@ test('BuildNode coordinates, runs harness, writes handoff, and sets task to Test
     $memory->write($project, "tasks/{$task->task_key}/role.md", "Role prompt");
     $memory->write($project, "tasks/{$task->task_key}/task.md", "Task prompt");
     
-    Config::set('metallama.base_url', 'http://localhost:11434');
+    Config::set('majordom.metallama.base_url', 'http://localhost:11434');
     Config::set('majordom.builder.gateway_model', 'codellama');
     Config::set('majordom.builder.model', 'builder-model-id');
     Config::set('queue.connections.harness.driver', 'sync');
@@ -161,7 +161,7 @@ test('BuildNode failure parks execution and sets task to Failed', function () {
     $memory->write($project, "tasks/{$task->task_key}/role.md", "Role");
     $memory->write($project, "tasks/{$task->task_key}/task.md", "Task");
     
-    Config::set('metallama.base_url', 'http://localhost:11434');
+    Config::set('majordom.metallama.base_url', 'http://localhost:11434');
     Config::set('majordom.builder.gateway_model', 'codellama');
     Config::set('majordom.builder.model', 'builder-model-id');
 
@@ -199,7 +199,7 @@ test('BuildNode uses task.v2.md when revision is 2', function () {
     $memory->write($project, "tasks/{$task->task_key}/task.md", "Original");
     $memory->write($project, "tasks/{$task->task_key}/task.v2.md", "Revised v2 marker");
     
-    Config::set('metallama.base_url', 'http://localhost:11434');
+    Config::set('majordom.metallama.base_url', 'http://localhost:11434');
     Config::set('majordom.builder.gateway_model', 'codellama');
     Config::set('majordom.builder.model', 'builder-model-id');
 
