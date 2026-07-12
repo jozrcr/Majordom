@@ -1,4 +1,8 @@
-<div class="mx-auto flex h-[calc(100vh-52px)] max-w-6xl gap-0 px-6" @if($this->thinking || $this->latestExecution?->status === \App\Enums\ExecutionStatus::Running) wire:poll.2s @endif>
+<div class="mx-auto flex h-[calc(100vh-52px)] max-w-6xl gap-0 px-6">
+    {{-- Static poll (reliability floor): a conditional wire:poll on the root
+         never initializes when morphed in later. Echo pushes are the fast
+         path; this catches anything the socket misses. --}}
+    <div wire:poll.3s class="hidden"></div>
     <div class="flex h-full min-w-0 flex-1 flex-col">
         <div class="py-4 flex items-center gap-3 border-b border-border">
             <h1 class="text-title font-semibold text-hi">{{ $project->name }}</h1>

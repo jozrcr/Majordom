@@ -215,6 +215,18 @@
 /* needs-you LED glow — the only glow in the app */
 .led-glow { box-shadow: 0 0 8px var(--accent-glow); }
 
+/* action spinner — spinners belong to in-flight work, never page loads */
+@keyframes spin { to { transform: rotate(360deg); } }
+.spinner {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border-radius: 9999px;
+    border: 2px solid var(--border-strong);
+    border-top-color: var(--status-working);
+    animation: spin .8s linear infinite;
+}
+
 /* ---------------------------------------------------------------- base */
 body {
     background-color: var(--bg);

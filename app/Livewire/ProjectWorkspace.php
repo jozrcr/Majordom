@@ -72,6 +72,13 @@ class ProjectWorkspace extends Component
         return Cache::has("architect-turn:{$this->project->id}");
     }
 
+    public function getThinkingLabelProperty(): string
+    {
+        return Cache::get("architect-turn:{$this->project->id}") === 'planning'
+            ? 'architect is writing the plan…'
+            : 'architect is thinking…';
+    }
+
     /**
      * The plan-approval gate is open when the LAST message is an Architect
      * turn that claimed consensus with zero open questions. Anything after it
