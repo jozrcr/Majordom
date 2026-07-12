@@ -3,7 +3,6 @@
 use App\Models\Project;
 use App\Projects\Memory\MemoryStore;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use InvalidArgumentException;
 
 uses(RefreshDatabase::class);
 

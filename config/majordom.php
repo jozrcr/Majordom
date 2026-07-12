@@ -3,6 +3,7 @@
 return [
     'token' => env('MAJORDOM_TOKEN'),
     'memory_root' => env('MAJORDOM_MEMORY_ROOT'),
+    'worktrees_root' => env('MAJORDOM_WORKTREES_ROOT'), // null => $HOME/.majordom/worktrees
     'metallama' => [
         'base_url' => env('METALLAMA_BASE_URL', 'http://127.0.0.1:8010'),
         'token' => env('METALLAMA_TOKEN'),
@@ -41,5 +42,13 @@ return [
         'max_tokens' => (int) env('MAJORDOM_ARCHITECT_MAX_TOKENS', 4000),
         'plan_max_tokens' => (int) env('MAJORDOM_ARCHITECT_PLAN_MAX_TOKENS', 8000),
         'temperature' => (float) env('MAJORDOM_ARCHITECT_TEMPERATURE', 0.3),
+    ],
+
+    // Reviewer defaults to the Architect's model until bound separately in
+    // Settings → Actors (GLM 5.2 is the standing candidate).
+    'reviewer' => [
+        'model' => env('MAJORDOM_REVIEWER_MODEL') ?: env('MAJORDOM_ARCHITECT_MODEL', 'deepseek/deepseek-v4-flash'),
+        'max_tokens' => (int) env('MAJORDOM_REVIEWER_MAX_TOKENS', 3000),
+        'temperature' => (float) env('MAJORDOM_REVIEWER_TEMPERATURE', 0.2),
     ],
 ];

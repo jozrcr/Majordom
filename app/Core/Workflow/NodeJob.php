@@ -1,0 +1,97 @@
+<?php
+
+namespace App\Core\Workflow;
+
+use App\Enums\ExecutionStatus;
+use App\Enums\NodeStatus;
+use App\Enums\ProjectStatus;
+use App\Models\Execution;
+use App\Models\Node;
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Foundation\Queue\Queueable;
+
+/**
+ * Base for every workflow node (SPEC §4: each node is a queue Job with typed
+ * input/output persisted on its Node row). Subclasses implement run() and
+ * return a NodeResult; this class owns the lifecycle bookkeeping so a node
+ * can never leave the execution in an ambiguous state.
+ */
+abstract class NodeJob implements ShouldQueue
+{
+    use Queueable;
+
+    public int $timeout = 3600;
+
+    public int $tries = 1;
+
+    public function __construct(public int $nodeId) {}
+
+    abstract protected function run(Node $node, Execution $execution): NodeResult;
+
+    public function handle(): void
+    {
+        $node = Node::findOrFail($this->nodeId);
+        $execution = $node->execution;
+
+        // A parked/completed execution never runs queued leftovers.
+        if ($execution->status !== ExecutionStatus::Running) {
+            return;
+        }
+
+        $node->start();
+        $execution->update(['current_node' => $node->type]);
+
+        try {
+            $result = $this->run($node, $execution);
+        } catch (\Throwable $e) {
+            $this->parkOn($node, $execution, $e->getMessage(), ['exception' => $e::class]);
+
+            throw $e;
+        }
+
+        match ($result->status) {
+            'done' => $this->completeAndAdvance($node, $execution, $result),
+            'waiting' => $this->waitForHuman($node, $execution, $result),
+            'failed' => $this->parkOn($node, $execution, $result->failureReason, $result->output),
+        };
+    }
+
+    public function failed(?\Throwable $e): void
+    {
+        // Death before/outside handle()'s own catch (stale worker, timeout
+        // kill): make the failure visible instead of a silent stall.
+        $node = Node::find($this->nodeId);
+        if ($node && $node->status === NodeStatus::Running) {
+            $execution = $node->execution;
+            $this->parkOn($node, $execution, $e?->getMessage() ?? 'node died unexpectedly', []);
+        }
+    }
+
+    private function completeAndAdvance(Node $node, Execution $execution, NodeResult $result): void
+    {
+        $node->finish($result->output);
+        app(WorkflowEngine::class)->advance($execution->fresh());
+    }
+
+    private function waitForHuman(Node $node, Execution $execution, NodeResult $result): void
+    {
+        $node->update(['status' => NodeStatus::WaitingHuman, 'output' => $result->output]);
+
+        $execution->approvals()->create([
+            'project_id' => $execution->project_id,
+            'type' => $result->approvalType,
+            'title' => $result->approvalTitle,
+            'payload' => $result->approvalPayload + ['node_id' => $node->id],
+        ]);
+
+        $execution->update(['status' => ExecutionStatus::NeedsYou]);
+        $execution->project->update(['status' => ProjectStatus::NeedsYou, 'last_activity_at' => now()]);
+    }
+
+    private function parkOn(Node $node, Execution $execution, string $reason, array $output): void
+    {
+        $node->fail($output + ['reason' => $reason]);
+        $execution->park($reason);
+        $execution->project->update(['status' => ProjectStatus::Parked, 'last_activity_at' => now()]);
+    }
+}
