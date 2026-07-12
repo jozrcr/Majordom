@@ -205,25 +205,29 @@
 
 /* ------------------------------------------------------------- motion */
 /* Handoff §4. LED pulse is the only motion above 300 ms. Errors don't
-   breathe: the failed LED never pulses. */
-@keyframes led-pulse {
-    0%, 100% { opacity: 1; }
-    50%      { opacity: .35; }
-}
-@keyframes skeleton-pulse {
-    0%, 100% { opacity: 1; }
-    50%      { opacity: .55; }
-}
+   breathe: the failed LED never pulses. Tailwind-4 idiom: keyframes +
+   --animate-* tokens in @theme, composable one-offs via @utility. */
+@theme {
+    --animate-led-pulse: led-pulse 2.4s ease-in-out infinite;
+    --animate-skeleton-pulse: skeleton-pulse 1.6s ease-in-out infinite;
 
-.animate-led-pulse      { animation: led-pulse 2.4s ease-in-out infinite; }
-.animate-skeleton-pulse { animation: skeleton-pulse 1.6s ease-in-out infinite; }
+    @keyframes led-pulse {
+        0%, 100% { opacity: 1; }
+        50%      { opacity: .35; }
+    }
+    @keyframes skeleton-pulse {
+        0%, 100% { opacity: 1; }
+        50%      { opacity: .55; }
+    }
+}
 
 /* needs-you LED glow — the only glow in the app */
-.led-glow { box-shadow: 0 0 8px var(--accent-glow); }
+@utility led-glow {
+    box-shadow: 0 0 8px var(--accent-glow);
+}
 
 /* action spinner — spinners belong to in-flight work, never page loads */
-@keyframes spin { to { transform: rotate(360deg); } }
-.spinner {
+@utility spinner {
     display: inline-block;
     width: 14px;
     height: 14px;
