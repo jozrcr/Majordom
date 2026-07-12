@@ -219,13 +219,30 @@
                             @endforeach
                         </div>
                     </details>
+                    <input type="text" wire:model="commitComment" placeholder="Comment (required for rework / reject)…"
+                           class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-body-sm text-hi placeholder:text-faint">
+                    @error('commitComment') <p class="text-caption text-failed-text">{{ $message }}</p> @enderror
+                    <div class="flex items-center gap-2">
+                        <button wire:click="applyCommit" wire:confirm="Squash-merge {{ $this->commitSuggestion->branch }} into your current branch and commit?" wire:loading.attr="disabled"
+                                class="rounded-lg bg-accent px-3 py-1.5 text-body-sm font-semibold text-accent-ink disabled:opacity-55">
+                            <span wire:loading.remove wire:target="applyCommit">Commit</span>
+                            <span wire:loading wire:target="applyCommit">Committing…</span>
+                        </button>
+                        <button wire:click="reworkCommit" wire:loading.attr="disabled"
+                                class="rounded-lg border border-border-hover px-3 py-1.5 text-body-sm font-semibold text-[#c7d2df] hover:bg-surface-active disabled:opacity-55">
+                            <span wire:loading.remove wire:target="reworkCommit">Rework</span>
+                            <span wire:loading wire:target="reworkCommit">Restarting…</span>
+                        </button>
+                        <button wire:click="rejectCommit" wire:loading.attr="disabled"
+                                class="rounded-lg border border-failed-border px-3 py-1.5 text-body-sm font-semibold text-failed-text hover:bg-failed-tint disabled:opacity-55">Reject</button>
+                    </div>
                 </div>
             @endif
 
             @if($this->thinking)
                 <div class="flex items-center gap-2.5">
-                    <span class="h-2 w-2 rounded-full bg-status-working animate-led-pulse"></span>
-                    <span class="font-mono text-meta text-mute">architect is thinking…</span>
+                    <span class="spinner"></span>
+                    <span class="font-mono text-meta text-mute">{{ $this->thinkingLabel }}</span>
                 </div>
             @endif
         </div>

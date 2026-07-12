@@ -67,6 +67,48 @@ class ProjectWorkspace extends Component
         }
     }
 
+    public ?string $commitComment = null;
+
+    public function applyCommit(): void
+    {
+        $suggestion = $this->commitSuggestion;
+        if (! $suggestion) return;
+
+        try {
+            app(\App\Projects\Repositories\CommitService::class)->apply($suggestion);
+        } catch (\RuntimeException $e) {
+            $this->addError('commitComment', $e->getMessage());
+        }
+    }
+
+    public function reworkCommit(): void
+    {
+        $suggestion = $this->commitSuggestion;
+        if (! $suggestion) return;
+
+        if (trim((string) $this->commitComment) === '') {
+            $this->addError('commitComment', 'Say what to change — the comment becomes the revision brief.');
+            return;
+        }
+
+        app(\App\Projects\Repositories\CommitService::class)->rework($suggestion, $this->commitComment);
+        $this->commitComment = null;
+    }
+
+    public function rejectCommit(): void
+    {
+        $suggestion = $this->commitSuggestion;
+        if (! $suggestion) return;
+
+        if (trim((string) $this->commitComment) === '') {
+            $this->addError('commitComment', 'Say why — rejections need a reason.');
+            return;
+        }
+
+        app(\App\Projects\Repositories\CommitService::class)->reject($suggestion, $this->commitComment);
+        $this->commitComment = null;
+    }
+
     public function toggleArchive(): void
     {
         $this->project->update(['archived_at' => $this->project->archived_at ? null : now()]);

@@ -51,6 +51,7 @@ class CommitSuggestionNode extends NodeJob
             'message' => $message,
             'diff' => $diff,
             'branch' => $task->branch,
+            'status' => 'suggested',
         ]);
 
         $task->update(['status' => TaskStatus::Approved]);
