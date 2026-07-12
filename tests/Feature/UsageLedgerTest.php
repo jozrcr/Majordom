@@ -41,8 +41,8 @@ test('record inserts with computed cost', function () {
     expect($record)->not->toBeNull()
         ->role->toBe('architect')
         ->model->toBe('deepseek/deepseek-v4-flash')
-        ->promptTokens->toBe(1000)
-        ->completionTokens->toBe(500);
+        ->prompt_tokens->toBe(1000)
+        ->completion_tokens->toBe(500);
         
     $expectedCost = 1000 * 0.0000002 + 500 * 0.0000008;
     expect(round($record->cost_usd, 8))->toBe(round($expectedCost, 8));
@@ -113,6 +113,7 @@ test('ArchitectService turn records an architect row', function () {
         {
             return new ProviderResponse(
                 content: json_encode(['reply' => 'Test', 'questions' => [], 'consensus_reached' => false]),
+                finishReason: 'stop',
                 promptTokens: 150,
                 completionTokens: 50
             );
@@ -123,6 +124,6 @@ test('ArchitectService turn records an architect row', function () {
     $service->converse($project, 'Hello');
 
     expect(UsageRecord::where('role', 'architect')->count())->toBe(1)
-        ->and(UsageRecord::first()->promptTokens)->toBe(150)
-        ->and(UsageRecord::first()->completionTokens)->toBe(50);
+        ->and(UsageRecord::first()->prompt_tokens)->toBe(150)
+        ->and(UsageRecord::first()->completion_tokens)->toBe(50);
 });
