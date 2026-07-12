@@ -2,7 +2,7 @@
 
 use App\Livewire\ProjectWorkspace;
 use App\Models\Project;
-use App\Models\Message;
+use App\Models\ConsensusMessage;
 use App\Models\Event;
 use App\Enums\MessageRole;
 use Illuminate\Support\Facades\Queue;
@@ -15,16 +15,16 @@ test('sessions are grouped by planWritten delimiter', function () {
     $project = Project::factory()->create();
 
     // Session 1
-    Message::factory()->create(['project_id' => $project->id, 'role' => MessageRole::User, 'content' => 'First message']);
-    Message::factory()->create(['project_id' => $project->id, 'role' => MessageRole::Architect, 'content' => 'First architect']);
-    Message::factory()->create(['project_id' => $project->id, 'role' => MessageRole::System, 'content' => 'Plan written', 'meta' => ['planWritten' => true]]);
+    ConsensusMessage::factory()->create(['project_id' => $project->id, 'role' => MessageRole::User, 'content' => 'First message']);
+    ConsensusMessage::factory()->create(['project_id' => $project->id, 'role' => MessageRole::Architect, 'content' => 'First architect']);
+    ConsensusMessage::factory()->create(['project_id' => $project->id, 'role' => MessageRole::System, 'content' => 'Plan written', 'meta' => ['planWritten' => true]]);
 
     // Session 2
-    Message::factory()->create(['project_id' => $project->id, 'role' => MessageRole::User, 'content' => 'Second message']);
-    Message::factory()->create(['project_id' => $project->id, 'role' => MessageRole::System, 'content' => 'Plan written 2', 'meta' => ['planWritten' => true]]);
+    ConsensusMessage::factory()->create(['project_id' => $project->id, 'role' => MessageRole::User, 'content' => 'Second message']);
+    ConsensusMessage::factory()->create(['project_id' => $project->id, 'role' => MessageRole::System, 'content' => 'Plan written 2', 'meta' => ['planWritten' => true]]);
 
     // Session 3 (current)
-    Message::factory()->create(['project_id' => $project->id, 'role' => MessageRole::User, 'content' => 'Third message']);
+    ConsensusMessage::factory()->create(['project_id' => $project->id, 'role' => MessageRole::User, 'content' => 'Third message']);
 
     $html = Livewire::test(ProjectWorkspace::class, ['project' => $project])->html();
 
@@ -43,9 +43,11 @@ test('timeline groups events by execution_id', function () {
     Queue::fake();
     $project = Project::factory()->create();
 
+    $e1 = \App\Models\Execution::factory()->create(['project_id' => $project->id]);
+    $e2 = \App\Models\Execution::factory()->create(['project_id' => $project->id]);
     Event::factory()->create(['project_id' => $project->id, 'execution_id' => null, 'name' => 'consensus.event']);
-    Event::factory()->create(['project_id' => $project->id, 'execution_id' => 1, 'name' => 'exec1.event']);
-    Event::factory()->create(['project_id' => $project->id, 'execution_id' => 2, 'name' => 'exec2.event']);
+    Event::factory()->create(['project_id' => $project->id, 'execution_id' => $e1->id, 'name' => 'exec1.event']);
+    Event::factory()->create(['project_id' => $project->id, 'execution_id' => $e2->id, 'name' => 'exec2.event']);
 
     $html = Livewire::test(ProjectWorkspace::class, ['project' => $project])->html();
 
@@ -57,7 +59,7 @@ test('timeline groups events by execution_id', function () {
 test('message blocks carry id attributes', function () {
     Queue::fake();
     $project = Project::factory()->create();
-    $msg = Message::factory()->create(['project_id' => $project->id, 'role' => MessageRole::User, 'content' => 'Test msg']);
+    $msg = ConsensusMessage::factory()->create(['project_id' => $project->id, 'role' => MessageRole::User, 'content' => 'Test msg']);
 
     $html = Livewire::test(ProjectWorkspace::class, ['project' => $project])->html();
 
