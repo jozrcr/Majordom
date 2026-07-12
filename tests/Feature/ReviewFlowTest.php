@@ -108,27 +108,42 @@ it('approved review parks behind the human gate with diff + verdict payload', fu
     expect($sent)->toContain('+guard')->and($sent)->toContain('Automated tests PASSED');
 });
 
-it('changes_requested writes the revision brief and parks', function () {
+it('changes_requested re-arms build+test with the revision brief', function () {
     [$project, $execution, $task, $reviewNode] = reviewSetup(json_encode([
         'verdict' => 'changes_requested',
         'comments' => [['file' => 'x.py', 'comment' => 'Handle negative b.']],
         'summary' => 'Edge case missing.',
     ]));
+    config(['queue.connections.harness.driver' => 'database']); // don't run the re-armed build inline
 
     app(MemoryStore::class)->write($project, 'tasks/T-001/task.md', 'Original brief');
 
     (new ReviewNode($reviewNode->id))->handle();
 
     $execution->refresh();
-    expect($execution->status)->toBe(ExecutionStatus::Parked)
-        ->and($execution->meta['parked_reason'])->toContain('revision brief')
+    expect($execution->status)->toBe(ExecutionStatus::Running)
         ->and($task->fresh()->revision)->toBe(2)
-        ->and($task->fresh()->status)->toBe(TaskStatus::Failed);
+        ->and($task->fresh()->status)->toBe(TaskStatus::Pending)
+        ->and($reviewNode->fresh()->status)->toBe(\App\Enums\NodeStatus::Pending)
+        ->and($execution->nodes()->where('type', 'build')->first()->status)->toBe(\App\Enums\NodeStatus::Pending);
 
     $brief = app(MemoryStore::class)->read($project, 'tasks/T-001/task.v2.md');
     expect($brief)->toContain('Original brief')
         ->and($brief)->toContain('Handle negative b.')
         ->and($brief)->toContain('Edge case missing.');
+});
+
+it('changes_requested beyond the revision budget parks', function () {
+    [$project, $execution, $task, $reviewNode] = reviewSetup(json_encode([
+        'verdict' => 'changes_requested', 'comments' => [], 'summary' => 'Still wrong.',
+    ]));
+    $task->update(['revision' => 3]);
+    app(MemoryStore::class)->write($project, 'tasks/T-001/task.md', 'Brief');
+
+    (new ReviewNode($reviewNode->id))->handle();
+
+    expect($execution->refresh()->status)->toBe(ExecutionStatus::Parked)
+        ->and($execution->meta['parked_reason'])->toContain('after 4 revisions');
 });
 
 it('review gate grant runs commit suggestion and completes the execution', function () {

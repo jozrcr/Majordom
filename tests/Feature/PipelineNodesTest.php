@@ -271,17 +271,37 @@ test('TestNode failure writes revision brief and increments revision', function 
         'php artisan test' => Process::result(output: 'FAIL', exitCode: 1),
     ]);
 
+    Config::set('queue.connections.harness.driver', 'database');
+    $node->update(['type' => 'test']); // real map type so advance() can dispatch
     $job = new TestNode($node->id);
     $job->handle();
 
-    expect($node->refresh()->status)->toBe(\App\Enums\NodeStatus::Failed);
+    // Bounded revise loop: within budget the node goes back to pending.
+    expect($node->refresh()->status)->toBe(\App\Enums\NodeStatus::Pending);
     $task->refresh();
     expect($task->revision)->toBe(2);
-    expect($task->status)->toBe(TaskStatus::Failed);
+    expect($task->status)->toBe(TaskStatus::Pending);
     $brief = $memory->read($project, "tasks/{$task->task_key}/task.v2.md");
     expect($brief)->toContain('Original brief');
     expect($brief)->toContain('## Test failure (revision 2)');
     expect($brief)->toContain('FAIL');
     $execution->refresh();
-    expect($execution->meta['parked_reason'] ?? '')->toContain('Tests failed');
+    expect($execution->status)->toBe(\App\Enums\ExecutionStatus::Running);
+});
+
+test('TestNode failure beyond the revision budget parks', function () {
+    setupMemoryRoot();
+    [$execution, $task, $node, $project] = createExecutionWithTask([
+        'worktree_path' => '/tmp/worktree',
+        'revision' => 3,
+    ]);
+    $project->update(['test_command' => 'php artisan test']);
+    app(MemoryStore::class)->write($project, "tasks/{$task->task_key}/task.md", "Brief");
+
+    Process::fake(['php artisan test' => Process::result(output: 'FAIL', exitCode: 1)]);
+
+    (new TestNode($node->id))->handle();
+
+    expect($execution->refresh()->status)->toBe(\App\Enums\ExecutionStatus::Parked)
+        ->and($execution->meta['parked_reason'])->toContain('still failing');
 });

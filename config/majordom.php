@@ -22,6 +22,12 @@ return [
         'gateway_model' => env('MAJORDOM_BUILDER_GATEWAY_MODEL'),
     ],
 
+    'workflow' => [
+        // Bounded revise loop: test failures / review changes re-arm the
+        // build this many times before the execution parks for the human.
+        'max_revisions' => (int) env('MAJORDOM_MAX_REVISIONS', 3),
+    ],
+
     'harness' => [
         'aider_bin' => env('MAJORDOM_AIDER_BIN', 'aider'),
         'timeout' => (int) env('MAJORDOM_HARNESS_TIMEOUT', 1800), // seconds

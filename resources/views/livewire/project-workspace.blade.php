@@ -3,15 +3,17 @@
          never initializes when morphed in later. Echo pushes are the fast
          path; this catches anything the socket misses. --}}
     <div wire:poll.3s class="hidden"></div>
-    <div class="flex h-full min-w-0 flex-1 flex-col">
-        <div class="py-4 flex items-center gap-3 border-b border-border">
+    <div class="flex h-full min-w-0 flex-1 flex-col justify-start">
+        <div class="py-4 flex items-center gap-3 border-b border-border pr-4">
             <div class="min-w-0">
-            <h1 class="truncate text-title font-semibold text-hi">{{ $project->name }}</h1>
-            <p class="truncate font-mono text-meta text-mute" title="{{ $project->repo_path }}">{{ $project->repo_path }}</p>
-        </div>
-            <span class="rounded-[5px] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[.1em]" style="background: var(--actor-architect-bg); color: var(--actor-architect)">Architect</span>
-            <span class="font-mono text-meta text-mute">{{ config('majordom.architect.model') }}</span>
-            @if($openCount > 0)
+                <h1 class="truncate text-title font-semibold text-hi">{{ $project->name }}</h1>
+                <p class="truncate font-mono text-meta text-mute" title="{{ $project->repo_path }}">{{ $project->repo_path }}</p>
+            </div>
+            <div class="min-w-0 flex flex-col">
+                <span class="rounded-[5px] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[.1em]" style="background: var(--actor-architect-bg); color: var(--actor-architect)">Architect</span>
+                <span class="font-mono text-meta text-mute">{{ config('majordom.architect.model') }}</span>
+            </div>
+                @if($openCount > 0)
                 <span class="ml-auto rounded-full border px-2.5 py-0.5 font-mono text-[10.5px] font-semibold tracking-[.06em] text-accent" style="border-color: var(--accent-border)">{{ $openCount }} question{{ $openCount > 1 ? 's' : '' }} remaining</span>
             @endif
         </div>

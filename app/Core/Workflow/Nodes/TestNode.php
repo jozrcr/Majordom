@@ -53,6 +53,19 @@ class TestNode extends NodeJob
         $task->revision = $newRevision;
         $task->save();
 
-        return NodeResult::failed('Tests failed.', ['testsPassed' => false, 'log' => $output]);
+        if ($newRevision > (int) config('majordom.workflow.max_revisions', 3)) {
+            return NodeResult::failed(
+                "Tests still failing after {$task->revision} revisions — parked for the owner.",
+                ['testsPassed' => false, 'log' => $output],
+            );
+        }
+
+        $task->update(['status' => TaskStatus::Pending]);
+
+        return NodeResult::retry(
+            ['build'],
+            "Tests failed — rebuilding with task.v{$newRevision}.md.",
+            ['testsPassed' => false, 'log' => $output, 'revision' => $newRevision],
+        );
     }
 }

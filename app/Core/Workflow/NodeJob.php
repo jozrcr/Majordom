@@ -62,7 +62,33 @@ abstract class NodeJob implements ShouldQueue
             'done' => $this->completeAndAdvance($node, $execution, $result),
             'waiting' => $this->waitForHuman($node, $execution, $result),
             'failed' => $this->parkOn($node, $execution, $result->failureReason, $result->output),
+            'retry' => $this->retryFrom($node, $execution, $result),
         };
+    }
+
+    /**
+     * The bounded revise loop: this node and the named earlier types go back
+     * to pending; advance() re-runs them in chain order with the revision
+     * brief in play.
+     */
+    private function retryFrom(Node $node, Execution $execution, NodeResult $result): void
+    {
+        $node->update(['status' => NodeStatus::Pending, 'output' => $result->output, 'finished_at' => null]);
+
+        $execution->nodes()
+            ->whereIn('type', $result->retryResets)
+            ->where('id', '<', $node->id)
+            ->update(['status' => NodeStatus::Pending, 'finished_at' => null]);
+
+        app(EventRecorder::class)->record(
+            $execution->project,
+            "{$node->type}.retry",
+            ['reason' => $result->failureReason],
+            $execution,
+            $this->actorFor($node)
+        );
+
+        app(WorkflowEngine::class)->advance($execution->fresh());
     }
 
     public function failed(?\Throwable $e): void
