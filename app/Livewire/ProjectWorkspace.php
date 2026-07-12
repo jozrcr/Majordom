@@ -14,6 +14,8 @@ class ProjectWorkspace extends Component
     public Project $project;
     public string $draft = '';
     public array $answerDrafts = [];
+    /** Free-text answers; when non-empty they win over a picked option. */
+    public array $customDrafts = [];
 
     public function mount(Project $project): void
     {
@@ -44,10 +46,11 @@ class ProjectWorkspace extends Component
             return;
         }
 
-        $text = $this->answerDrafts[$questionId] ?? '';
+        $custom = trim($this->customDrafts[$questionId] ?? '');
+        $text = $custom !== '' ? $custom : trim($this->answerDrafts[$questionId] ?? '');
 
-        if (trim($text) === '') {
-            $this->addError("answer-{$questionId}", 'Answer cannot be empty.');
+        if ($text === '') {
+            $this->addError("answer-{$questionId}", 'Pick an option or write an answer.');
             return;
         }
 

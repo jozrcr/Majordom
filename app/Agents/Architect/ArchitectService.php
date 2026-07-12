@@ -148,7 +148,8 @@ class ArchitectService
 
         $project->consensusMessages()->create([
             'role' => MessageRole::System,
-            'content' => "Consensus reached — project memory written (architecture.md, roadmap.md, tasks/{$taskId}/task.md).\n\n"
+            'content' => "Consensus reached — project memory written to {$this->memory->pathFor($project)} "
+                ."(architecture.md, roadmap.md, tasks/{$taskId}/task.md).\n\n"
                 .(string) ($data['summary'] ?? ''),
             'meta' => ['planWritten' => true, 'firstTaskId' => $taskId],
         ]);
@@ -201,6 +202,7 @@ Rules:
 2. "consensus_reached" may only be true when every question you ever raised has been answered AND this turn raises none. The engine enforces this regardless of what you claim.
 3. When consensus_reached is true, "reply" must restate the agreed scope in a few sentences.
 4. Keep "reply" concise; the owner reads it in a chat pane.
+5. The owner may answer a question in their own words instead of picking an option — including deferring to you ("your call"). Treat a deferral as a real answer: make a sensible decision, state it explicitly in "reply", and do not re-ask.
 PROMPT;
     }
 

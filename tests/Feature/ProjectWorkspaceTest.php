@@ -136,3 +136,37 @@ test('gate pill shows remaining count or is absent', function () {
     Livewire::test(\App\Livewire\ProjectWorkspace::class, ['project' => $project])
         ->assertDontSee('remaining');
 });
+
+test('custom free-text answer wins over a picked option', function () {
+    $project = Project::factory()->create(['name' => 'Test Project']);
+    $msg = ConsensusMessage::create(['project_id' => $project->id, 'role' => 'architect', 'content' => 'Q?']);
+    $question = Question::create([
+        'project_id' => $project->id,
+        'consensus_message_id' => $msg->id,
+        'status' => QuestionStatus::Open,
+        'text' => 'Choose?',
+        'options' => ['Yes', 'No'],
+    ]);
+
+    Livewire::test(\App\Livewire\ProjectWorkspace::class, ['project' => $project])
+        ->set('answerDrafts.'.$question->id, 'Yes')
+        ->set('customDrafts.'.$question->id, 'Actually, your call — pick what is simplest.')
+        ->call('answerQuestion', $question->id);
+
+    expect($question->fresh()->answer)->toBe('Actually, your call — pick what is simplest.');
+});
+
+test('question card with options still offers a free-text field', function () {
+    $project = Project::factory()->create(['name' => 'Test Project']);
+    $msg = ConsensusMessage::create(['project_id' => $project->id, 'role' => 'architect', 'content' => 'Q?']);
+    Question::create([
+        'project_id' => $project->id,
+        'consensus_message_id' => $msg->id,
+        'status' => QuestionStatus::Open,
+        'text' => 'Choose?',
+        'options' => ['Yes', 'No'],
+    ]);
+
+    Livewire::test(\App\Livewire\ProjectWorkspace::class, ['project' => $project])
+        ->assertSee('your own words');
+});

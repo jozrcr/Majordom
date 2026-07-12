@@ -34,9 +34,12 @@
                                         <span>{{ $option }}</span>
                                     </label>
                                 @endforeach
-                            @else
-                                <input type="text" wire:model="answerDrafts.{{ $question->id }}" placeholder="Answer…" class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-body text-hi placeholder:text-faint">
                             @endif
+                            {{-- Always offer free text — clarify, push back, or defer
+                                 ("your call"); when filled it wins over the radio. --}}
+                            <input type="text" wire:model="customDrafts.{{ $question->id }}"
+                                   placeholder="{{ $question->options ? 'Or answer in your own words — “your call” works too…' : 'Answer…' }}"
+                                   class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-body text-hi placeholder:text-faint">
                             @error("answer-{$question->id}") <p class="text-caption text-failed-text">{{ $message }}</p> @enderror
                             <div class="flex items-center gap-3">
                                 <button wire:click="answerQuestion({{ $question->id }})" wire:loading.attr="disabled" class="rounded-lg px-3 py-1.5 text-body-sm font-semibold disabled:opacity-55" style="background: var(--accent); color: var(--accent-ink)">Answer</button>
