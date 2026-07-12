@@ -14,9 +14,12 @@
         <a href="/" class="font-mono text-[12px] font-medium tracking-[.18em] text-hi">MAJORDOM</a>
         <div class="flex items-center gap-5 text-body-sm">
             <a href="/" class="font-medium text-hi">Projects</a>
-            <a href="#" class="text-t3 transition-colors duration-120 hover:text-hi">
+            @php $inboxCount = \App\Livewire\Inbox::openCount(); @endphp
+            <a href="{{ route('inbox') }}" class="flex items-center gap-1.5 text-t3 transition-colors duration-120 hover:text-hi">
                 Inbox
-                {{-- badge appears with the inbox in M4 --}}
+                @if($inboxCount > 0)
+                    <span class="rounded-full px-1.5 py-0.5 font-mono text-[10.5px] font-semibold leading-none bg-accent text-accent-ink">{{ $inboxCount }}</span>
+                @endif
             </a>
             <a href="#" class="text-t3 transition-colors duration-120 hover:text-hi">Settings</a>
         </div>
