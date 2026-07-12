@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\ApprovalStatus;
 use App\Enums\ProjectStatus;
 use App\Enums\QuestionStatus;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -42,5 +43,25 @@ class Project extends Model
     public function openQuestions(): HasMany
     {
         return $this->hasMany(Question::class)->where('status', QuestionStatus::Open);
+    }
+
+    public function executions(): HasMany
+    {
+        return $this->hasMany(Execution::class);
+    }
+
+    public function tasks(): HasMany
+    {
+        return $this->hasMany(Task::class);
+    }
+
+    public function approvals(): HasMany
+    {
+        return $this->hasMany(Approval::class);
+    }
+
+    public function openApprovals(): HasMany
+    {
+        return $this->hasMany(Approval::class)->where('status', ApprovalStatus::Open);
     }
 }
