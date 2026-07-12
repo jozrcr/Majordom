@@ -57,4 +57,12 @@ return [
         'max_tokens' => (int) env('MAJORDOM_REVIEWER_MAX_TOKENS', 3000),
         'temperature' => (float) env('MAJORDOM_REVIEWER_TEMPERATURE', 0.2),
     ],
+
+    'telegram' => [
+        'bot_token' => env('TELEGRAM_BOT_TOKEN'),
+        'chat_id' => env('TELEGRAM_CHAT_ID'),
+        'poll_timeout' => (int) env('TELEGRAM_POLL_TIMEOUT', 30),
+        // true => messages deliver without a push notification (dev/test)
+        'silent' => (bool) env('TELEGRAM_SILENT', false),
+    ],
 ];

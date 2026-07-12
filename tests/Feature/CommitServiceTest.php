@@ -116,3 +116,16 @@ it('refuses to act twice on the same suggestion', function () {
     expect(fn () => app(CommitService::class)->reject($this->suggestion, 'x'))
         ->toThrow(RuntimeException::class, 'already resolved');
 });
+
+it('ignores untracked files in the clean-tree guard', function () {
+    Process::fake([
+        "'git' 'status' '--porcelain'" => Process::result(output: "?? __pycache__/\n?? notes.txt\n"),
+        "'git' 'merge' '--squash'*" => Process::result(output: 'ok'),
+        "'git' 'commit' '-m'*" => Process::result(output: 'committed'),
+        "'git' 'worktree' 'remove'*" => Process::result(output: ''),
+    ]);
+
+    app(CommitService::class)->apply($this->suggestion);
+
+    expect($this->suggestion->fresh()->status)->toBe('committed');
+});

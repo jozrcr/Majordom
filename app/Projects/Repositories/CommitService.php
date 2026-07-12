@@ -31,8 +31,12 @@ class CommitService
         $task = $suggestion->task;
         $repo = $suggestion->project->repo_path;
 
+        // Untracked files can't be clobbered by a squash-merge (git aborts
+        // itself on a real path collision) — only TRACKED changes block.
         $status = Process::path($repo)->run(['git', 'status', '--porcelain']);
-        if (trim($status->output()) !== '') {
+        $dirty = collect(explode("\n", trim($status->output())))
+            ->filter(fn ($line) => $line !== '' && ! str_starts_with($line, '??'));
+        if ($dirty->isNotEmpty()) {
             throw new RuntimeException('Your working tree has uncommitted changes — commit or stash them first.');
         }
 

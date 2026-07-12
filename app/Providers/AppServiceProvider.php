@@ -34,6 +34,8 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(EventRecorder::class, fn () => new EventRecorder());
         
         $this->app->singleton(UsageLedger::class, fn () => new UsageLedger());
+
+        $this->app->singleton(\App\Integrations\Telegram\TelegramClient::class, fn () => \App\Integrations\Telegram\TelegramClient::fromConfig());
     }
 
     /**
