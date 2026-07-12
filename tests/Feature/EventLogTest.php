@@ -47,7 +47,8 @@ it('swallows storage failures without throwing', function () {
     Schema::drop('events');
     
     $recorder = app(EventRecorder::class);
-    expect(fn () => $recorder->record($this->project, 'test.event'))->not->toThrow();
+    $recorder->record($this->project, 'test.event'); // reaching the next line = no throw
+    expect(true)->toBeTrue();
 });
 
 class TestDoneNode extends NodeJob
