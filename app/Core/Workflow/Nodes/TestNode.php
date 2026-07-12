@@ -9,6 +9,7 @@ use App\Models\Execution;
 use App\Models\Node;
 use App\Models\Task;
 use App\Projects\Memory\MemoryStore;
+use App\Support\Setting;
 use Illuminate\Support\Facades\Process;
 
 class TestNode extends NodeJob
@@ -53,7 +54,7 @@ class TestNode extends NodeJob
         $task->revision = $newRevision;
         $task->save();
 
-        if ($newRevision > (int) config('majordom.workflow.max_revisions', 3)) {
+        if ($newRevision > (int) Setting::get('workflow.max_revisions', config('majordom.workflow.max_revisions', 3))) {
             return NodeResult::failed(
                 "Tests still failing after {$task->revision} revisions — parked for the owner.",
                 ['testsPassed' => false, 'log' => $output],

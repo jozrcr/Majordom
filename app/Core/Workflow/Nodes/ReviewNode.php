@@ -11,6 +11,7 @@ use App\Enums\TaskStatus;
 use App\Models\Execution;
 use App\Models\Node;
 use App\Projects\Memory\MemoryStore;
+use App\Support\Setting;
 
 /**
  * Frontier review of the Builder's diff (SPEC §3 phase 7). Approved →
@@ -48,7 +49,7 @@ class ReviewNode extends NodeJob
             $this->writeRevisionBrief($task, $verdict);
             $revision = $task->fresh()->revision;
 
-            if ($revision > (int) config('majordom.workflow.max_revisions', 3)) {
+            if ($revision > (int) Setting::get('workflow.max_revisions', config('majordom.workflow.max_revisions', 3))) {
                 return NodeResult::failed(
                     "Reviewer still requesting changes after {$revision} revisions — parked for the owner (task.v{$revision}.md).",
                     ['verdict' => $verdict->toArray()],

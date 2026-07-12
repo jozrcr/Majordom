@@ -10,6 +10,7 @@ use App\Core\Workflow\Nodes\TestNode;
 use App\Enums\ExecutionStatus;
 use App\Models\Project;
 use App\Models\Task;
+use App\Support\Setting;
 
 /**
  * The one v1 workflow template (SPEC §2): hardcoded, not pluggable
@@ -42,7 +43,7 @@ class ImplementFeatureWorkflow
             'status' => ExecutionStatus::Running,
             'profile' => $profile,
             'spend_cap_usd' => $profile === 'overnight'
-                ? config('majordom.workflow.overnight_spend_cap_usd')
+                ? Setting::get('workflow.overnight_spend_cap_usd', config('majordom.workflow.overnight_spend_cap_usd'))
                 : null,
         ]);
 

@@ -21,7 +21,7 @@
                     <span class="rounded-full px-1.5 py-0.5 font-mono text-[10.5px] font-semibold leading-none bg-accent text-accent-ink">{{ $inboxCount }}</span>
                 @endif
             </a>
-            <a href="#" class="text-t3 transition-colors duration-120 hover:text-hi">Settings</a>
+            <a href="{{ route('settings') }}" class="text-t3 transition-colors duration-120 hover:text-hi">Settings</a>
         </div>
         <div class="ml-auto flex items-center gap-4">
             <span class="h-[26px] w-[26px] rounded-full border border-border-strong bg-surface-chip"></span>
