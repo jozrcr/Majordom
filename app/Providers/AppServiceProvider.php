@@ -23,6 +23,11 @@ class AppServiceProvider extends ServiceProvider
         
         $this->app->singleton(MemoryStore::class, fn () => MemoryStore::fromConfig());
         $this->app->singleton(WorktreeManager::class, fn () => WorktreeManager::fromConfig());
+
+        $this->app->singleton(
+            \App\Core\Workflow\WorkflowEngine::class,
+            fn () => new \App\Core\Workflow\WorkflowEngine(\App\Core\Workflow\ImplementFeatureWorkflow::nodeMap()),
+        );
     }
 
     /**
