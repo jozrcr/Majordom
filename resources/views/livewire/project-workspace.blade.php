@@ -10,8 +10,8 @@
                 <p class="truncate font-mono text-meta text-mute" title="{{ $project->repo_path }}">{{ $project->repo_path }}</p>
             </div>
             <div class="min-w-0 flex flex-col">
-                <span class="rounded-[5px] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[.1em]" style="background: var(--actor-architect-bg); color: var(--actor-architect)">Architect</span>
-                <span class="font-mono text-meta text-mute">{{ config('majordom.architect.model') }}</span>
+                <span class="w-fit rounded-[5px] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[.1em]" style="background: var(--actor-architect-bg); color: var(--actor-architect)">Architect</span>
+                <span class="pl-1 font-mono text-meta text-mute">{{ config('majordom.architect.model') }}</span>
             </div>
                 @if($openCount > 0)
                 <span class="ml-auto rounded-full border px-2.5 py-0.5 font-mono text-[10.5px] font-semibold tracking-[.06em] text-accent" style="border-color: var(--accent-border)">{{ $openCount }} question{{ $openCount > 1 ? 's' : '' }} remaining</span>
