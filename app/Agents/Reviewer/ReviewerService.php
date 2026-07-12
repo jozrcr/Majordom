@@ -7,6 +7,7 @@ use App\Agents\Providers\ProviderRequest;
 use App\Core\Usage\UsageLedger;
 use App\Models\Task;
 use App\Projects\Memory\MemoryStore;
+use App\Support\RoleResolver;
 
 /**
  * The frontier Reviewer (AGENTS.md): judges the Builder's diff against the
@@ -46,21 +47,23 @@ class ReviewerService
             ."## Test result\n{$testsLine}\n\n"
             ."## Diff".($truncated ? ' (truncated at 30k chars)' : '')."\n```diff\n{$diffShown}\n```";
 
+        $binding = app(RoleResolver::class)->resolve('reviewer', $project);
+
         $response = $this->provider->chat(new ProviderRequest(
-            model: (string) config('majordom.reviewer.model'),
+            model: $binding->model,
             messages: [
                 ['role' => 'system', 'content' => self::SYSTEM_PROMPT],
                 ['role' => 'user', 'content' => $userContent],
             ],
-            maxTokens: (int) config('majordom.reviewer.max_tokens', 3000),
-            temperature: (float) config('majordom.reviewer.temperature', 0.2),
+            maxTokens: $binding->maxTokens,
+            temperature: $binding->temperature,
             jsonMode: true,
         ));
 
         app(UsageLedger::class)->record(
             $project,
             'reviewer',
-            (string) config('majordom.reviewer.model'),
+            $binding->model,
             $response->promptTokens,
             $response->completionTokens,
             $task->execution, // links the cost to the run — the spend cap reads this

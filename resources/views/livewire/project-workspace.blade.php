@@ -13,6 +13,15 @@
                 <span class="w-fit rounded-[5px] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[.1em]">Architect</span>
                 <span class="pl-1 font-mono text-meta text-mute">{{ config('majordom.architect.model') }}</span>
             </div>
+            <div class="flex items-center gap-2">
+                <label class="font-mono text-meta text-mute">workflow</label>
+                <select wire:model.live="workflowId" class="rounded border border-border bg-surface px-2 py-1 text-xs font-mono text-hi">
+                    <option value="">default</option>
+                    @foreach($workflows as $wf)
+                        <option value="{{ $wf->id }}">{{ $wf->name }}</option>
+                    @endforeach
+                </select>
+            </div>
                 @if($openCount > 0)
                 <span class="ml-auto rounded-full border px-2.5 py-0.5 font-mono text-[10.5px] font-semibold tracking-[.06em] text-accent">{{ $openCount }} question{{ $openCount > 1 ? 's' : '' }} remaining</span>
             @endif

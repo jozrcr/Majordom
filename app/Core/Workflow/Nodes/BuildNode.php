@@ -14,6 +14,7 @@ use App\Models\Node;
 use App\Models\Task;
 use App\Projects\Memory\MemoryStore;
 use App\Runtime\Metallama\ResourceCoordinator;
+use App\Support\RoleResolver;
 
 class BuildNode extends NodeJob
 {
@@ -29,7 +30,9 @@ class BuildNode extends NodeJob
             return NodeResult::failed('Task has no worktree.');
         }
 
-        app(ResourceCoordinator::class)->ensure(config('majordom.builder.model'));
+        $binding = app(RoleResolver::class)->resolve('builder', $task->project);
+        $managedModel = $binding->meta['managed_model'] ?? $binding->model;
+        app(ResourceCoordinator::class)->ensure($managedModel);
 
         $memory = app(MemoryStore::class);
         $project = $task->project;
@@ -49,7 +52,7 @@ class BuildNode extends NodeJob
         $result = app(Harness::class)->runTask(new HarnessRequest(
             repoPath: $task->worktree_path,
             endpointBaseUrl: config('majordom.metallama.base_url') . '/ollama/v1',
-            modelName: config('majordom.builder.gateway_model'),
+            modelName: $binding->model,
             rolePrompt: $rolePrompt,
             taskPrompt: $taskPrompt,
             testCommand: $project->test_command,
@@ -60,7 +63,7 @@ class BuildNode extends NodeJob
             app(UsageLedger::class)->record(
                 $project,
                 'builder',
-                config('majordom.builder.gateway_model'),
+                $binding->model,
                 $sent,
                 $received,
                 $execution

@@ -7,6 +7,7 @@ use App\Enums\ProjectStatus;
 use App\Enums\QuestionStatus;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Project extends Model
@@ -22,6 +23,7 @@ class Project extends Model
         'last_activity_at',
         'test_command',
         'archived_at',
+        'workflow_id',
     ];
 
     protected function casts(): array
@@ -31,6 +33,11 @@ class Project extends Model
             'last_activity_at' => 'datetime',
             'archived_at' => 'datetime',
         ];
+    }
+
+    public function workflow(): BelongsTo
+    {
+        return $this->belongsTo(Workflow::class);
     }
 
     public function consensusMessages(): HasMany
