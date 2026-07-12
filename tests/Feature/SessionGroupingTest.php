@@ -29,7 +29,7 @@ test('sessions are grouped by planWritten delimiter', function () {
     $html = Livewire::test(ProjectWorkspace::class, ['project' => $project])->html();
 
     // Assert two closed sessions
-    $count = preg_match_all('/session ·/', $html);
+    $count = preg_match_all('/session \d+ ·/', $html);
     expect($count)->toBe(2);
 
     // Current session message visible

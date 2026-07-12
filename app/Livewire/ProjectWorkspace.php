@@ -116,6 +116,26 @@ class ProjectWorkspace extends Component
         $this->redirectRoute('home', navigate: false);
     }
 
+    /**
+     * execution id → session index: the session whose closing plan preceded
+     * the execution's start (timeline headers deep-link into the chat).
+     */
+    private function executionSessionMap(array $sessions): array
+    {
+        $map = [];
+        foreach ($this->project->executions()->orderBy('id')->get() as $execution) {
+            $index = count($sessions) - 1; // default: current session
+            foreach ($sessions as $i => $session) {
+                if ($session['closed'] && $session['endedAt'] && $session['endedAt']->lte($execution->created_at)) {
+                    $index = min($i + 1, count($sessions) - 1);
+                }
+            }
+            $map[$execution->id] = $index;
+        }
+
+        return $map;
+    }
+
     public function getThinkingProperty(): bool
     {
         return Cache::has("architect-turn:{$this->project->id}");
