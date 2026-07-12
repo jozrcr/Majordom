@@ -1,4 +1,4 @@
-<div class="mx-auto flex h-[calc(100vh-52px)] max-w-6xl gap-0 px-6">
+<div class="mx-auto flex h-[calc(100vh-52px)] w-full max-w-[1920px] gap-0 px-6">
     {{-- Static poll (reliability floor): a conditional wire:poll on the root
          never initializes when morphed in later. Echo pushes are the fast
          path; this catches anything the socket misses. --}}
@@ -239,7 +239,7 @@
         </div>
     </div>
 
-    <aside class="hidden w-[330px] shrink-0 flex-col border-l border-border lg:flex">
+    <aside class="hidden w-[330px] shrink-0 flex-col border-l border-border lg:flex xl:w-[460px] 2xl:w-[640px]">
         <div class="flex items-center gap-2 px-4 py-4">
             <span class="font-mono text-micro uppercase tracking-[.14em] text-mute">Activity</span>
             <span class="h-2 w-2 rounded-full bg-status-working animate-led-pulse"></span>
