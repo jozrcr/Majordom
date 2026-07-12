@@ -44,7 +44,7 @@ test('engine knownTypes contains expected types', function () {
 });
 
 test('settings page creates workflow', function () {
-    livewire(SettingsPage::class)
+    \Livewire\Livewire::test(SettingsPage::class)
         ->set('section', 'workflows')
         ->set('workflowName', 'Custom Flow')
         ->set('workflowDescription', 'A test flow')
@@ -56,7 +56,7 @@ test('settings page creates workflow', function () {
 });
 
 test('settings page moveStep and removeStep work', function () {
-    livewire(SettingsPage::class)
+    \Livewire\Livewire::test(SettingsPage::class)
         ->set('chainDraft', ['a', 'b', 'c'])
         ->call('moveStep', 0, 'down')
         ->assertSet('chainDraft', ['b', 'a', 'c'])
@@ -66,7 +66,7 @@ test('settings page moveStep and removeStep work', function () {
 
 test('settings page prevents duplicate names', function () {
     Workflow::factory()->create(['name' => 'Existing']);
-    livewire(SettingsPage::class)
+    \Livewire\Livewire::test(SettingsPage::class)
         ->set('workflowName', 'Existing')
         ->set('chainDraft', ['delegate'])
         ->call('saveWorkflow')
@@ -77,7 +77,7 @@ test('settings page prevents deleting used workflow', function () {
     $wf = Workflow::factory()->create();
     Project::factory()->create(['workflow_id' => $wf->id]);
     
-    livewire(SettingsPage::class)
+    \Livewire\Livewire::test(SettingsPage::class)
         ->call('deleteWorkflow', $wf->id)
         ->assertHasErrors(['workflow']);
     
@@ -86,7 +86,7 @@ test('settings page prevents deleting used workflow', function () {
 
 test('settings page prevents deleting builtin workflow', function () {
     $wf = Workflow::factory()->create(['is_builtin' => true]);
-    livewire(SettingsPage::class)
+    \Livewire\Livewire::test(SettingsPage::class)
         ->call('deleteWorkflow', $wf->id)
         ->assertHasErrors(['workflow']);
 });
@@ -95,7 +95,7 @@ test('workspace select saves workflow_id', function () {
     $project = Project::factory()->create();
     $wf = Workflow::factory()->create();
     
-    livewire(ProjectWorkspace::class, ['project' => $project])
+    \Livewire\Livewire::test(ProjectWorkspace::class, ['project' => $project])
         ->set('workflowId', $wf->id)
         ->assertSet('workflowId', $wf->id);
         

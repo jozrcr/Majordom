@@ -78,7 +78,7 @@ test('workflow section saves settings and round-trips', function () {
     \Livewire\Livewire::test(SettingsPage::class)
         ->set('workflow.max_revisions', 5)
         ->set('workflow.overnight_spend_cap_usd', 10.00)
-        ->call('saveWorkflow')
+        ->call('saveWorkflowSettings')
         ->assertHasNoErrors();
         
     $this->assertEquals(5, Setting::get('workflow.max_revisions'));
