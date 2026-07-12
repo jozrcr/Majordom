@@ -170,3 +170,51 @@ test('question card with options still offers a free-text field', function () {
     Livewire::test(\App\Livewire\ProjectWorkspace::class, ['project' => $project])
         ->assertSee('your own words');
 });
+
+test('plan-approval card shows when last message claims consensus with zero open questions', function () {
+    $project = Project::factory()->create(['name' => 'Test Project']);
+    ConsensusMessage::create([
+        'project_id' => $project->id, 'role' => 'architect',
+        'content' => 'We agree.', 'meta' => ['consensusClaimed' => true],
+    ]);
+
+    Livewire::test(\App\Livewire\ProjectWorkspace::class, ['project' => $project])
+        ->assertSee('Plan approval')
+        ->assertSee('Approve plan');
+});
+
+test('plan-approval card absent when questions are open or after a newer message', function () {
+    $project = Project::factory()->create(['name' => 'Test Project']);
+    $claim = ConsensusMessage::create([
+        'project_id' => $project->id, 'role' => 'architect',
+        'content' => 'We agree.', 'meta' => ['consensusClaimed' => true],
+    ]);
+    Question::create(['project_id' => $project->id, 'consensus_message_id' => $claim->id, 'status' => QuestionStatus::Open, 'text' => 'Wait, one more?']);
+
+    Livewire::test(\App\Livewire\ProjectWorkspace::class, ['project' => $project])
+        ->assertDontSee('Plan approval');
+
+    $project2 = Project::factory()->create(['name' => 'Other Project']);
+    ConsensusMessage::create([
+        'project_id' => $project2->id, 'role' => 'architect',
+        'content' => 'We agree.', 'meta' => ['consensusClaimed' => true],
+    ]);
+    ConsensusMessage::create(['project_id' => $project2->id, 'role' => 'user', 'content' => 'Actually, wait.']);
+
+    Livewire::test(\App\Livewire\ProjectWorkspace::class, ['project' => $project2])
+        ->assertDontSee('Plan approval');
+});
+
+test('approvePlan dispatches RunPlanDraft and sets working status', function () {
+    $project = Project::factory()->create(['name' => 'Test Project']);
+    ConsensusMessage::create([
+        'project_id' => $project->id, 'role' => 'architect',
+        'content' => 'We agree.', 'meta' => ['consensusClaimed' => true],
+    ]);
+
+    Livewire::test(\App\Livewire\ProjectWorkspace::class, ['project' => $project])
+        ->call('approvePlan');
+
+    Queue::assertPushed(\App\Jobs\RunPlanDraft::class, fn ($job) => $job->projectId === $project->id);
+    expect($project->fresh()->status)->toBe(\App\Enums\ProjectStatus::Working);
+});

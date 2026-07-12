@@ -57,7 +57,7 @@ it('persists user + architect messages and creates questions', function () {
 
     $result = $service->converse($this->project, 'Build me a login page');
 
-    expect($result['planWritten'])->toBeFalse()
+    expect($result['consensusPending'])->toBeFalse()
         ->and($this->project->consensusMessages()->count())->toBe(2)
         ->and($this->project->openQuestions()->count())->toBe(2);
 
@@ -75,7 +75,7 @@ it('ignores a consensus claim while questions from the same turn are open', func
 
     $result = $service->converse($this->project, 'Go');
 
-    expect($result['planWritten'])->toBeFalse()
+    expect($result['consensusPending'])->toBeFalse()
         ->and(is_dir($this->memoryRoot))->toBeFalse();
 });
 
@@ -88,12 +88,24 @@ it('ignores a consensus claim while previously raised questions are open', funct
         'consensus_reached' => true,
     ])]);
 
-    expect($service->converse($this->project, 'Proceed')['planWritten'])->toBeFalse();
+    expect($service->converse($this->project, 'Proceed')['consensusPending'])->toBeFalse();
 });
 
-it('writes the plan to memory when consensus is real', function () {
+it('reports consensus pending and does NOT write the plan without approval', function () {
     [$service, $provider] = architect([
         json_encode(['reply' => 'Agreed scope: X.', 'questions' => [], 'consensus_reached' => true]),
+    ]);
+
+    $result = $service->converse($this->project, 'All agreed.');
+
+    expect($result['consensusPending'])->toBeTrue()
+        ->and(is_dir($this->memoryRoot))->toBeFalse()
+        ->and(count($provider->requests))->toBe(1)
+        ->and($this->project->fresh()->status)->toBe(\App\Enums\ProjectStatus::NeedsYou);
+});
+
+it('writes the plan on explicit approval', function () {
+    [$service, $provider] = architect([
         json_encode([
             'architecture_md' => '# Arch',
             'roadmap_md' => '# Roadmap',
@@ -103,15 +115,13 @@ it('writes the plan to memory when consensus is real', function () {
         ]),
     ]);
 
-    $result = $service->converse($this->project, 'All agreed.');
+    $service->approvePlan($this->project);
     $store = MemoryStore::fromConfig();
 
-    expect($result['planWritten'])->toBeTrue()
-        ->and($store->read($this->project, 'architecture.md'))->toBe('# Arch')
+    expect($store->read($this->project, 'architecture.md'))->toBe('# Arch')
         ->and($store->read($this->project, 'roadmap.md'))->toBe('# Roadmap')
         ->and($store->read($this->project, 'tasks/T-001/task.md'))->toBe('# Task 1')
-        ->and(count($provider->requests))->toBe(2)
-        ->and($provider->requests[1]->jsonMode)->toBeTrue();
+        ->and($provider->requests[0]->jsonMode)->toBeTrue();
 
     $last = $this->project->consensusMessages()->orderByDesc('id')->first();
     expect($last->role)->toBe(MessageRole::System)
@@ -119,16 +129,12 @@ it('writes the plan to memory when consensus is real', function () {
 });
 
 it('salvages a malformed plan response into plan_draft.md', function () {
-    [$service] = architect([
-        json_encode(['reply' => 'Done.', 'questions' => [], 'consensus_reached' => true]),
-        'this is not json at all',
-    ]);
+    [$service] = architect(['this is not json at all']);
 
-    $result = $service->converse($this->project, 'Ship it');
+    $service->approvePlan($this->project);
     $store = MemoryStore::fromConfig();
 
-    expect($result['planWritten'])->toBeTrue()
-        ->and($store->read($this->project, 'plan_draft.md'))->toBe('this is not json at all')
+    expect($store->read($this->project, 'plan_draft.md'))->toBe('this is not json at all')
         ->and($store->exists($this->project, 'architecture.md'))->toBeFalse();
 });
 
@@ -139,7 +145,7 @@ it('degrades a malformed envelope to a plain reply without crashing', function (
 
     expect($result['message']->content)->toBe('plain text, no JSON here')
         ->and($this->project->openQuestions()->count())->toBe(0)
-        ->and($result['planWritten'])->toBeFalse();
+        ->and($result['consensusPending'])->toBeFalse();
 });
 
 it('parses an envelope wrapped in markdown fences', function () {

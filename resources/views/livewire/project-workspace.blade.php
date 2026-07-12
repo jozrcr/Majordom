@@ -69,6 +69,21 @@
             </div>
         @endforelse
 
+        @if($this->consensusPending && !$this->thinking)
+            {{-- Plan-approval moment (design §2.6): the human owns this gate. --}}
+            <div class="max-w-[640px] rounded-lg border bg-surface-raised p-4 space-y-3" style="border-color: var(--accent-border)">
+                <p class="font-mono text-micro uppercase tracking-[.14em] text-accent">Plan approval</p>
+                <p class="text-body-sm text-text">Consensus reached. Approve to let the Architect write the project memory — architecture.md, roadmap.md and the first task brief. Not confident yet? Keep talking below; the scope stays open.</p>
+                <div class="flex items-center gap-3">
+                    <button wire:click="approvePlan" wire:loading.attr="disabled" class="rounded-lg px-3 py-1.5 text-body-sm font-semibold disabled:opacity-55" style="background: var(--accent); color: var(--accent-ink)">
+                        <span wire:loading.remove wire:target="approvePlan">Approve plan</span>
+                        <span wire:loading wire:target="approvePlan">Approving…</span>
+                    </button>
+                    <span class="font-mono text-meta text-faint">writes project memory · nothing touches your repo</span>
+                </div>
+            </div>
+        @endif
+
         @if($this->thinking)
             <div class="flex items-center gap-2.5">
                 <span class="h-2 w-2 rounded-full bg-status-working animate-led-pulse"></span>

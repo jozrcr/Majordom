@@ -69,6 +69,35 @@ class ProjectWorkspace extends Component
         return Cache::has("architect-turn:{$this->project->id}");
     }
 
+    /**
+     * The plan-approval gate is open when the LAST message is an Architect
+     * turn that claimed consensus with zero open questions. Anything after it
+     * (a new user message, the plan's system message) closes the moment.
+     */
+    public function getConsensusPendingProperty(): bool
+    {
+        $last = $this->project->consensusMessages()->orderByDesc('id')->first();
+
+        return $last !== null
+            && $last->role === \App\Enums\MessageRole::Architect
+            && ($last->meta['consensusClaimed'] ?? false) === true
+            && $this->project->openQuestions()->count() === 0;
+    }
+
+    public function approvePlan(): void
+    {
+        if (! $this->consensusPending || $this->thinking) {
+            return;
+        }
+
+        Cache::put("architect-turn:{$this->project->id}", 'planning', now()->addMinutes(15));
+        $this->project->update(['status' => \App\Enums\ProjectStatus::Working, 'last_activity_at' => now()]);
+
+        \App\Jobs\RunPlanDraft::dispatch($this->project->id)
+            ->onConnection('harness')
+            ->onQueue('harness');
+    }
+
     public function render()
     {
         $messages = $this->project->consensusMessages()->orderBy('id')->get();
