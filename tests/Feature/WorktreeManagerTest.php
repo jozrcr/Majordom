@@ -8,19 +8,15 @@ use RuntimeException;
 
 uses(\Illuminate\Foundation\Testing\RefreshDatabase::class);
 
-beforeEach(function () {
-    Process::fake();
-});
-
 it('creates worktree and persists branch and path', function () {
     $repoDir = sys_get_temp_dir().'/majordom-test-repo-'.uniqid();
     mkdir($repoDir, 0755, true);
     mkdir($repoDir.'/.git', 0755, true);
 
-    $project = new Project(['slug' => 'test-project', 'repo_path' => $repoDir]);
-    $project->save();
-    $task = new Task(['task_key' => 'T-001', 'project_id' => $project->id]);
-    $task->save();
+    $project = Project::factory()->create(['slug' => 'test-project', 'repo_path' => $repoDir]);
+    $task = Task::factory()->create(['task_key' => 'T-001', 'project_id' => $project->id]);
+
+    Process::fake();
 
     $manager = app(WorktreeManager::class);
     $expectedPath = $manager->pathFor($task);
@@ -34,7 +30,7 @@ it('creates worktree and persists branch and path', function () {
 
     Process::assertRan(function ($run) use ($repoDir, $expectedPath) {
         return $run->path === $repoDir &&
-               $run->command === "'git' 'worktree' 'add' '-b' 'majordom/T-001' '{$expectedPath}' 'HEAD'";
+               $run->command === ['git', 'worktree', 'add', '-b', 'majordom/T-001', $expectedPath, 'HEAD'];
     });
 });
 
@@ -46,11 +42,10 @@ it('reuses existing worktree_path without running git', function () {
     $existingPath = sys_get_temp_dir().'/majordom-existing-'.uniqid();
     mkdir($existingPath, 0755, true);
 
-    $project = new Project(['slug' => 'test-project', 'repo_path' => $repoDir]);
-    $project->save();
-    $task = new Task(['task_key' => 'T-001', 'project_id' => $project->id, 'worktree_path' => $existingPath]);
-    $task->save();
+    $project = Project::factory()->create(['slug' => 'test-project', 'repo_path' => $repoDir]);
+    $task = Task::factory()->create(['task_key' => 'T-001', 'project_id' => $project->id, 'worktree_path' => $existingPath]);
 
+    Process::fake();
     $manager = app(WorktreeManager::class);
     $path = $manager->create($task);
 
@@ -63,19 +58,16 @@ it('retries without -b on already exists stderr', function () {
     mkdir($repoDir, 0755, true);
     mkdir($repoDir.'/.git', 0755, true);
 
-    $project = new Project(['slug' => 'test-project', 'repo_path' => $repoDir]);
-    $project->save();
-    $task = new Task(['task_key' => 'T-001', 'project_id' => $project->id]);
-    $task->save();
+    $project = Project::factory()->create(['slug' => 'test-project', 'repo_path' => $repoDir]);
+    $task = Task::factory()->create(['task_key' => 'T-001', 'project_id' => $project->id]);
 
     $manager = app(WorktreeManager::class);
     $expectedPath = $manager->pathFor($task);
 
     Process::fake([
-        "'git' 'worktree' 'add'*" => Process::sequence([
-            Process::result(exitCode: 128, errorOutput: 'fatal: a branch named majordom/T-001 already exists'),
-            Process::result(exitCode: 0),
-        ]),
+        "'git' 'worktree' 'add'*" => Process::sequence()
+            ->push(Process::result(exitCode: 128, errorOutput: 'fatal: a branch named majordom/T-001 already exists'))
+            ->push(Process::result(exitCode: 0)),
     ]);
 
     $path = $manager->create($task);
@@ -85,12 +77,11 @@ it('retries without -b on already exists stderr', function () {
     expect($task->branch)->toBe('majordom/T-001')
         ->and($task->worktree_path)->toBe($expectedPath);
 
-    Process::assertRanTimes(2);
     Process::assertRan(function ($run) use ($expectedPath) {
-        return $run->command === "'git' 'worktree' 'add' '-b' 'majordom/T-001' '{$expectedPath}' 'HEAD'";
+        return $run->command === ['git', 'worktree', 'add', '-b', 'majordom/T-001', $expectedPath, 'HEAD'];
     });
     Process::assertRan(function ($run) use ($expectedPath) {
-        return $run->command === "'git' 'worktree' 'add' '{$expectedPath}' 'majordom/T-001'";
+        return $run->command === ['git', 'worktree', 'add', $expectedPath, 'majordom/T-001'];
     });
 });
 
@@ -98,11 +89,10 @@ it('throws on non-git repo_path', function () {
     $repoDir = sys_get_temp_dir().'/majordom-test-repo-'.uniqid();
     mkdir($repoDir, 0755, true);
 
-    $project = new Project(['slug' => 'test-project', 'repo_path' => $repoDir]);
-    $project->save();
-    $task = new Task(['task_key' => 'T-001', 'project_id' => $project->id]);
-    $task->save();
+    $project = Project::factory()->create(['slug' => 'test-project', 'repo_path' => $repoDir]);
+    $task = Task::factory()->create(['task_key' => 'T-001', 'project_id' => $project->id]);
 
+    Process::fake();
     $manager = app(WorktreeManager::class);
 
     expect(fn () => $manager->create($task))
@@ -116,10 +106,8 @@ it('throws on other git failure with stderr', function () {
     mkdir($repoDir, 0755, true);
     mkdir($repoDir.'/.git', 0755, true);
 
-    $project = new Project(['slug' => 'test-project', 'repo_path' => $repoDir]);
-    $project->save();
-    $task = new Task(['task_key' => 'T-001', 'project_id' => $project->id]);
-    $task->save();
+    $project = Project::factory()->create(['slug' => 'test-project', 'repo_path' => $repoDir]);
+    $task = Task::factory()->create(['task_key' => 'T-001', 'project_id' => $project->id]);
 
     $manager = app(WorktreeManager::class);
 
@@ -139,11 +127,10 @@ it('removes worktree and nulls path', function () {
     $worktreePath = sys_get_temp_dir().'/majordom-worktree-'.uniqid();
     mkdir($worktreePath, 0755, true);
 
-    $project = new Project(['slug' => 'test-project', 'repo_path' => $repoDir]);
-    $project->save();
-    $task = new Task(['task_key' => 'T-001', 'project_id' => $project->id, 'worktree_path' => $worktreePath]);
-    $task->save();
+    $project = Project::factory()->create(['slug' => 'test-project', 'repo_path' => $repoDir]);
+    $task = Task::factory()->create(['task_key' => 'T-001', 'project_id' => $project->id, 'worktree_path' => $worktreePath]);
 
+    Process::fake();
     $manager = app(WorktreeManager::class);
     $manager->remove($task);
 
@@ -152,7 +139,7 @@ it('removes worktree and nulls path', function () {
 
     Process::assertRan(function ($run) use ($repoDir, $worktreePath) {
         return $run->path === $repoDir &&
-               $run->command === "'git' 'worktree' 'remove' '--force' '{$worktreePath}'";
+               $run->command === ['git', 'worktree', 'remove', '--force', $worktreePath];
     });
 });
 
@@ -161,11 +148,10 @@ it('does nothing on remove with null worktree_path', function () {
     mkdir($repoDir, 0755, true);
     mkdir($repoDir.'/.git', 0755, true);
 
-    $project = new Project(['slug' => 'test-project', 'repo_path' => $repoDir]);
-    $project->save();
-    $task = new Task(['task_key' => 'T-001', 'project_id' => $project->id]);
-    $task->save();
+    $project = Project::factory()->create(['slug' => 'test-project', 'repo_path' => $repoDir]);
+    $task = Task::factory()->create(['task_key' => 'T-001', 'project_id' => $project->id]);
 
+    Process::fake();
     $manager = app(WorktreeManager::class);
     $manager->remove($task);
 
