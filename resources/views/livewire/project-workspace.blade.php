@@ -32,10 +32,10 @@
             @else
                 @foreach($sessions as $idx => $session)
                     @if($session['closed'])
-                        <div class="max-w-[640px]" x-data="{ open: false }" id="session-{{ $idx }}"
+                        <div x-data="{ open: false }" id="session-{{ $idx }}"
                              @open-session.window="if ($event.detail.session === {{ $idx }}) { open = true; $nextTick(() => $el.scrollIntoView({ behavior: 'smooth', block: 'start' })) }">
                             <button type="button" @click="open = !open"
-                                    class="flex w-full cursor-pointer items-center gap-2 rounded-md border border-border-soft px-3 py-2 font-mono text-meta text-mute transition-colors duration-120 hover:bg-surface-active hover:text-t3">
+                                    class="flex w-full max-w-[640px] cursor-pointer items-center gap-2 rounded-md border border-border-soft px-3 py-2 font-mono text-meta text-mute transition-colors duration-120 hover:bg-surface-active hover:text-t3">
                                 <span class="transition-transform duration-120" :class="open && 'rotate-90'">›</span>
                                 session {{ $idx + 1 }} · {{ $session['messages']->count() }} messages · ended {{ $session['endedAt']->diffForHumans() }}
                             </button>

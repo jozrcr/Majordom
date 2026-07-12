@@ -1,6 +1,6 @@
 @if($message->role === \App\Enums\MessageRole::User)
-    <div id="msg-{{ $message->id }}" class="max-w-[640px] ml-auto">
-        <p class="font-mono text-micro uppercase tracking-[.14em] text-mute">You</p>
+    <div id="msg-{{ $message->id }}" class="ml-auto w-fit max-w-[640px] rounded-lg border border-border-soft bg-surface px-4 py-3">
+        <p class="text-right font-mono text-micro uppercase tracking-[.14em] text-mute">You</p>
         <div class="mt-1 text-body text-body whitespace-pre-wrap">{{ $message->content }}</div>
     </div>
 @elseif($message->role === \App\Enums\MessageRole::Architect)
