@@ -69,6 +69,28 @@ test('HumanTaskNode waits with HumanTask approval carrying worktree and brief', 
     expect($approval->payload['brief'])->toContain('Build the feature.');
 });
 
+test('HumanTaskNode appends step instructions config to the brief', function () {
+    humanNodesMemoryRoot();
+    $repoDir = sys_get_temp_dir().'/majordom-noderepo-'.uniqid();
+    mkdir($repoDir.'/.git', 0755, true);
+    [$execution, $task, $node, $project] = humanNodesExecution([], ['repo_path' => $repoDir]);
+    $node->update(['input' => ['role' => 'human', 'config' => ['instructions' => 'Only touch the docs folder.']]]);
+
+    $memory = app(MemoryStore::class);
+    $memory->write($project, "tasks/{$task->task_key}/task.md", "Build the feature.");
+
+    Process::fake([
+        "'git' 'rev-parse' '--verify' 'HEAD'" => Process::result(output: "abc123\n"),
+        "'git' 'worktree' 'add'*" => Process::result(output: 'ok'),
+    ]);
+
+    (new HumanTaskNode($node->id))->handle();
+
+    $approval = Approval::open()->first();
+    expect($approval->payload['brief'])->toContain('Build the feature.');
+    expect($approval->payload['brief'])->toContain('**Step instructions:** Only touch the docs folder.');
+});
+
 test('HumanTaskNode rejection parks execution', function () {
     humanNodesMemoryRoot();
     $repoDir = sys_get_temp_dir().'/majordom-noderepo-'.uniqid();

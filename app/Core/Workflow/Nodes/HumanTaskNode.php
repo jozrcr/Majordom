@@ -33,6 +33,11 @@ class HumanTaskNode extends NodeJob
         $brief = $memory->read($task->project, $briefPath) ?? '';
         $brief = mb_substr($brief, 0, 2000);
 
+        $instructions = trim((string) ($node->input['config']['instructions'] ?? ''));
+        if ($instructions !== '') {
+            $brief = trim($brief."\n\n**Step instructions:** ".mb_substr($instructions, 0, 500));
+        }
+
         return NodeResult::waitHuman(
             ApprovalType::HumanTask,
             "Your turn — {$taskKey}: {$task->title}",

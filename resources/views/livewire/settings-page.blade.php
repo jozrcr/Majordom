@@ -170,6 +170,9 @@
                                                     @endforeach
                                                 </select>
                                             @endif
+                                            @if($step['type'] === 'human_task')
+                                                <input type="text" wire:model.live="chainDraft.{{ $i }}.config.instructions" placeholder="instructions…" maxlength="500" class="w-64 rounded border border-border bg-surface px-2 py-0.5 text-xs text-t3" />
+                                            @endif
                                         @endif
                                     </div>
                                 @endforeach
