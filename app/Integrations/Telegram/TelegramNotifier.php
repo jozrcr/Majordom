@@ -61,6 +61,20 @@ class TelegramNotifier
             return;
         }
 
+        // Reviewer escalated: send each execution question as force-reply.
+        if (str_ends_with($name, '.clarification') && $event->execution_id) {
+            foreach (Question::open()->where('execution_id', $event->execution_id)->get() as $question) {
+                $messageId = $this->telegram->sendMessage(
+                    "[{$project->name}] The Reviewer needs your call:\n{$question->text}\n\nReply to this message to answer.",
+                    ['force_reply' => true],
+                    silent: $silent,
+                );
+                $this->map($project->id, 'question', $question->id, $messageId);
+            }
+
+            return;
+        }
+
         // Review gate opened.
         if ($name === 'review.waiting_human' && $event->execution_id) {
             $approval = Approval::open()->where('execution_id', $event->execution_id)->orderByDesc('id')->first();

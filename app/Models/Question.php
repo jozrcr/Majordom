@@ -15,6 +15,7 @@ class Question extends Model
     protected $fillable = [
         'project_id',
         'consensus_message_id',
+        'execution_id',
         'text',
         'options',
         'status',
@@ -34,6 +35,11 @@ class Question extends Model
     public function project(): BelongsTo
     {
         return $this->belongsTo(Project::class);
+    }
+
+    public function execution(): BelongsTo
+    {
+        return $this->belongsTo(Execution::class);
     }
 
     public function consensusMessage(): BelongsTo

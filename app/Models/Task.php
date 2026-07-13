@@ -20,6 +20,7 @@ class Task extends Model
         'worktree_path',
         'status',
         'revision',
+        'clarified_at_revision',
     ];
 
     protected function casts(): array

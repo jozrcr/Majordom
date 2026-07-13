@@ -45,11 +45,29 @@ class ReviewNode extends NodeJob
 
         $verdict = app(ReviewerService::class)->review($task, $diff, $testsPassed);
 
+        // M9 escalation: the failure is the owner's to resolve, not the
+        // Builder's — questions instead of another doomed revision.
+        if (! $verdict->approved && $verdict->needsClarification()) {
+            foreach ($verdict->questions as $q) {
+                $execution->questions()->create([
+                    'project_id' => $execution->project_id,
+                    'text' => $q,
+                ]);
+            }
+            $task->update(['status' => TaskStatus::NeedsYou]);
+
+            return NodeResult::escalated([
+                'verdict' => $verdict->toArray(),
+                'questions' => $verdict->questions,
+            ]);
+        }
+
         if (! $verdict->approved) {
             $this->writeRevisionBrief($task, $verdict);
             $revision = $task->fresh()->revision;
 
-            if ($revision > (int) Setting::get('workflow.max_revisions', config('majordom.workflow.max_revisions', 3))) {
+            $budgetBase = (int) ($task->clarified_at_revision ?? 0);
+            if ($revision - $budgetBase > (int) Setting::get('workflow.max_revisions', config('majordom.workflow.max_revisions', 3))) {
                 return NodeResult::failed(
                     "Reviewer still requesting changes after {$revision} revisions — parked for the owner (task.v{$revision}.md).",
                     ['verdict' => $verdict->toArray()],

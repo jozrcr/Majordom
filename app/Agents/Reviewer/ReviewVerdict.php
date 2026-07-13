@@ -14,7 +14,14 @@ final readonly class ReviewVerdict
         /** @var array<int, array{file: ?string, comment: string}> */
         public array $comments,
         public string $summary,
+        /** Non-empty = the Builder cannot fix this without the owner. */
+        public array $questions = [],
     ) {}
+
+    public function needsClarification(): bool
+    {
+        return ! $this->approved && $this->questions !== [];
+    }
 
     public static function fromContent(string $content): self
     {
@@ -46,10 +53,18 @@ final readonly class ReviewVerdict
             }
         }
 
+        $questions = [];
+        foreach (is_array($data['questions'] ?? null) ? $data['questions'] : [] as $q) {
+            if (is_string($q) && trim($q) !== '') {
+                $questions[] = trim($q);
+            }
+        }
+
         return new self(
             approved: ($data['verdict'] ?? '') === 'approved',
             comments: $comments,
             summary: is_string($data['summary'] ?? null) ? $data['summary'] : '',
+            questions: $questions,
         );
     }
 
@@ -59,6 +74,7 @@ final readonly class ReviewVerdict
             'approved' => $this->approved,
             'comments' => $this->comments,
             'summary' => $this->summary,
+            'questions' => $this->questions,
         ];
     }
 }

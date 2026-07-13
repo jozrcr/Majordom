@@ -191,6 +191,19 @@ class UpdateHandler
 
         app(ArchitectService::class)->answer($question, $text);
 
+        if ($question->execution_id) {
+            $execution = $question->execution;
+            if ($execution && $execution->questions()->open()->count() === 0) {
+                app(\App\Core\Workflow\WorkflowEngine::class)->resumeAfterClarification($execution);
+                $this->telegram->sendMessage('All clarifications in — the build is re-running with your answers.');
+            } else {
+                $remaining = $execution?->questions()->open()->count() ?? 0;
+                $this->telegram->sendMessage("Answer recorded — {$remaining} clarification(s) remaining.");
+            }
+
+            return;
+        }
+
         $project = $question->project;
         if ($project->openQuestions()->count() === 0) {
             Cache::put("architect-turn:{$project->id}", 'thinking', now()->addMinutes(15));

@@ -135,6 +135,63 @@ class WorkflowEngine
         $execution->project->update(['status' => ProjectStatus::Parked, 'last_activity_at' => now()]);
     }
 
+    /**
+     * M9: the owner answered the last escalated question. Their answers
+     * become the next revision brief, the budget resets (human input is new
+     * information), the loop re-arms from build.
+     */
+    public function resumeAfterClarification(Execution $execution): void
+    {
+        if ($execution->status !== ExecutionStatus::NeedsYou) {
+            return;
+        }
+
+        $task = $execution->tasks()->first();
+        if ($task === null) {
+            return;
+        }
+
+        $answered = $execution->questions()
+            ->where('status', \App\Enums\QuestionStatus::Answered)
+            ->orderBy('id')->get();
+
+        $memory = app(\App\Projects\Memory\MemoryStore::class);
+        $base = $memory->read($execution->project, "tasks/{$task->task_key}/task.md") ?? '';
+        $next = $task->revision + 1;
+
+        $qa = $answered->map(fn ($q) => "**Q:** {$q->text}\n**A:** {$q->answer}")->implode("\n\n");
+        $memory->write(
+            $execution->project,
+            "tasks/{$task->task_key}/task.v{$next}.md",
+            $base."\n\n## Owner clarifications (revision {$next})\n\n".$qa."\n",
+        );
+
+        $task->update([
+            'revision' => $next,
+            'clarified_at_revision' => $next, // budget resets from here
+            'status' => \App\Enums\TaskStatus::Pending,
+        ]);
+
+        // Re-arm the loop: build/test and the waiting review go back to pending.
+        $execution->nodes()
+            ->whereIn('type', ['build', 'test', 'review'])
+            ->whereIn('status', [NodeStatus::Completed, NodeStatus::WaitingHuman, NodeStatus::Failed])
+            ->update(['status' => NodeStatus::Pending, 'finished_at' => null]);
+
+        $execution->update(['status' => ExecutionStatus::Running]);
+        $execution->project->update(['status' => \App\Enums\ProjectStatus::Working, 'last_activity_at' => now()]);
+
+        app(\App\Core\Events\EventRecorder::class)->record(
+            $execution->project,
+            'clarification.resolved',
+            ['answers' => $answered->count(), 'revision' => $next],
+            $execution,
+            'you'
+        );
+
+        $this->advance($execution->fresh());
+    }
+
     public function knows(string $type): bool
     {
         return isset($this->nodeMap[$type]);

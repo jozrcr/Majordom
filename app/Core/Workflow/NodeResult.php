@@ -38,6 +38,16 @@ final readonly class NodeResult
     }
 
     /**
+     * Escalation (M9): the node needs the OWNER's answers before the chain
+     * can continue — questions were created; the execution waits without an
+     * Approval row. Resumed by WorkflowEngine::resumeAfterClarification.
+     */
+    public static function escalated(array $output = []): self
+    {
+        return new self('escalated', $output);
+    }
+
+    /**
      * The bounded revise loop (SPEC §3 phases 6-7): reset the named node
      * types (and this node) to pending so the chain re-runs them — the
      * revision brief carries the why.

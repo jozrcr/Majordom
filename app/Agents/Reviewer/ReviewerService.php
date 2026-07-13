@@ -97,7 +97,8 @@ Respond ONLY with a JSON object of this exact shape (no markdown fences):
 {
   "verdict": "approved" | "changes_requested",
   "comments": [{"file": "path or null", "comment": "one specific, actionable point"}],
-  "summary": "2-4 sentences: what the change does and why you ruled as you did"
+  "summary": "2-4 sentences: what the change does and why you ruled as you did",
+  "questions": ["only when the OWNER must decide — see rule 4"]
 }
 
 Rules:
@@ -106,5 +107,11 @@ Rules:
 2. Failing tests are disqualifying unless the brief explicitly says otherwise.
 3. Every changes_requested comment must be concrete enough for a builder to
    act on without asking questions.
+4. ESCALATE instead of rejecting when the failure is not the builder's to
+   fix: ambiguous acceptance criteria, an unstated design choice,
+   contradictory requirements, or repeated failures suggesting the brief is
+   wrong. Put discrete, answerable owner questions in "questions" (verdict
+   stays "changes_requested"). Never use questions for things a competent
+   builder should just do.
 PROMPT;
 }
