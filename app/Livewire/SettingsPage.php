@@ -7,7 +7,9 @@ use App\Models\ProviderEndpoint;
 use App\Models\Role;
 use App\Models\Workflow;
 use App\Support\Setting;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Validation\Rule;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
@@ -40,7 +42,12 @@ class SettingsPage extends Component
     public array $availableRoles = [];
     public array $providerOptions = [];
 
-    /** Feedback marker: which thing was just saved ('role:{id}', 'workflow-settings'). */
+    // Provider endpoints state
+    public array $endpointDrafts = [];
+    public array $newEndpoint = ['name' => '', 'label' => '', 'driver' => 'openai_compatible', 'base_url' => '', 'api_key' => ''];
+    public array $endpointTestResults = [];
+
+    /** Feedback marker: which thing was just saved ('role:{id}', 'workflow-settings', 'endpoint:{id}'). */
     public ?string $justSaved = null;
 
     public function mount(): void
@@ -48,6 +55,7 @@ class SettingsPage extends Component
         $this->loadRoles();
         $this->loadWorkflow();
         $this->loadIntegrations();
+        $this->loadEndpoints();
         $this->availableRoles = array_values(array_unique(array_merge(
             ['builder', 'reviewer', 'architect'],
             Role::whereNull('project_id')->pluck('name')->toArray(),
@@ -87,6 +95,23 @@ class SettingsPage extends Component
 
         $this->telegramConfigured = app(\App\Integrations\Telegram\TelegramClient::class)->configured();
         $this->reverbHost = config('broadcasting.connections.reverb.host', '') . ':' . (config('broadcasting.connections.reverb.port', ''));
+    }
+
+    public function loadEndpoints(): void
+    {
+        $endpoints = ProviderEndpoint::orderBy('is_builtin', 'desc')->orderBy('name')->get();
+        foreach ($endpoints as $ep) {
+            $this->endpointDrafts[$ep->id] = [
+                'name' => $ep->name,
+                'driver' => $ep->driver,
+                'is_builtin' => $ep->is_builtin,
+                'has_key' => $ep->api_key !== null,
+                'label' => $ep->label,
+                'base_url' => $ep->base_url,
+                'timeout' => $ep->timeout,
+                'api_key' => '',
+            ];
+        }
     }
 
     public function saveRole(string $id): void
@@ -288,6 +313,97 @@ class SettingsPage extends Component
     {
         unset($this->chainDraft[$index]);
         $this->chainDraft = array_values($this->chainDraft);
+    }
+
+    // Provider Endpoints CRUD
+    public function saveEndpoint(string $id): void
+    {
+        $ep = ProviderEndpoint::findOrFail($id);
+        $validated = $this->validate([
+            "endpointDrafts.{$id}.label" => 'required|string',
+            "endpointDrafts.{$id}.base_url" => 'required|url',
+            "endpointDrafts.{$id}.timeout" => 'required|integer|min:5|max:3600',
+            "endpointDrafts.{$id}.api_key" => 'nullable|string',
+        ]);
+
+        $updateData = [
+            'label' => data_get($validated, "endpointDrafts.{$id}.label"),
+            'base_url' => rtrim(data_get($validated, "endpointDrafts.{$id}.base_url"), '/'),
+            'timeout' => data_get($validated, "endpointDrafts.{$id}.timeout"),
+        ];
+
+        $newKey = data_get($validated, "endpointDrafts.{$id}.api_key");
+        if ($newKey !== null && $newKey !== '') {
+            $updateData['api_key'] = $newKey;
+        }
+
+        $ep->update($updateData);
+        $this->loadEndpoints();
+        $this->justSaved = "endpoint:{$id}";
+    }
+
+    public function clearEndpointKey(string $id): void
+    {
+        $ep = ProviderEndpoint::findOrFail($id);
+        $ep->update(['api_key' => null]);
+        $this->loadEndpoints();
+    }
+
+    public function addEndpoint(): void
+    {
+        $validated = $this->validate([
+            'newEndpoint.name' => 'required|alpha_dash|unique:provider_endpoints,name',
+            'newEndpoint.label' => 'required|string',
+            'newEndpoint.driver' => 'required|in:openai_compatible,metallama',
+            'newEndpoint.base_url' => 'required|url',
+            'newEndpoint.api_key' => 'nullable|string',
+        ]);
+
+        ProviderEndpoint::create([
+            'name' => strtolower(data_get($validated, 'newEndpoint.name')),
+            'label' => data_get($validated, 'newEndpoint.label'),
+            'driver' => data_get($validated, 'newEndpoint.driver'),
+            'base_url' => rtrim(data_get($validated, 'newEndpoint.base_url'), '/'),
+            'api_key' => data_get($validated, 'newEndpoint.api_key') ?: null,
+            'timeout' => 30,
+            'is_builtin' => false,
+        ]);
+
+        $this->reset('newEndpoint');
+        $this->loadEndpoints();
+    }
+
+    public function deleteEndpoint(string $id): void
+    {
+        $ep = ProviderEndpoint::findOrFail($id);
+        if ($ep->is_builtin) {
+            $this->addError('endpoint', 'Cannot delete builtin providers.');
+            return;
+        }
+        if (Role::where('provider', $ep->name)->exists()) {
+            $this->addError('endpoint', 'Cannot delete providers referenced by roles.');
+            return;
+        }
+        $ep->delete();
+        $this->loadEndpoints();
+    }
+
+    public function testEndpoint(string $id): void
+    {
+        $ep = ProviderEndpoint::findOrFail($id);
+        try {
+            $response = Http::baseUrl($ep->chatBaseUrl())
+                ->timeout(5)
+                ->withHeaders(['Accept' => 'application/json'])
+                ->when($ep->resolvedApiKey(), fn($h) => $h->withToken($ep->resolvedApiKey()))
+                ->get('/models');
+
+            $this->endpointTestResults[$id] = $response->successful() ? 'ok' : 'fail';
+        } catch (ConnectionException $e) {
+            $this->endpointTestResults[$id] = 'fail';
+        } catch (\Throwable $e) {
+            $this->endpointTestResults[$id] = 'fail';
+        }
     }
 
     public function render()
