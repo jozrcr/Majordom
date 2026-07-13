@@ -3,10 +3,12 @@
 namespace App\Livewire;
 
 use App\Core\Workflow\ChainStep;
+use App\Models\ProviderEndpoint;
 use App\Models\Role;
 use App\Models\Workflow;
 use App\Support\Setting;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Validation\Rule;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
 use Livewire\Component;
@@ -36,6 +38,7 @@ class SettingsPage extends Component
     public string $chainPick = '';
     public ?int $editingId = null;
     public array $availableRoles = [];
+    public array $providerOptions = [];
 
     /** Feedback marker: which thing was just saved ('role:{id}', 'workflow-settings'). */
     public ?string $justSaved = null;
@@ -49,6 +52,7 @@ class SettingsPage extends Component
             ['builder', 'reviewer', 'architect'],
             Role::whereNull('project_id')->pluck('name')->toArray(),
         )));
+        $this->providerOptions = ProviderEndpoint::orderBy('name')->pluck('label', 'name')->toArray();
     }
 
     public function loadRoles(): void
@@ -89,7 +93,7 @@ class SettingsPage extends Component
     {
         $role = Role::findOrFail($id);
         $validated = $this->validate([
-            "roleDrafts.{$id}.provider" => 'required|in:openrouter,metallama',
+            "roleDrafts.{$id}.provider" => ['required', Rule::exists('provider_endpoints', 'name')],
             "roleDrafts.{$id}.model" => 'required|string',
             "roleDrafts.{$id}.temperature" => 'nullable|numeric|min:0|max:2',
             "roleDrafts.{$id}.max_tokens" => 'nullable|integer|min:0',
@@ -110,7 +114,7 @@ class SettingsPage extends Component
     {
         $rules = [];
         foreach (array_keys($this->roleDrafts) as $id) {
-            $rules["roleDrafts.{$id}.provider"] = 'required|in:openrouter,metallama';
+            $rules["roleDrafts.{$id}.provider"] = ['required', Rule::exists('provider_endpoints', 'name')];
             $rules["roleDrafts.{$id}.model"] = 'required|string';
             $rules["roleDrafts.{$id}.temperature"] = 'nullable|numeric|min:0|max:2';
             $rules["roleDrafts.{$id}.max_tokens"] = 'nullable|integer|min:0';
@@ -143,7 +147,7 @@ class SettingsPage extends Component
     {
         $validated = $this->validate([
             'newRole.name' => 'required|string|alpha_dash|unique:roles,name',
-            'newRole.provider' => 'required|in:openrouter,metallama',
+            'newRole.provider' => ['required', Rule::exists('provider_endpoints', 'name')],
             'newRole.model' => 'required|string',
         ]);
 

@@ -10,6 +10,7 @@ use App\Projects\Repositories\WorktreeManager;
 use App\Core\Events\EventRecorder;
 use App\Core\Usage\UsageLedger;
 use App\Support\RoleResolver;
+use App\Agents\Providers\ProviderRegistry;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -22,7 +23,6 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(ResourceCoordinator::class, fn ($app) => new ResourceCoordinator($app->make(MetallamaClient::class)));
         
         $this->app->bind(\App\Agents\Harness\Harness::class, fn () => \App\Agents\Harness\AiderHarness::fromConfig());
-        $this->app->bind(\App\Agents\Providers\Provider::class, fn () => \App\Agents\Providers\OpenAiCompatibleProvider::openrouter());
         
         $this->app->singleton(MemoryStore::class, fn () => MemoryStore::fromConfig());
         $this->app->singleton(WorktreeManager::class, fn () => WorktreeManager::fromConfig());
@@ -39,6 +39,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(\App\Integrations\Telegram\TelegramClient::class, fn () => \App\Integrations\Telegram\TelegramClient::fromConfig());
 
         $this->app->singleton(RoleResolver::class);
+        $this->app->singleton(ProviderRegistry::class);
     }
 
     /**

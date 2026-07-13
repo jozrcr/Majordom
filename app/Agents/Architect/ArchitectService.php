@@ -2,7 +2,7 @@
 
 namespace App\Agents\Architect;
 
-use App\Agents\Providers\Provider;
+use App\Agents\Providers\ProviderRegistry;
 use App\Agents\Providers\ProviderRequest;
 use App\Core\Events\EventRecorder;
 use App\Core\Usage\UsageLedger;
@@ -24,7 +24,7 @@ use App\Support\RoleResolver;
 class ArchitectService
 {
     public function __construct(
-        private readonly Provider $provider,
+        private readonly ProviderRegistry $providers,
         private readonly MemoryStore $memory,
     ) {}
 
@@ -47,7 +47,7 @@ class ArchitectService
 
         $binding = app(RoleResolver::class)->resolve('architect', $project);
 
-        $response = $this->provider->chat(new ProviderRequest(
+        $response = $this->providers->forBinding($binding)->chat(new ProviderRequest(
             model: $binding->model,
             messages: $this->buildMessages($project),
             maxTokens: $binding->maxTokens,
@@ -152,7 +152,7 @@ class ArchitectService
     {
         $binding = app(RoleResolver::class)->resolve('architect', $project);
 
-        $response = $this->provider->chat(new ProviderRequest(
+        $response = $this->providers->forBinding($binding)->chat(new ProviderRequest(
             model: $binding->model,
             messages: array_merge($this->buildMessages($project), [[
                 'role' => 'user',

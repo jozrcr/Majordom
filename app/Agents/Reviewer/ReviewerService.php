@@ -2,7 +2,7 @@
 
 namespace App\Agents\Reviewer;
 
-use App\Agents\Providers\Provider;
+use App\Agents\Providers\ProviderRegistry;
 use App\Agents\Providers\ProviderRequest;
 use App\Core\Usage\UsageLedger;
 use App\Models\Task;
@@ -20,7 +20,7 @@ class ReviewerService
     private const MAX_DIFF_CHARS = 30000;
 
     public function __construct(
-        private readonly Provider $provider,
+        private readonly ProviderRegistry $providers,
         private readonly MemoryStore $memory,
     ) {}
 
@@ -52,7 +52,7 @@ class ReviewerService
             $binding = app(RoleResolver::class)->resolve('reviewer', $project);
         }
 
-        $response = $this->provider->chat(new ProviderRequest(
+        $response = $this->providers->forBinding($binding)->chat(new ProviderRequest(
             model: $binding->model,
             messages: [
                 ['role' => 'system', 'content' => self::SYSTEM_PROMPT],

@@ -34,8 +34,9 @@
                                 <div>
                                     <label class="text-xs font-medium text-t3">Provider</label>
                                     <select wire:model.live="roleDrafts.{{ $id }}.provider" class="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm text-hi">
-                                        <option value="openrouter">openrouter</option>
-                                        <option value="metallama">metallama</option>
+                                        @foreach($providerOptions as $name => $label)
+                                            <option value="{{ $name }}">{{ $label }}</option>
+                                        @endforeach
                                     </select>
                                 </div>
                                 <div>
@@ -84,8 +85,9 @@
                         <div>
                             <label class="text-xs font-medium text-t3">Provider</label>
                             <select wire:model.live="newRole.provider" class="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm text-hi">
-                                <option value="openrouter">openrouter</option>
-                                <option value="metallama">metallama</option>
+                                @foreach($providerOptions as $name => $label)
+                                    <option value="{{ $name }}">{{ $label }}</option>
+                                @endforeach
                             </select>
                         </div>
                         <div>
