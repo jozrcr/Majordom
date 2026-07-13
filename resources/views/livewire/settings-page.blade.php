@@ -155,7 +155,20 @@
                                         <button wire:click="moveStep({{ $i }}, 'up')" class="text-t3 hover:text-hi disabled:opacity-30" @disabled($i === 0)">↑</button>
                                         <button wire:click="moveStep({{ $i }}, 'down')" class="text-t3 hover:text-hi disabled:opacity-30" @disabled($i === count($chainDraft) - 1)">↓</button>
                                         <button wire:click="removeStep({{ $i }})" class="text-status-failed hover:underline">×</button>
-                                        <span>{{ $step }}</span>
+                                        <span>{{ $step['type'] }}</span>
+                                        <select wire:model.live="chainDraft.{{ $i }}.role" class="rounded border border-border bg-surface px-1 py-0.5 text-xs text-hi">
+                                            @foreach($availableRoles as $r)
+                                                <option value="{{ $r }}">{{ $r }}</option>
+                                            @endforeach
+                                        </select>
+                                        @if($step['type'] === 'review')
+                                            <select wire:model.live="chainDraft.{{ $i }}.config.rescue_role" class="rounded border border-border bg-surface px-1 py-0.5 text-xs text-t3">
+                                                <option value="">rescue: none</option>
+                                                @foreach($availableRoles as $r)
+                                                    <option value="{{ $r }}">{{ $r }}</option>
+                                                @endforeach
+                                            </select>
+                                        @endif
                                     </div>
                                 @endforeach
                             </div>

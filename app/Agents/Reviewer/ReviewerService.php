@@ -7,6 +7,7 @@ use App\Agents\Providers\ProviderRequest;
 use App\Core\Usage\UsageLedger;
 use App\Models\Task;
 use App\Projects\Memory\MemoryStore;
+use App\Support\RoleBinding;
 use App\Support\RoleResolver;
 
 /**
@@ -23,7 +24,7 @@ class ReviewerService
         private readonly MemoryStore $memory,
     ) {}
 
-    public function review(Task $task, string $diff, ?bool $testsPassed): ReviewVerdict
+    public function review(Task $task, string $diff, ?bool $testsPassed, ?RoleBinding $binding = null): ReviewVerdict
     {
         $project = $task->project;
         $key = $task->task_key;
@@ -47,7 +48,9 @@ class ReviewerService
             ."## Test result\n{$testsLine}\n\n"
             ."## Diff".($truncated ? ' (truncated at 30k chars)' : '')."\n```diff\n{$diffShown}\n```";
 
-        $binding = app(RoleResolver::class)->resolve('reviewer', $project);
+        if ($binding === null) {
+            $binding = app(RoleResolver::class)->resolve('reviewer', $project);
+        }
 
         $response = $this->provider->chat(new ProviderRequest(
             model: $binding->model,

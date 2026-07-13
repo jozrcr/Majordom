@@ -31,9 +31,13 @@ class WorkflowEngine
     /** @param string[] $nodeTypes ordered chain, keys of the node map */
     public function start(Execution $execution, array $nodeTypes): void
     {
-        foreach ($nodeTypes as $type) {
-            $this->assertKnown($type);
-            $execution->nodes()->create(['type' => $type]);
+        $steps = ChainStep::normalize($nodeTypes);
+        foreach ($steps as $step) {
+            $this->assertKnown($step->type);
+            $execution->nodes()->create([
+                'type' => $step->type,
+                'input' => ['role' => $step->role, 'config' => $step->config],
+            ]);
         }
 
         $execution->update(['status' => ExecutionStatus::Running]);

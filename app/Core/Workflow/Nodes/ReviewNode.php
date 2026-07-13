@@ -3,6 +3,7 @@
 namespace App\Core\Workflow\Nodes;
 
 use App\Agents\Reviewer\ReviewerService;
+use App\Core\Events\EventRecorder;
 use App\Core\Workflow\NodeJob;
 use App\Core\Workflow\NodeResult;
 use App\Enums\ApprovalType;
@@ -11,6 +12,7 @@ use App\Enums\TaskStatus;
 use App\Models\Execution;
 use App\Models\Node;
 use App\Projects\Memory\MemoryStore;
+use App\Support\RoleResolver;
 use App\Support\Setting;
 
 /**
@@ -43,7 +45,10 @@ class ReviewNode extends NodeJob
 
         $task->update(['status' => TaskStatus::Reviewing]);
 
-        $verdict = app(ReviewerService::class)->review($task, $diff, $testsPassed);
+        $roleName = $node->input['role'] ?? 'reviewer';
+        $binding = app(RoleResolver::class)->resolve($roleName, $task->project);
+
+        $verdict = app(ReviewerService::class)->review($task, $diff, $testsPassed, $binding);
 
         // M9 escalation: the failure is the owner's to resolve, not the
         // Builder's — questions instead of another doomed revision.
@@ -68,6 +73,48 @@ class ReviewNode extends NodeJob
 
             $budgetBase = (int) ($task->clarified_at_revision ?? 0);
             if ($revision - $budgetBase > (int) Setting::get('workflow.max_revisions', config('majordom.workflow.max_revisions', 3))) {
+                $rescueRole = $node->input['config']['rescue_role'] ?? null;
+                
+                if ($rescueRole) {
+                    $buildNode = $execution->nodes()->where('type', 'build')->first();
+                    if ($buildNode && ($buildNode->input['rescued'] ?? false)) {
+                        return NodeResult::failed(
+                            "Reviewer still requesting changes after {$revision} revisions — parked for the owner (task.v{$revision}.md).",
+                            ['verdict' => $verdict->toArray()],
+                        );
+                    }
+                    
+                    if ($buildNode) {
+                        $buildNode->update([
+                            'input' => array_merge($buildNode->input ?? [], [
+                                'role' => $rescueRole,
+                                'config' => array_merge($buildNode->input['config'] ?? [], ['rescued' => true]),
+                            ]),
+                        ]);
+                    }
+                    
+                    $execution->nodes()
+                        ->whereIn('type', ['build', 'test', 'review'])
+                        ->whereIn('status', [NodeStatus::Completed, NodeStatus::WaitingHuman, NodeStatus::Failed])
+                        ->update(['status' => NodeStatus::Pending, 'finished_at' => null]);
+                        
+                    $task->update(['status' => TaskStatus::Pending]);
+                    
+                    app(EventRecorder::class)->record(
+                        $execution->project,
+                        'build.rescue',
+                        ['rescue_role' => $rescueRole],
+                        $execution,
+                        'system'
+                    );
+                    
+                    return NodeResult::retry(
+                        ['build', 'test'],
+                        "Budget exhausted — rescuing with role '{$rescueRole}'.",
+                        ['verdict' => $verdict->toArray(), 'rescue_role' => $rescueRole],
+                    );
+                }
+                
                 return NodeResult::failed(
                     "Reviewer still requesting changes after {$revision} revisions — parked for the owner (task.v{$revision}.md).",
                     ['verdict' => $verdict->toArray()],

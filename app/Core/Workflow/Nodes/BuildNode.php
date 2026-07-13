@@ -8,6 +8,7 @@ use App\Agents\Harness\HarnessStatus;
 use App\Core\Usage\UsageLedger;
 use App\Core\Workflow\NodeJob;
 use App\Core\Workflow\NodeResult;
+use App\Enums\NodeStatus;
 use App\Enums\TaskStatus;
 use App\Models\Execution;
 use App\Models\Node;
@@ -30,7 +31,8 @@ class BuildNode extends NodeJob
             return NodeResult::failed('Task has no worktree.');
         }
 
-        $binding = app(RoleResolver::class)->resolve('builder', $task->project);
+        $roleName = $node->input['role'] ?? 'builder';
+        $binding = app(RoleResolver::class)->resolve($roleName, $task->project);
         $managedModel = $binding->meta['managed_model'] ?? $binding->model;
         app(ResourceCoordinator::class)->ensure($managedModel);
 
@@ -49,6 +51,22 @@ class BuildNode extends NodeJob
         }
         $taskPrompt = $memory->read($project, $taskBriefPath) ?? '';
 
+        // Collect fileHints from latest review node
+        $fileHints = [];
+        $latestReview = $execution->nodes()
+            ->where('type', 'review')
+            ->whereIn('status', [NodeStatus::Completed, NodeStatus::Failed])
+            ->orderByDesc('id')
+            ->first();
+            
+        if ($latestReview && isset($latestReview->output['verdict']['comments'])) {
+            foreach ($latestReview->output['verdict']['comments'] as $comment) {
+                if (!empty($comment['file'])) {
+                    $fileHints[] = $comment['file'];
+                }
+            }
+        }
+
         $result = app(Harness::class)->runTask(new HarnessRequest(
             repoPath: $task->worktree_path,
             endpointBaseUrl: config('majordom.metallama.base_url') . '/ollama/v1',
@@ -56,6 +74,7 @@ class BuildNode extends NodeJob
             rolePrompt: $rolePrompt,
             taskPrompt: $taskPrompt,
             testCommand: $project->test_command,
+            fileHints: $fileHints,
         ));
 
         [$sent, $received] = UsageLedger::parseAiderTokens($result->rawLog);
