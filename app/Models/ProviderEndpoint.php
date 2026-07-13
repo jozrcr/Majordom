@@ -38,12 +38,30 @@ class ProviderEndpoint extends Model
         return null;
     }
 
-    public function chatBaseUrl(): string
+    /**
+     * Built-in rows carry meta.base_url_config so the URL keeps tracking
+     * config/env at runtime (same indirection as api_key_config) instead of
+     * the value snapshotted at migration time. Custom rows store a literal
+     * base_url and have no meta pointer, so the column wins.
+     */
+    public function resolvedBaseUrl(): string
     {
-        if ($this->driver === 'metallama') {
-            return rtrim($this->base_url, '/') . '/ollama/v1';
+        $configPath = $this->meta['base_url_config'] ?? null;
+        if ($configPath && ($url = config($configPath))) {
+            return $url;
         }
 
         return $this->base_url;
+    }
+
+    public function chatBaseUrl(): string
+    {
+        $base = $this->resolvedBaseUrl();
+
+        if ($this->driver === 'metallama') {
+            return rtrim($base, '/') . '/ollama/v1';
+        }
+
+        return $base;
     }
 }

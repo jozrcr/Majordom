@@ -38,7 +38,7 @@ function autonomySetup(string $profile): array
     ]);
     $provider = new ApprovingProvider;
     app()->instance(Provider::class, $provider);
-    app()->instance(ReviewerService::class, new ReviewerService($provider, MemoryStore::fromConfig()));
+    app()->instance(ReviewerService::class, new ReviewerService(app(\App\Agents\Providers\ProviderRegistry::class), MemoryStore::fromConfig()));
 
     $project = Project::factory()->create();
     $execution = Execution::factory()->create([

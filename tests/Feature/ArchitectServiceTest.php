@@ -41,8 +41,9 @@ afterEach(function () {
 function architect(array $responses): array
 {
     $provider = new ScriptedProvider($responses);
+    app()->instance(\App\Agents\Providers\Provider::class, $provider);
 
-    return [new ArchitectService($provider, MemoryStore::fromConfig()), $provider];
+    return [new ArchitectService(app(\App\Agents\Providers\ProviderRegistry::class), MemoryStore::fromConfig()), $provider];
 }
 
 it('persists user + architect messages and creates questions', function () {

@@ -43,7 +43,7 @@ function reviewSetup(string $providerResponse): array
 
     $provider = new ScriptedReviewProvider($providerResponse);
     app()->instance(Provider::class, $provider);
-    app()->instance(ReviewerService::class, new ReviewerService($provider, MemoryStore::fromConfig()));
+    app()->instance(ReviewerService::class, new ReviewerService(app(\App\Agents\Providers\ProviderRegistry::class), MemoryStore::fromConfig()));
 
     $project = Project::factory()->create();
     $execution = Execution::factory()->create(['project_id' => $project->id, 'status' => ExecutionStatus::Running]);
