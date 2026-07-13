@@ -37,6 +37,9 @@ class SettingsPage extends Component
     public ?int $editingId = null;
     public array $availableRoles = [];
 
+    /** Feedback marker: which thing was just saved ('role:{id}', 'workflow-settings'). */
+    public ?string $justSaved = null;
+
     public function mount(): void
     {
         $this->loadRoles();
@@ -98,6 +101,8 @@ class SettingsPage extends Component
             'temperature' => data_get($validated, "roleDrafts.{$id}.temperature"),
             'max_tokens' => data_get($validated, "roleDrafts.{$id}.max_tokens"),
         ]);
+
+        $this->justSaved = "role:{$id}";
     }
 
     public function deleteRole(string $id): void
@@ -143,6 +148,8 @@ class SettingsPage extends Component
 
         Setting::put('workflow.max_revisions', data_get($validated, 'workflow.max_revisions'));
         Setting::put('workflow.overnight_spend_cap_usd', data_get($validated, 'workflow.overnight_spend_cap_usd'));
+
+        $this->justSaved = 'workflow-settings';
     }
 
     // Workflow CRUD

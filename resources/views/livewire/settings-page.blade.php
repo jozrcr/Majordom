@@ -57,6 +57,9 @@
                         </div>
                         <div class="flex gap-2">
                             <button wire:click="saveRole('{{ $id }}')" class="rounded border border-border px-3 py-1.5 text-xs font-medium text-hi hover:bg-surface-chip transition-colors">Save</button>
+                            @if($justSaved === "role:{$id}")
+                                <span class="self-center text-xs font-medium text-status-completed">Saved ✓</span>
+                            @endif
                             @if(!$role->is_builtin)
                                 <button wire:click="deleteRole('{{ $id }}')" wire:confirm="Delete this role?" class="rounded border border-status-failed px-3 py-1.5 text-xs font-medium text-status-failed hover:bg-status-failed/10 transition-colors">Delete</button>
                             @endif
@@ -106,7 +109,12 @@
                             @error('workflow.overnight_spend_cap_usd') <span class="text-xs text-status-failed">{{ $message }}</span> @enderror
                         </div>
                     </div>
-                    <button wire:click="saveWorkflowSettings" class="rounded bg-accent px-4 py-2 text-sm font-medium text-accent-ink hover:opacity-90 transition-opacity">Save</button>
+                    <div class="flex items-center gap-3">
+                        <button wire:click="saveWorkflowSettings" class="rounded bg-accent px-4 py-2 text-sm font-medium text-accent-ink hover:opacity-90 transition-opacity">Save</button>
+                        @if($justSaved === 'workflow-settings')
+                            <span class="text-xs font-medium text-status-completed">Saved ✓</span>
+                        @endif
+                    </div>
                 </div>
             @elseif($section === 'workflows')
                 <h2 class="mb-6 text-lg font-semibold text-hi">Workflows</h2>
