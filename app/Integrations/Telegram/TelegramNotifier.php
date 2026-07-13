@@ -80,8 +80,9 @@ class TelegramNotifier
             $approval = Approval::open()->where('execution_id', $event->execution_id)->orderByDesc('id')->first();
             if ($approval) {
                 if ($approval->type === \App\Enums\ApprovalType::HumanTask) {
+                    $worktree = $approval->payload['worktree'] ?? 'N/A';
                     $this->telegram->sendMessage(
-                        "[{$project->name}] Your turn — {$approval->title}\nworktree: {$approval->payload['worktree'] ?? 'N/A'}",
+                        "[{$project->name}] Your turn — {$approval->title}\nworktree: {$worktree}",
                         ['inline_keyboard' => [[
                             ['text' => 'Done', 'callback_data' => "approval:grant:{$approval->id}"],
                             ['text' => 'Skip…', 'callback_data' => "approval:reject:{$approval->id}"],

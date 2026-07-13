@@ -117,7 +117,7 @@ test('rejectReview without comment errors and approval stays open', function () 
     ]);
 
     Livewire::test(ProjectWorkspace::class, ['project' => $project])
-        ->call('rejectReview')
+        ->call('rejectApproval')
         ->assertHasErrors(['gateComment' => 'Say why — the comment becomes the revision brief.']);
 
     $approval->refresh();
@@ -143,7 +143,7 @@ test('approveReview resolves approval and moves execution', function () {
 
     Livewire::test(ProjectWorkspace::class, ['project' => $project])
         ->set('gateComment', 'Looks fine')
-        ->call('approveReview');
+        ->call('approveApproval');
 
     $approval->refresh();
     expect($approval->status)->toBe(ApprovalStatus::Granted);
