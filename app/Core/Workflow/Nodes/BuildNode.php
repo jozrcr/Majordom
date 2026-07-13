@@ -33,8 +33,18 @@ class BuildNode extends NodeJob
 
         $roleName = $node->input['role'] ?? 'builder';
         $binding = app(RoleResolver::class)->resolve($roleName, $task->project);
-        $managedModel = $binding->meta['managed_model'] ?? $binding->model;
-        app(ResourceCoordinator::class)->ensure($managedModel);
+
+        // Frontier roles (e.g. a rescue) drive aider against OpenRouter's
+        // OpenAI-compatible endpoint — no local model to boot or serialize.
+        if ($binding->provider === 'metallama') {
+            $managedModel = $binding->meta['managed_model'] ?? $binding->model;
+            app(ResourceCoordinator::class)->ensure($managedModel);
+            $endpointBaseUrl = config('majordom.metallama.base_url').'/ollama/v1';
+            $apiKey = null;
+        } else {
+            $endpointBaseUrl = config('majordom.providers.openrouter.base_url');
+            $apiKey = config('majordom.providers.openrouter.api_key');
+        }
 
         $memory = app(MemoryStore::class);
         $project = $task->project;
@@ -69,19 +79,20 @@ class BuildNode extends NodeJob
 
         $result = app(Harness::class)->runTask(new HarnessRequest(
             repoPath: $task->worktree_path,
-            endpointBaseUrl: config('majordom.metallama.base_url') . '/ollama/v1',
+            endpointBaseUrl: $endpointBaseUrl,
             modelName: $binding->model,
             rolePrompt: $rolePrompt,
             taskPrompt: $taskPrompt,
             testCommand: $project->test_command,
             fileHints: $fileHints,
+            apiKey: $apiKey,
         ));
 
         [$sent, $received] = UsageLedger::parseAiderTokens($result->rawLog);
         if ($sent + $received > 0) {
             app(UsageLedger::class)->record(
                 $project,
-                'builder',
+                $roleName,
                 $binding->model,
                 $sent,
                 $received,

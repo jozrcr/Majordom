@@ -77,13 +77,13 @@ class ReviewNode extends NodeJob
                 
                 if ($rescueRole) {
                     $buildNode = $execution->nodes()->where('type', 'build')->first();
-                    if ($buildNode && ($buildNode->input['rescued'] ?? false)) {
+                    if ($buildNode && ($buildNode->input['config']['rescued'] ?? false)) {
                         return NodeResult::failed(
                             "Reviewer still requesting changes after {$revision} revisions — parked for the owner (task.v{$revision}.md).",
                             ['verdict' => $verdict->toArray()],
                         );
                     }
-                    
+
                     if ($buildNode) {
                         $buildNode->update([
                             'input' => array_merge($buildNode->input ?? [], [
@@ -92,14 +92,9 @@ class ReviewNode extends NodeJob
                             ]),
                         ]);
                     }
-                    
-                    $execution->nodes()
-                        ->whereIn('type', ['build', 'test', 'review'])
-                        ->whereIn('status', [NodeStatus::Completed, NodeStatus::WaitingHuman, NodeStatus::Failed])
-                        ->update(['status' => NodeStatus::Pending, 'finished_at' => null]);
-                        
+
                     $task->update(['status' => TaskStatus::Pending]);
-                    
+
                     app(EventRecorder::class)->record(
                         $execution->project,
                         'build.rescue',
@@ -107,7 +102,8 @@ class ReviewNode extends NodeJob
                         $execution,
                         'system'
                     );
-                    
+
+                    // retryFrom resets this node + earlier build/test rows.
                     return NodeResult::retry(
                         ['build', 'test'],
                         "Budget exhausted — rescuing with role '{$rescueRole}'.",

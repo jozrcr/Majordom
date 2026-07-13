@@ -42,7 +42,10 @@ class SettingsPage extends Component
         $this->loadRoles();
         $this->loadWorkflow();
         $this->loadIntegrations();
-        $this->availableRoles = Role::whereNull('project_id')->pluck('name')->toArray();
+        $this->availableRoles = array_values(array_unique(array_merge(
+            ['builder', 'reviewer', 'architect'],
+            Role::whereNull('project_id')->pluck('name')->toArray(),
+        )));
     }
 
     public function loadRoles(): void

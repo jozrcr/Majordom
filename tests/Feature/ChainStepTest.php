@@ -58,7 +58,7 @@ function setupChainEnv(): string {
     Config::set('majordom.metallama.base_url', 'http://localhost:11434');
     Config::set('majordom.builder.gateway_model', 'codellama');
     Config::set('majordom.builder.model', 'builder-model-id');
-    Config::set('queue.connections.harness.driver', 'sync');
+    \Illuminate\Support\Facades\Queue::fake();
     return $root;
 }
 
@@ -135,6 +135,40 @@ test('BuildNode uses step role', function () {
     expect($fakeHarness->requests[0]->modelName)->toBe('fast-model');
 });
 
+test('BuildNode with a frontier role skips metallama and targets openrouter', function () {
+    setupChainEnv();
+    Config::set('majordom.providers.openrouter.base_url', 'https://openrouter.test/api/v1');
+    Config::set('majordom.providers.openrouter.api_key', 'or-test-key');
+    Role::create(['name' => 'rescuer', 'provider' => 'openrouter', 'model' => 'deepseek/frontier']);
+
+    [$execution, $task, $project] = createChainExecution([
+        ['type' => 'build', 'role' => 'rescuer', 'config' => []],
+    ]);
+
+    $memory = app(MemoryStore::class);
+    $memory->write($project, "tasks/{$task->task_key}/role.md", "Role");
+    $memory->write($project, "tasks/{$task->task_key}/task.md", "Task");
+
+    $fakeHarness = new FakeHarnessForChain(new HarnessResult(
+        status: HarnessStatus::Completed, diff: '', filesChanged: [], testsPassed: true, summary: 'Ok', openQuestions: [], rawLog: ''
+    ));
+    app()->instance(Harness::class, $fakeHarness);
+    // A frontier build must never touch the resource coordinator.
+    app()->instance(ResourceCoordinator::class, new class extends ResourceCoordinator {
+        public function __construct() {}
+        public function ensure(string $id): \App\Runtime\Metallama\ModelState {
+            throw new RuntimeException('coordinator must not be called for a frontier role');
+        }
+    });
+
+    (new BuildNode($execution->nodes()->first()->id))->handle();
+
+    $request = $fakeHarness->requests[0];
+    expect($request->modelName)->toBe('deepseek/frontier')
+        ->and($request->endpointBaseUrl)->toBe('https://openrouter.test/api/v1')
+        ->and($request->apiKey)->toBe('or-test-key');
+});
+
 test('BuildNode passes reviewer-flagged files as fileHints', function () {
     setupChainEnv();
     [$execution, $task, $project] = createChainExecution(['build', 'review', 'build']);
@@ -188,7 +222,7 @@ test('frontier rescue resets nodes and updates build role', function () {
     $testNode->update(['status' => NodeStatus::Completed, 'output' => ['testsPassed' => true]]);
     
     $fakeReviewer = new FakeReviewerService(new ReviewVerdict(
-        verdict: 'changes_requested',
+        approved: false,
         comments: [['file' => 'x.php', 'comment' => 'fix']],
         summary: 'Needs fix',
         questions: []
@@ -229,7 +263,7 @@ test('second exhaustion parks despite rescue_role', function () {
     $testNode->update(['status' => NodeStatus::Completed, 'output' => ['testsPassed' => true]]);
     
     $fakeReviewer = new FakeReviewerService(new ReviewVerdict(
-        verdict: 'changes_requested',
+        approved: false,
         comments: [['file' => 'x.php', 'comment' => 'fix']],
         summary: 'Needs fix',
         questions: []

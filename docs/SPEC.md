@@ -25,7 +25,7 @@ to Services; Services front Models. Events record everything.
 | Entity | Responsibility | Storage |
 |---|---|---|
 | **Project** | A registered git repo + its config overrides + a pointer to its memory dir. The unit everything hangs off. | DB row; memory as files |
-| **Workflow** | A named, code/config-defined template (ordered nodes + gates). v1 ships one: *Implement Feature*. | Code + DB reference |
+| **Workflow** | A named template: an ordered chain of steps, each `{type, role, config}` — the node type, the actor (a Role name resolved per project), and per-step tunables (e.g. `rescue_role` on review steps). Legacy plain-string chains normalize on read (`ChainStep`). Builtins seeded; custom chains editable in Settings. | DB (chain JSON) |
 | **Execution** | One run of a Workflow against a Project (an "implement this feature" instance). Holds status, autonomy profile, current node, frontier-spend counter + budget cap. | DB |
 | **Milestone** | A chunk of the roadmap the Architect defined. Belongs to a Project; realized within Executions. | DB (+ `roadmap.md`) |
 | **Task** | The atomic unit the Builder executes. Has a `role.md` + versioned `task.md` briefs, a feature branch (checked out in its own worktree), a status. | DB (+ files) |
@@ -85,6 +85,16 @@ notify* vs *auto-proceed & collect*.
      comments become the next task revision (`task.v2.md`, …) → back to Build
      (bounded loop — `workflow.max_revisions`, default 3; exhausting the
      budget parks the execution with the last revision brief written).
+     Files the Reviewer flagged are handed to the next Build as harness
+     file hints, pointing the Builder at what it keeps missing.
+   - **Escalation:** when the failure is the owner's to resolve (ambiguous
+     criteria, unstated design choice), the Reviewer returns `questions`
+     instead of comments → execution-linked Questions, node waits. The last
+     answer appends *Owner clarifications* to `task.v{n+1}.md`, RESETS the
+     revision budget (`clarified_at_revision`) and re-arms build → review.
+   - **Frontier rescue:** a review step may carry `config.rescue_role`; on
+     budget exhaustion the build step's actor is swapped to that role for
+     one more full loop (one rescue per execution) before parking.
    - **[gate]** Human may be asked to arbitrate or approve the review.
 8. **Accept** *(Human: Manual test)* — configurable, on by default
    - **[gate]** Human is invited to test the feature. `HumanTestRequested` →
