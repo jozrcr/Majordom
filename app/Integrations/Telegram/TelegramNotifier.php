@@ -61,25 +61,51 @@ class TelegramNotifier
             return;
         }
 
-        // Review gate opened.
-        if ($name === 'review.waiting_human' && $event->execution_id) {
-            $approval = Approval::open()->where('execution_id', $event->execution_id)->orderByDesc('id')->first();
-            if ($approval) {
-                $tests = match ($approval->payload['testsPassed'] ?? null) {
-                    true => 'tests passed',
-                    false => 'TESTS FAILING',
-                    default => 'no tests',
-                };
-                $summary = $approval->payload['verdict']['summary'] ?? '';
-
-                $this->telegram->sendMessage(
-                    "[{$project->name}] {$approval->title} — {$tests}\n{$summary}",
-                    ['inline_keyboard' => [[
-                        ['text' => 'Approve', 'callback_data' => "approval:grant:{$approval->id}"],
-                        ['text' => 'Reject…', 'callback_data' => "approval:reject:{$approval->id}"],
-                    ]]],
+        // Reviewer escalated: send each execution question as force-reply.
+        if (str_ends_with($name, '.clarification') && $event->execution_id) {
+            foreach (Question::open()->where('execution_id', $event->execution_id)->get() as $question) {
+                $messageId = $this->telegram->sendMessage(
+                    "[{$project->name}] The Reviewer needs your call:\n{$question->text}\n\nReply to this message to answer.",
+                    ['force_reply' => true],
                     silent: $silent,
                 );
+                $this->map($project->id, 'question', $question->id, $messageId);
+            }
+
+            return;
+        }
+
+        // Review gate opened or Human task turn.
+        if (str_ends_with($name, '.waiting_human') && $event->execution_id) {
+            $approval = Approval::open()->where('execution_id', $event->execution_id)->orderByDesc('id')->first();
+            if ($approval) {
+                if ($approval->type === \App\Enums\ApprovalType::HumanTask) {
+                    $worktree = $approval->payload['worktree'] ?? 'N/A';
+                    $this->telegram->sendMessage(
+                        "[{$project->name}] Your turn — {$approval->title}\nworktree: {$worktree}",
+                        ['inline_keyboard' => [[
+                            ['text' => 'Done', 'callback_data' => "approval:grant:{$approval->id}"],
+                            ['text' => 'Skip…', 'callback_data' => "approval:reject:{$approval->id}"],
+                        ]]],
+                        silent: $silent,
+                    );
+                } else {
+                    $tests = match ($approval->payload['testsPassed'] ?? null) {
+                        true => 'tests passed',
+                        false => 'TESTS FAILING',
+                        default => 'no tests',
+                    };
+                    $summary = $approval->payload['verdict']['summary'] ?? '';
+
+                    $this->telegram->sendMessage(
+                        "[{$project->name}] {$approval->title} — {$tests}\n{$summary}",
+                        ['inline_keyboard' => [[
+                            ['text' => 'Approve', 'callback_data' => "approval:grant:{$approval->id}"],
+                            ['text' => 'Reject…', 'callback_data' => "approval:reject:{$approval->id}"],
+                        ]]],
+                        silent: $silent,
+                    );
+                }
             }
 
             return;

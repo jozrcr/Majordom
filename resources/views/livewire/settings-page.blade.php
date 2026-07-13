@@ -120,7 +120,7 @@
                                         <span class="rounded-[5px] bg-surface-chip px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[.1em] text-t3">builtin</span>
                                     @endif
                                 </div>
-                                <p class="mt-1 font-mono text-xs text-t3">{{ implode(' → ', $wf->chain) }}</p>
+                                <p class="mt-1 font-mono text-xs text-t3">{{ collect($wf->chain)->map(fn ($s) => is_array($s) ? $s['type'].'('.$s['role'].')'.(($s['config']['rescue_role'] ?? '') !== '' ? '⚑' : '') : $s)->implode(' → ') }}</p>
                             </div>
                             <div class="flex gap-2">
                                 @if(!$wf->is_builtin)
@@ -155,7 +155,25 @@
                                         <button wire:click="moveStep({{ $i }}, 'up')" class="text-t3 hover:text-hi disabled:opacity-30" @disabled($i === 0)">↑</button>
                                         <button wire:click="moveStep({{ $i }}, 'down')" class="text-t3 hover:text-hi disabled:opacity-30" @disabled($i === count($chainDraft) - 1)">↓</button>
                                         <button wire:click="removeStep({{ $i }})" class="text-status-failed hover:underline">×</button>
-                                        <span>{{ $step }}</span>
+                                        <span>{{ is_array($step) ? $step['type'] : $step }}</span>
+                                        @if(is_array($step))
+                                            <select wire:model.live="chainDraft.{{ $i }}.role" class="rounded border border-border bg-surface px-1 py-0.5 text-xs text-hi">
+                                                @foreach($availableRoles as $r)
+                                                    <option value="{{ $r }}">{{ $r }}</option>
+                                                @endforeach
+                                            </select>
+                                            @if($step['type'] === 'review')
+                                                <select wire:model.live="chainDraft.{{ $i }}.config.rescue_role" class="rounded border border-border bg-surface px-1 py-0.5 text-xs text-t3">
+                                                    <option value="">rescue: none</option>
+                                                    @foreach($availableRoles as $r)
+                                                        <option value="{{ $r }}">{{ $r }}</option>
+                                                    @endforeach
+                                                </select>
+                                            @endif
+                                            @if($step['type'] === 'human_task')
+                                                <input type="text" wire:model.live="chainDraft.{{ $i }}.config.instructions" placeholder="instructions…" maxlength="500" class="w-64 rounded border border-border bg-surface px-2 py-0.5 text-xs text-t3" />
+                                            @endif
+                                        @endif
                                     </div>
                                 @endforeach
                             </div>

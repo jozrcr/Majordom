@@ -5,6 +5,8 @@ namespace App\Core\Workflow;
 use App\Core\Workflow\Nodes\BuildNode;
 use App\Core\Workflow\Nodes\CommitSuggestionNode;
 use App\Core\Workflow\Nodes\DelegateNode;
+use App\Core\Workflow\Nodes\HumanReviewNode;
+use App\Core\Workflow\Nodes\HumanTaskNode;
 use App\Core\Workflow\Nodes\ReviewNode;
 use App\Core\Workflow\Nodes\TestNode;
 use App\Enums\ExecutionStatus;
@@ -30,6 +32,8 @@ class ImplementFeatureWorkflow
             'test' => TestNode::class,
             'review' => ReviewNode::class,
             'commit_suggestion' => CommitSuggestionNode::class,
+            'human_task' => HumanTaskNode::class,
+            'human_review' => HumanReviewNode::class,
         ];
     }
 

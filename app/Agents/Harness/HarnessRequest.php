@@ -13,6 +13,7 @@ final readonly class HarnessRequest
         public ?string $testCommand = null,
         public array $fileHints = [],
         public ?int $timeoutSeconds = null,
+        public ?string $apiKey = null,
     ) {
     }
 }

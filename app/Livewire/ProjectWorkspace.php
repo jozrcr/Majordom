@@ -67,6 +67,16 @@ class ProjectWorkspace extends Component
 
         app(ArchitectService::class)->answer($question, $text);
 
+        // Reviewer-escalated questions resume the execution, not the chat.
+        if ($question->execution_id) {
+            $execution = $question->execution;
+            if ($execution && $execution->questions()->open()->count() === 0) {
+                app(\App\Core\Workflow\WorkflowEngine::class)->resumeAfterClarification($execution);
+            }
+
+            return;
+        }
+
         if ($this->project->openQuestions()->count() === 0) {
             Cache::put("architect-turn:{$this->project->id}", 'thinking', now()->addMinutes(15));
             RunArchitectTurn::dispatch($this->project->id, null)
@@ -237,11 +247,9 @@ class ProjectWorkspace extends Component
         return ['key' => $taskId, 'title' => $title];
     }
 
-    public function getReviewApprovalProperty(): ?\App\Models\Approval
+    public function getOpenApprovalProperty(): ?\App\Models\Approval
     {
-        return $this->project->openApprovals()
-            ->where('type', \App\Enums\ApprovalType::Review)
-            ->first();
+        return $this->project->openApprovals()->first();
     }
 
     public function getCommitSuggestionProperty(): ?\App\Models\CommitSuggestion
@@ -275,9 +283,9 @@ class ProjectWorkspace extends Component
         );
     }
 
-    public function approveReview(): void
+    public function approveApproval(): void
     {
-        $approval = $this->reviewApproval;
+        $approval = $this->openApproval;
         if (!$approval) {
             return;
         }
@@ -290,9 +298,9 @@ class ProjectWorkspace extends Component
         $this->gateComment = null;
     }
 
-    public function rejectReview(): void
+    public function rejectApproval(): void
     {
-        $approval = $this->reviewApproval;
+        $approval = $this->openApproval;
         if (!$approval) {
             return;
         }

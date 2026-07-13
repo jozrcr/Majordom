@@ -7,6 +7,7 @@ use App\Agents\Providers\ProviderRequest;
 use App\Core\Usage\UsageLedger;
 use App\Models\Task;
 use App\Projects\Memory\MemoryStore;
+use App\Support\RoleBinding;
 use App\Support\RoleResolver;
 
 /**
@@ -23,7 +24,7 @@ class ReviewerService
         private readonly MemoryStore $memory,
     ) {}
 
-    public function review(Task $task, string $diff, ?bool $testsPassed): ReviewVerdict
+    public function review(Task $task, string $diff, ?bool $testsPassed, ?RoleBinding $binding = null): ReviewVerdict
     {
         $project = $task->project;
         $key = $task->task_key;
@@ -47,7 +48,9 @@ class ReviewerService
             ."## Test result\n{$testsLine}\n\n"
             ."## Diff".($truncated ? ' (truncated at 30k chars)' : '')."\n```diff\n{$diffShown}\n```";
 
-        $binding = app(RoleResolver::class)->resolve('reviewer', $project);
+        if ($binding === null) {
+            $binding = app(RoleResolver::class)->resolve('reviewer', $project);
+        }
 
         $response = $this->provider->chat(new ProviderRequest(
             model: $binding->model,
@@ -97,7 +100,8 @@ Respond ONLY with a JSON object of this exact shape (no markdown fences):
 {
   "verdict": "approved" | "changes_requested",
   "comments": [{"file": "path or null", "comment": "one specific, actionable point"}],
-  "summary": "2-4 sentences: what the change does and why you ruled as you did"
+  "summary": "2-4 sentences: what the change does and why you ruled as you did",
+  "questions": ["only when the OWNER must decide — see rule 4"]
 }
 
 Rules:
@@ -106,5 +110,11 @@ Rules:
 2. Failing tests are disqualifying unless the brief explicitly says otherwise.
 3. Every changes_requested comment must be concrete enough for a builder to
    act on without asking questions.
+4. ESCALATE instead of rejecting when the failure is not the builder's to
+   fix: ambiguous acceptance criteria, an unstated design choice,
+   contradictory requirements, or repeated failures suggesting the brief is
+   wrong. Put discrete, answerable owner questions in "questions" (verdict
+   stays "changes_requested"). Never use questions for things a competent
+   builder should just do.
 PROMPT;
 }

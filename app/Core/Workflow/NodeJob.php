@@ -75,7 +75,29 @@ abstract class NodeJob implements ShouldQueue
             'waiting' => $this->waitForHuman($node, $execution, $result),
             'failed' => $this->parkOn($node, $execution, $result->failureReason, $result->output),
             'retry' => $this->retryFrom($node, $execution, $result),
+            'escalated' => $this->waitForAnswers($node, $execution, $result),
         };
+    }
+
+    /**
+     * M9 escalation: questions for the owner exist; no Approval row — the
+     * chain resumes via WorkflowEngine::resumeAfterClarification once the
+     * last one is answered.
+     */
+    private function waitForAnswers(Node $node, Execution $execution, NodeResult $result): void
+    {
+        $node->update(['status' => NodeStatus::WaitingHuman, 'output' => $result->output]);
+
+        $execution->update(['status' => ExecutionStatus::NeedsYou]);
+        $execution->project->update(['status' => ProjectStatus::NeedsYou, 'last_activity_at' => now()]);
+
+        app(EventRecorder::class)->record(
+            $execution->project,
+            "{$node->type}.clarification",
+            ['questions' => count($result->output['questions'] ?? [])],
+            $execution,
+            $this->actorFor($node)
+        );
     }
 
     /**

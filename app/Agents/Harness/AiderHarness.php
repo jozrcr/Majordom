@@ -75,7 +75,7 @@ class AiderHarness implements Harness
             // 5. Run
             try {
                 $result = Process::path($repoPath)
-                    ->env(['OPENAI_API_BASE' => $request->endpointBaseUrl, 'OPENAI_API_KEY' => 'majordom'])
+                    ->env(['OPENAI_API_BASE' => $request->endpointBaseUrl, 'OPENAI_API_KEY' => $request->apiKey ?? 'majordom'])
                     ->timeout($timeout)
                     ->run($command);
             } catch (ProcessTimedOutException $e) {

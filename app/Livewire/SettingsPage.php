@@ -2,6 +2,7 @@
 
 namespace App\Livewire;
 
+use App\Core\Workflow\ChainStep;
 use App\Models\Role;
 use App\Models\Workflow;
 use App\Support\Setting;
@@ -34,12 +35,17 @@ class SettingsPage extends Component
     public array $chainDraft = [];
     public string $chainPick = '';
     public ?int $editingId = null;
+    public array $availableRoles = [];
 
     public function mount(): void
     {
         $this->loadRoles();
         $this->loadWorkflow();
         $this->loadIntegrations();
+        $this->availableRoles = array_values(array_unique(array_merge(
+            ['builder', 'reviewer', 'architect'],
+            Role::whereNull('project_id')->pluck('name')->toArray(),
+        )));
     }
 
     public function loadRoles(): void
@@ -149,25 +155,28 @@ class SettingsPage extends Component
         ]);
 
         $engine = app(\App\Core\Workflow\WorkflowEngine::class);
-        foreach ($validated['chainDraft'] as $type) {
-            if (!$engine->knows($type)) {
-                $this->addError('chainDraft', "Unknown node type '{$type}'.");
+        $steps = ChainStep::normalize($validated['chainDraft']);
+        foreach ($steps as $step) {
+            if (!$engine->knows($step->type)) {
+                $this->addError('chainDraft', "Unknown node type '{$step->type}'.");
                 return;
             }
         }
+
+        $storable = ChainStep::toStorable($steps);
 
         if ($this->editingId) {
             $wf = Workflow::findOrFail($this->editingId);
             $wf->update([
                 'name' => $validated['workflowName'],
                 'description' => $validated['workflowDescription'],
-                'chain' => $validated['chainDraft'],
+                'chain' => $storable,
             ]);
         } else {
             Workflow::create([
                 'name' => $validated['workflowName'],
                 'description' => $validated['workflowDescription'],
-                'chain' => $validated['chainDraft'],
+                'chain' => $storable,
                 'is_builtin' => false,
             ]);
         }
@@ -190,7 +199,12 @@ class SettingsPage extends Component
         $this->editingId = $id;
         $this->workflowName = $wf->name;
         $this->workflowDescription = $wf->description ?? '';
-        $this->chainDraft = $wf->chain;
+        $steps = ChainStep::normalize($wf->chain);
+        $this->chainDraft = array_map(fn(ChainStep $s) => [
+            'type' => $s->type,
+            'role' => $s->role,
+            'config' => $s->config,
+        ], $steps);
     }
 
     public function deleteWorkflow(int $id): void
@@ -210,7 +224,12 @@ class SettingsPage extends Component
     public function addStep(): void
     {
         if ($this->chainPick !== '' && app(\App\Core\Workflow\WorkflowEngine::class)->knows($this->chainPick)) {
-            $this->chainDraft[] = $this->chainPick;
+            $defaults = ['build' => 'builder', 'review' => 'reviewer'];
+            $this->chainDraft[] = [
+                'type' => $this->chainPick,
+                'role' => $defaults[$this->chainPick] ?? 'system',
+                'config' => [],
+            ];
             $this->chainPick = '';
         }
     }

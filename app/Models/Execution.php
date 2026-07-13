@@ -49,6 +49,11 @@ class Execution extends Model
         return $this->hasMany(Approval::class);
     }
 
+    public function questions(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(Question::class);
+    }
+
     /** SPEC §8: the engine only asks "is this gate blocking under my profile?" */
     public function gateBehavior(string $gate): string
     {

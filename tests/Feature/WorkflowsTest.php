@@ -51,8 +51,12 @@ test('settings page creates workflow', function () {
         ->set('chainDraft', ['delegate', 'build'])
         ->call('saveWorkflow');
 
+    // Chains persist as step objects since M9 (strings normalize on save).
     expect(Workflow::where('name', 'Custom Flow')->first())
-        ->chain->toBe(['delegate', 'build']);
+        ->chain->toBe([
+            ['type' => 'delegate', 'role' => 'system', 'config' => []],
+            ['type' => 'build', 'role' => 'builder', 'config' => []],
+        ]);
 });
 
 test('settings page moveStep and removeStep work', function () {
