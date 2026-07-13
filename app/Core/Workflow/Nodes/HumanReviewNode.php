@@ -19,10 +19,12 @@ class HumanReviewNode extends NodeJob
             return NodeResult::failed('Execution has no task.');
         }
 
+        // nodes() bakes in orderBy('id') ASC — reorder() or the appended
+        // DESC sort silently loses and first() returns the OLDEST node.
         $prevNode = $execution->nodes()
             ->whereIn('type', ['build', 'human_task'])
             ->where('status', NodeStatus::Completed)
-            ->orderByDesc('id')
+            ->reorder('id', 'desc')
             ->first();
 
         $diff = '';
@@ -34,9 +36,13 @@ class HumanReviewNode extends NodeJob
         }
 
         if ($prevNode && $prevNode->type === 'human_task' && $diff === '' && $task->worktree_path) {
-            $result = Process::path($task->worktree_path)->run(['git', 'diff', 'HEAD~1', 'HEAD']);
-            if ($result->successful()) {
-                $diff = $result->output();
+            // Prefer uncommitted work; fall back to the last commit if clean.
+            foreach ([['git', 'diff', 'HEAD'], ['git', 'diff', 'HEAD~1', 'HEAD']] as $cmd) {
+                $result = Process::path($task->worktree_path)->run($cmd);
+                if ($result->successful() && trim($result->output()) !== '') {
+                    $diff = $result->output();
+                    break;
+                }
             }
         }
 

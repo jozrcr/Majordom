@@ -19,14 +19,14 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
 
-function setupMemoryRoot(): string
+function humanNodesMemoryRoot(): string
 {
     $root = sys_get_temp_dir().'/majordom-test-'.uniqid();
     Config::set('majordom.memory_root', $root);
     return $root;
 }
 
-function createExecutionWithTask(array $taskAttrs = [], array $projectAttrs = []): array
+function humanNodesExecution(array $taskAttrs = [], array $projectAttrs = []): array
 {
     $project = Project::factory()->create($projectAttrs);
     $task = Task::factory()->create(array_merge([
@@ -43,10 +43,10 @@ function createExecutionWithTask(array $taskAttrs = [], array $projectAttrs = []
 }
 
 test('HumanTaskNode waits with HumanTask approval carrying worktree and brief', function () {
-    setupMemoryRoot();
+    humanNodesMemoryRoot();
     $repoDir = sys_get_temp_dir().'/majordom-noderepo-'.uniqid();
     mkdir($repoDir.'/.git', 0755, true);
-    [$execution, $task, $node, $project] = createExecutionWithTask([], ['repo_path' => $repoDir]);
+    [$execution, $task, $node, $project] = humanNodesExecution([], ['repo_path' => $repoDir]);
 
     $memory = app(MemoryStore::class);
     $memory->write($project, "tasks/{$task->task_key}/task.md", "Build the feature.");
@@ -70,10 +70,10 @@ test('HumanTaskNode waits with HumanTask approval carrying worktree and brief', 
 });
 
 test('HumanTaskNode rejection parks execution', function () {
-    setupMemoryRoot();
+    humanNodesMemoryRoot();
     $repoDir = sys_get_temp_dir().'/majordom-noderepo-'.uniqid();
     mkdir($repoDir.'/.git', 0755, true);
-    [$execution, $task, $node, $project] = createExecutionWithTask([], ['repo_path' => $repoDir]);
+    [$execution, $task, $node, $project] = humanNodesExecution([], ['repo_path' => $repoDir]);
 
     $memory = app(MemoryStore::class);
     $memory->write($project, "tasks/{$task->task_key}/task.md", "Build it.");
@@ -95,10 +95,10 @@ test('HumanTaskNode rejection parks execution', function () {
 });
 
 test('HumanReviewNode waits with Review approval and diff payload', function () {
-    setupMemoryRoot();
+    humanNodesMemoryRoot();
     $repoDir = sys_get_temp_dir().'/majordom-noderepo-'.uniqid();
     mkdir($repoDir.'/.git', 0755, true);
-    [$execution, $task, $node, $project] = createExecutionWithTask([], ['repo_path' => $repoDir]);
+    [$execution, $task, $node, $project] = humanNodesExecution([], ['repo_path' => $repoDir]);
 
     // Create a fake completed build node with diff
     $buildNode = Node::factory()->create([
@@ -122,10 +122,10 @@ test('HumanReviewNode waits with Review approval and diff payload', function () 
 });
 
 test('HumanReviewNode grant advances chain', function () {
-    setupMemoryRoot();
+    humanNodesMemoryRoot();
     $repoDir = sys_get_temp_dir().'/majordom-noderepo-'.uniqid();
     mkdir($repoDir.'/.git', 0755, true);
-    [$execution, $task, $node, $project] = createExecutionWithTask([], ['repo_path' => $repoDir]);
+    [$execution, $task, $node, $project] = humanNodesExecution([], ['repo_path' => $repoDir]);
 
     $buildNode = Node::factory()->create([
         'execution_id' => $execution->id,
@@ -134,17 +134,26 @@ test('HumanReviewNode grant advances chain', function () {
         'output' => ['diff' => 'diff --git', 'filesChanged' => []],
     ]);
 
+    // The helper's human_task node must not hijack advance(): it has the
+    // lowest id and advance() picks the first Pending node.
+    $node->update(['status' => NodeStatus::Completed]);
+
     $reviewNode = Node::factory()->create(['execution_id' => $execution->id, 'type' => 'human_review']);
     $nextNode = Node::factory()->create(['execution_id' => $execution->id, 'type' => 'commit_suggestion', 'status' => NodeStatus::Pending]);
 
     $job = new HumanReviewNode($reviewNode->id);
     $job->handle();
 
+    \Illuminate\Support\Facades\Queue::fake();
     $approval = Approval::open()->first();
     app(WorkflowEngine::class)->resolveApproval($approval, true);
 
-    $nextNode->refresh();
-    expect($nextNode->status)->toBe(NodeStatus::Running);
+    expect($reviewNode->fresh()->status)->toBe(NodeStatus::Completed)
+        ->and($execution->fresh()->status)->toBe(ExecutionStatus::Running);
+    \Illuminate\Support\Facades\Queue::assertPushed(
+        \App\Core\Workflow\Nodes\CommitSuggestionNode::class,
+        fn ($job) => $job->nodeId === $nextNode->id,
+    );
 });
 
 test('human_task and human_review are registered in nodeMap', function () {
