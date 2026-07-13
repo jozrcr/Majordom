@@ -118,7 +118,12 @@ human-needed item into the morning inbox; phase 9 (commit/push) **always** waits
 - **Dev:** Git (branch/diff/commit-prep), Tests (run suite), Shell (guarded),
   File Ops.
 - **Runtime:** Start Service / Stop Service (via metallama).
-- **Human:** Approval, Answer-Questions, Manual-Test.
+- **Human:** `human_task` (the chain hands *you* a step: node opens an Approval
+  carrying the worktree path, notifies via Telegram/UI with Done / Skip, and
+  the engine parks until you grant), `human_review` (a human gate over the most
+  recent completed build/human_task diff: grant advances the chain, reject with
+  a comment becomes the revision brief and re-arms the build). Both are
+  first-class chain step types usable anywhere in a custom Workflow.
 
 Each node is a Queue **Job** with typed input/output persisted on its Node row,
 and it emits its lifecycle Events.
