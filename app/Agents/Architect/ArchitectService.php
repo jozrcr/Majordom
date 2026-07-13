@@ -187,6 +187,19 @@ class ArchitectService
             ? $data['first_task_id']
             : 'T-001';
 
+        // A plan without a real first task brief is malformed — salvage it
+        // rather than writing an empty file the Builder can't act on
+        // (bit a legacy project on 2026-07-15).
+        if (trim((string) ($data['first_task_md'] ?? '')) === '') {
+            $this->memory->write($project, 'plan_draft.md', $response->content);
+            $project->consensusMessages()->create([
+                'role' => MessageRole::System,
+                'content' => 'The plan came back without a first task brief — raw draft saved to plan_draft.md. Approve the plan again to retry.',
+            ]);
+
+            return;
+        }
+
         $this->memory->write($project, 'architecture.md', (string) ($data['architecture_md'] ?? ''));
         $this->memory->write($project, 'roadmap.md', (string) ($data['roadmap_md'] ?? ''));
         $this->memory->write($project, "tasks/{$taskId}/task.md", (string) ($data['first_task_md'] ?? ''));

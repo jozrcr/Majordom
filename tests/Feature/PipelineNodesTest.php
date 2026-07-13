@@ -110,7 +110,7 @@ test('DelegateNode fails when task.md is missing', function () {
 
     expect($node->refresh()->status)->toBe(\App\Enums\NodeStatus::Failed);
     $execution->refresh();
-    expect($execution->meta['parked_reason'] ?? '')->toContain('task brief');
+    expect($execution->meta['parked_reason'] ?? '')->toContain('Task brief');
 });
 
 test('BuildNode coordinates, runs harness, writes handoff, and sets task to Testing', function () {

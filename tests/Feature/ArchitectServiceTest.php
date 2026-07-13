@@ -204,3 +204,15 @@ it('flips project status with the question gate', function () {
     $service->converse($this->project);
     expect($this->project->fresh()->status)->toBe(\App\Enums\ProjectStatus::Idle);
 });
+
+it('refuses to write an empty first task brief', function () {
+    [$service] = architect([
+        json_encode(['architecture_md' => '# A', 'roadmap_md' => '# R', 'first_task_id' => 'T-001', 'first_task_md' => '  ', 'summary' => 's']),
+    ]);
+
+    $service->approvePlan($this->project);
+    $store = MemoryStore::fromConfig();
+
+    expect($store->exists($this->project, 'tasks/T-001/task.md'))->toBeFalse()
+        ->and($store->read($this->project, 'plan_draft.md'))->not->toBeNull();
+});

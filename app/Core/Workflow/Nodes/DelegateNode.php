@@ -37,8 +37,8 @@ MD
             );
         }
 
-        if (!$memory->exists($project, $taskPath)) {
-            return NodeResult::failed("No task brief at tasks/{$taskKey}/task.md.");
+        if (trim((string) $memory->read($project, $taskPath)) === '') {
+            return NodeResult::failed("Task brief at tasks/{$taskKey}/task.md is missing or empty — re-run planning (approve the plan again in the chat).");
         }
 
         try {
