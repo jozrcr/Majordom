@@ -121,6 +121,13 @@
                     </div>
                     @if($this->latestExecution->status === \App\Enums\ExecutionStatus::Parked)
                         <p class="mt-2 font-mono text-meta text-failed-text">parked · {{ $this->latestExecution->meta['parked_reason'] ?? 'unknown' }}</p>
+                        <div class="mt-2 flex items-center gap-2">
+                            <button wire:click="resumeParked" class="rounded bg-accent px-3 py-1.5 text-xs font-medium text-accent-ink hover:opacity-90 transition-opacity">
+                                <span wire:loading.remove wire:target="resumeParked">Retry failed step</span>
+                                <span wire:loading wire:target="resumeParked">Retrying…</span>
+                            </button>
+                            <button wire:click="abandonParked" wire:confirm="Abandon this run? Remaining steps will be marked failed." class="rounded border border-border px-3 py-1.5 text-xs font-medium text-mute hover:bg-surface-chip transition-colors">Abandon run</button>
+                        </div>
                     @endif
                 </div>
             @endif

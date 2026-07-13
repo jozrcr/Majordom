@@ -105,6 +105,31 @@ class SettingsPage extends Component
         $this->justSaved = "role:{$id}";
     }
 
+    /** One button saves every role draft on the page. */
+    public function saveAllRoles(): void
+    {
+        $rules = [];
+        foreach (array_keys($this->roleDrafts) as $id) {
+            $rules["roleDrafts.{$id}.provider"] = 'required|in:openrouter,metallama';
+            $rules["roleDrafts.{$id}.model"] = 'required|string';
+            $rules["roleDrafts.{$id}.temperature"] = 'nullable|numeric|min:0|max:2';
+            $rules["roleDrafts.{$id}.max_tokens"] = 'nullable|integer|min:0';
+        }
+
+        $validated = $this->validate($rules);
+
+        foreach (Role::whereIn('id', array_keys($this->roleDrafts))->get() as $role) {
+            $role->update([
+                'provider' => data_get($validated, "roleDrafts.{$role->id}.provider"),
+                'model' => data_get($validated, "roleDrafts.{$role->id}.model"),
+                'temperature' => data_get($validated, "roleDrafts.{$role->id}.temperature"),
+                'max_tokens' => data_get($validated, "roleDrafts.{$role->id}.max_tokens"),
+            ]);
+        }
+
+        $this->justSaved = 'roles';
+    }
+
     public function deleteRole(string $id): void
     {
         $role = Role::findOrFail($id);

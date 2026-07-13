@@ -283,6 +283,22 @@ class ProjectWorkspace extends Component
         );
     }
 
+    public function resumeParked(): void
+    {
+        $exec = $this->latestExecution;
+        if ($exec && $exec->status === \App\Enums\ExecutionStatus::Parked) {
+            app(\App\Core\Workflow\WorkflowEngine::class)->resumeParked($exec);
+        }
+    }
+
+    public function abandonParked(): void
+    {
+        $exec = $this->latestExecution;
+        if ($exec && $exec->status === \App\Enums\ExecutionStatus::Parked) {
+            app(\App\Core\Workflow\WorkflowEngine::class)->abandonParked($exec);
+        }
+    }
+
     public function approveApproval(): void
     {
         $approval = $this->openApproval;

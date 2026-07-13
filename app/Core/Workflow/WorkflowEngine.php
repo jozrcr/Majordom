@@ -196,6 +196,66 @@ class WorkflowEngine
         $this->advance($execution->fresh());
     }
 
+    /**
+     * Owner retries a parked execution: failed nodes go back to pending
+     * and the chain re-runs from there.
+     */
+    public function resumeParked(Execution $execution): void
+    {
+        if ($execution->status !== ExecutionStatus::Parked) {
+            return;
+        }
+
+        $execution->nodes()
+            ->where('status', NodeStatus::Failed)
+            ->update(['status' => NodeStatus::Pending, 'finished_at' => null]);
+
+        $meta = $execution->meta ?? [];
+        unset($meta['parked_reason']);
+        $execution->update(['status' => ExecutionStatus::Running, 'meta' => $meta]);
+        $execution->project->update(['status' => \App\Enums\ProjectStatus::Working, 'last_activity_at' => now()]);
+
+        app(EventRecorder::class)->record(
+            $execution->project,
+            'workflow.resumed',
+            [],
+            $execution,
+            'you'
+        );
+
+        $this->advance($execution->fresh());
+    }
+
+    /**
+     * Owner gives up on a parked execution: remaining nodes are marked
+     * failed and the run closes out so it stops surfacing as actionable.
+     */
+    public function abandonParked(Execution $execution): void
+    {
+        if ($execution->status !== ExecutionStatus::Parked) {
+            return;
+        }
+
+        $execution->nodes()
+            ->whereIn('status', [NodeStatus::Pending, NodeStatus::WaitingHuman, NodeStatus::Running])
+            ->update(['status' => NodeStatus::Failed, 'finished_at' => now()]);
+
+        $execution->update([
+            'status' => ExecutionStatus::Completed,
+            'current_node' => null,
+            'meta' => array_merge($execution->meta ?? [], ['abandoned' => true]),
+        ]);
+        $execution->project->update(['status' => \App\Enums\ProjectStatus::Idle, 'last_activity_at' => now()]);
+
+        app(EventRecorder::class)->record(
+            $execution->project,
+            'workflow.abandoned',
+            [],
+            $execution,
+            'you'
+        );
+    }
+
     public function knows(string $type): bool
     {
         return isset($this->nodeMap[$type]);
