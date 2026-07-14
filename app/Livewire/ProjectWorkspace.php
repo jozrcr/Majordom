@@ -9,11 +9,14 @@ use App\Jobs\RunArchitectTurn;
 use App\Models\Project;
 use Illuminate\Support\Facades\Cache;
 use Livewire\Attributes\On;
+use Livewire\Attributes\Url;
 use Livewire\Component;
 
 class ProjectWorkspace extends Component
 {
     public Project $project;
+    #[Url]
+    public string $tab = 'chat';
     public string $draft = '';
     public array $answerDrafts = [];
     /** Free-text answers; when non-empty they win over a picked option. */
@@ -26,6 +29,9 @@ class ProjectWorkspace extends Component
     {
         $this->project = $project;
         $this->workflowId = $project->workflow_id;
+        if (!in_array($this->tab, ['chat', 'overview', 'stats'], true)) {
+            $this->tab = 'chat';
+        }
     }
 
     public function updatedWorkflowId(?int $value): void
@@ -360,6 +366,40 @@ class ProjectWorkspace extends Component
         }
 
         return ['event' => $event, 'node' => $node];
+    }
+
+    public function getRecentConsensusProperty(): \Illuminate\Support\Collection
+    {
+        return $this->project->consensusMessages()
+            ->orderByDesc('id')
+            ->limit(10)
+            ->get();
+    }
+
+    public function getUsageStatsProperty(): array
+    {
+        $byRole = \App\Models\UsageRecord::where('project_id', $this->project->id)
+            ->selectRaw('role, SUM(prompt_tokens) as prompt_tokens, SUM(completion_tokens) as completion_tokens, SUM(cost_usd) as cost_usd')
+            ->groupBy('role')
+            ->get();
+
+        $total = \App\Models\UsageRecord::where('project_id', $this->project->id)
+            ->selectRaw('SUM(prompt_tokens) as prompt_tokens, SUM(completion_tokens) as completion_tokens, SUM(cost_usd) as cost_usd')
+            ->first();
+
+        return [
+            'by_role' => $byRole,
+            'total' => $total,
+        ];
+    }
+
+    public function getExecutionCountsProperty(): array
+    {
+        return $this->project->executions()
+            ->selectRaw('status, COUNT(*) as count')
+            ->groupBy('status')
+            ->pluck('count', 'status')
+            ->toArray();
     }
 
     #[On('timeline-bump')]
