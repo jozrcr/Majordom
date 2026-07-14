@@ -19,6 +19,14 @@ class ProviderEndpoint extends Model
         'is_builtin' => 'boolean',
     ];
 
+    /**
+     * Never let the decrypted key leak through toArray()/JSON
+     * serialization (Livewire payloads, logs, API responses).
+     */
+    protected $hidden = [
+        'api_key',
+    ];
+
     public static function named(string $name): ?self
     {
         return static::where('name', $name)->first();

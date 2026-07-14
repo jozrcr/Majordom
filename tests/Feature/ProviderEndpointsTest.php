@@ -148,3 +148,11 @@ test('BuildNode uses custom endpoint row and does not call ResourceCoordinator',
     expect($fakeHarness->lastRequest->apiKey)->toBeNull();
     expect($fakeCoordinator->ensureCalled)->toBeFalse();
 });
+
+test('api_key is hidden from serialization', function () {
+    $ep = \App\Models\ProviderEndpoint::factory()->create(['api_key' => 'sk-super-secret']);
+
+    expect($ep->toArray())->not->toHaveKey('api_key')
+        ->and($ep->toJson())->not->toContain('sk-super-secret')
+        ->and($ep->resolvedApiKey())->toBe('sk-super-secret');
+});
