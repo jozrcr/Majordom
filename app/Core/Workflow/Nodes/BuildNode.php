@@ -63,6 +63,11 @@ class BuildNode extends NodeJob
         }
         $taskPrompt = $memory->read($project, $taskBriefPath) ?? '';
 
+        $extraInstructions = $binding->meta['extra_instructions'] ?? null;
+        if ($extraInstructions !== null && trim($extraInstructions) !== '') {
+            $taskPrompt .= "\n\n## Owner role instructions\n\n" . trim($extraInstructions);
+        }
+
         // Collect fileHints from latest review node
         $fileHints = [];
         $latestReview = $execution->nodes()

@@ -67,11 +67,19 @@ class SettingsPage extends Component
     {
         $roles = Role::whereNull('project_id')->orderBy('is_builtin', 'desc')->orderBy('name')->get();
         foreach ($roles as $role) {
+            $meta = $role->meta ?? [];
             $this->roleDrafts[$role->id] = [
                 'provider' => $role->provider,
                 'model' => $role->model,
                 'temperature' => $role->temperature,
                 'max_tokens' => $role->max_tokens,
+                'system_prompt_extra' => $meta['system_prompt_extra'] ?? '',
+                'extra_instructions' => $meta['extra_instructions'] ?? '',
+                'top_p' => $meta['top_p'] ?? '',
+                'frequency_penalty' => $meta['frequency_penalty'] ?? '',
+                'presence_penalty' => $meta['presence_penalty'] ?? '',
+                'stop' => isset($meta['stop']) && is_array($meta['stop']) ? implode(', ', $meta['stop']) : '',
+                'timeout' => $meta['timeout'] ?? '',
             ];
         }
     }
@@ -122,13 +130,24 @@ class SettingsPage extends Component
             "roleDrafts.{$id}.model" => 'required|string',
             "roleDrafts.{$id}.temperature" => 'nullable|numeric|min:0|max:2',
             "roleDrafts.{$id}.max_tokens" => 'nullable|integer|min:0',
+            "roleDrafts.{$id}.system_prompt_extra" => 'nullable|string',
+            "roleDrafts.{$id}.extra_instructions" => 'nullable|string',
+            "roleDrafts.{$id}.top_p" => 'nullable|numeric|min:0|max:1',
+            "roleDrafts.{$id}.frequency_penalty" => 'nullable|numeric|min:-2|max:2',
+            "roleDrafts.{$id}.presence_penalty" => 'nullable|numeric|min:-2|max:2',
+            "roleDrafts.{$id}.stop" => 'nullable|string',
+            "roleDrafts.{$id}.timeout" => 'nullable|integer|min:5|max:3600',
         ]);
+
+        $meta = $role->meta ?? [];
+        $this->applyMeta($meta, $validated, $id);
 
         $role->update([
             'provider' => data_get($validated, "roleDrafts.{$id}.provider"),
             'model' => data_get($validated, "roleDrafts.{$id}.model"),
             'temperature' => data_get($validated, "roleDrafts.{$id}.temperature"),
             'max_tokens' => data_get($validated, "roleDrafts.{$id}.max_tokens"),
+            'meta' => $meta,
         ]);
 
         $this->justSaved = "role:{$id}";
@@ -143,20 +162,58 @@ class SettingsPage extends Component
             $rules["roleDrafts.{$id}.model"] = 'required|string';
             $rules["roleDrafts.{$id}.temperature"] = 'nullable|numeric|min:0|max:2';
             $rules["roleDrafts.{$id}.max_tokens"] = 'nullable|integer|min:0';
+            $rules["roleDrafts.{$id}.system_prompt_extra"] = 'nullable|string';
+            $rules["roleDrafts.{$id}.extra_instructions"] = 'nullable|string';
+            $rules["roleDrafts.{$id}.top_p"] = 'nullable|numeric|min:0|max:1';
+            $rules["roleDrafts.{$id}.frequency_penalty"] = 'nullable|numeric|min:-2|max:2';
+            $rules["roleDrafts.{$id}.presence_penalty"] = 'nullable|numeric|min:-2|max:2';
+            $rules["roleDrafts.{$id}.stop"] = 'nullable|string';
+            $rules["roleDrafts.{$id}.timeout"] = 'nullable|integer|min:5|max:3600';
         }
 
         $validated = $this->validate($rules);
 
         foreach (Role::whereIn('id', array_keys($this->roleDrafts))->get() as $role) {
+            $meta = $role->meta ?? [];
+            $this->applyMeta($meta, $validated, $role->id);
+
             $role->update([
                 'provider' => data_get($validated, "roleDrafts.{$role->id}.provider"),
                 'model' => data_get($validated, "roleDrafts.{$role->id}.model"),
                 'temperature' => data_get($validated, "roleDrafts.{$role->id}.temperature"),
                 'max_tokens' => data_get($validated, "roleDrafts.{$role->id}.max_tokens"),
+                'meta' => $meta,
             ]);
         }
 
         $this->justSaved = 'roles';
+    }
+
+    private function applyMeta(array &$meta, array $validated, string $id): void
+    {
+        $extraSystem = trim(data_get($validated, "roleDrafts.{$id}.system_prompt_extra") ?? '');
+        $extraInstr = trim(data_get($validated, "roleDrafts.{$id}.extra_instructions") ?? '');
+        $topP = trim(data_get($validated, "roleDrafts.{$id}.top_p") ?? '');
+        $freqPen = trim(data_get($validated, "roleDrafts.{$id}.frequency_penalty") ?? '');
+        $presPen = trim(data_get($validated, "roleDrafts.{$id}.presence_penalty") ?? '');
+        $stopRaw = trim(data_get($validated, "roleDrafts.{$id}.stop") ?? '');
+        $timeout = trim(data_get($validated, "roleDrafts.{$id}.timeout") ?? '');
+
+        if ($extraSystem !== '') $meta['system_prompt_extra'] = $extraSystem; else unset($meta['system_prompt_extra']);
+        if ($extraInstr !== '') $meta['extra_instructions'] = $extraInstr; else unset($meta['extra_instructions']);
+        if ($topP !== '') $meta['top_p'] = (float) $topP; else unset($meta['top_p']);
+        if ($freqPen !== '') $meta['frequency_penalty'] = (float) $freqPen; else unset($meta['frequency_penalty']);
+        if ($presPen !== '') $meta['presence_penalty'] = (float) $presPen; else unset($meta['presence_penalty']);
+        
+        if ($stopRaw !== '') {
+            $stopArr = array_map('trim', explode(',', $stopRaw));
+            $stopArr = array_filter($stopArr, fn($s) => $s !== '');
+            $meta['stop'] = array_slice($stopArr, 0, 4);
+        } else {
+            unset($meta['stop']);
+        }
+        
+        if ($timeout !== '') $meta['timeout'] = (int) $timeout; else unset($meta['timeout']);
     }
 
     public function deleteRole(string $id): void
@@ -189,6 +246,13 @@ class SettingsPage extends Component
             'model' => $role->model,
             'temperature' => null,
             'max_tokens' => null,
+            'system_prompt_extra' => '',
+            'extra_instructions' => '',
+            'top_p' => '',
+            'frequency_penalty' => '',
+            'presence_penalty' => '',
+            'stop' => '',
+            'timeout' => '',
         ];
         $this->reset('newRole');
     }

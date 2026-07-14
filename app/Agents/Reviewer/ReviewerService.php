@@ -52,15 +52,26 @@ class ReviewerService
             $binding = app(RoleResolver::class)->resolve('reviewer', $project);
         }
 
+        $extraSystem = $binding->meta['system_prompt_extra'] ?? null;
+        $systemPrompt = self::SYSTEM_PROMPT;
+        if ($extraSystem !== null && trim($extraSystem) !== '') {
+            $systemPrompt .= "\n\n" . trim($extraSystem);
+        }
+
         $response = $this->providers->forBinding($binding)->chat(new ProviderRequest(
             model: $binding->model,
             messages: [
-                ['role' => 'system', 'content' => self::SYSTEM_PROMPT],
+                ['role' => 'system', 'content' => $systemPrompt],
                 ['role' => 'user', 'content' => $userContent],
             ],
             maxTokens: $binding->maxTokens,
             temperature: $binding->temperature,
             jsonMode: true,
+            topP: isset($binding->meta['top_p']) ? (float) $binding->meta['top_p'] : null,
+            frequencyPenalty: isset($binding->meta['frequency_penalty']) ? (float) $binding->meta['frequency_penalty'] : null,
+            presencePenalty: isset($binding->meta['presence_penalty']) ? (float) $binding->meta['presence_penalty'] : null,
+            stop: isset($binding->meta['stop']) ? $binding->meta['stop'] : null,
+            timeout: isset($binding->meta['timeout']) ? (int) $binding->meta['timeout'] : null,
         ));
 
         app(UsageLedger::class)->record(
