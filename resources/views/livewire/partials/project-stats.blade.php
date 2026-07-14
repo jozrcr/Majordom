@@ -68,12 +68,7 @@
                                 class="w-full flex items-center justify-between p-3 text-left hover:bg-surface cursor-pointer"
                             >
                                 <div class="flex items-center gap-2">
-                                    <span class="w-2 h-2 rounded-full"
-                                          :class="{
-                                              'bg-green-500': '{{ $mi['status'] }}' === 'done',
-                                              'bg-yellow-500': '{{ $mi['status'] }}' === 'ongoing',
-                                              'bg-gray-400': '{{ $mi['status'] }}' === 'todo'
-                                          }"></span>
+                                    <span class="w-2 h-2 rounded-full {{ $mi['status'] === 'done' ? 'bg-ok' : ($mi['status'] === 'ongoing' ? 'bg-status-working' : 'bg-status-idle') }}"></span>
                                     <span class="font-mono text-sm font-semibold text-hi">{{ $mi['key'] }}</span>
                                     <span class="text-sm text-t3">{{ $mi['title'] }}</span>
                                 </div>

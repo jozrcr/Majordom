@@ -9,11 +9,14 @@ use App\Models\Project;
 use App\Models\Task;
 use App\Models\UsageRecord;
 use App\Projects\Metrics\MilestoneMetrics;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
 use Tests\TestCase;
 
 class MilestoneMetricsTest extends TestCase
 {
+    use RefreshDatabase;
+
     public function test_for_milestone_aggregates_metrics(): void
     {
         $project = Project::factory()->create();
@@ -35,9 +38,9 @@ class MilestoneMetricsTest extends TestCase
         ]);
 
         // Usage records
-        UsageRecord::factory()->create(['execution_id' => $execution->id, 'role' => 'architect', 'prompt_tokens' => 100, 'completion_tokens' => 50, 'cost_usd' => 0.1]);
-        UsageRecord::factory()->create(['execution_id' => $execution->id, 'role' => 'builder', 'prompt_tokens' => 200, 'completion_tokens' => 100, 'cost_usd' => 0.2]);
-        UsageRecord::factory()->create(['execution_id' => $execution->id, 'role' => 'reviewer', 'prompt_tokens' => 50, 'completion_tokens' => 25, 'cost_usd' => 0.05]);
+        UsageRecord::factory()->create(['project_id' => $project->id, 'execution_id' => $execution->id, 'role' => 'architect', 'prompt_tokens' => 100, 'completion_tokens' => 50, 'cost_usd' => 0.1]);
+        UsageRecord::factory()->create(['project_id' => $project->id, 'execution_id' => $execution->id, 'role' => 'builder', 'prompt_tokens' => 200, 'completion_tokens' => 100, 'cost_usd' => 0.2]);
+        UsageRecord::factory()->create(['project_id' => $project->id, 'execution_id' => $execution->id, 'role' => 'reviewer', 'prompt_tokens' => 50, 'completion_tokens' => 25, 'cost_usd' => 0.05]);
 
         // Events
         Event::create([
@@ -70,7 +73,7 @@ class MilestoneMetricsTest extends TestCase
         $this->assertEquals(150, $metrics['tokens']['architect']);
         $this->assertEquals(300, $metrics['tokens']['builder']);
         $this->assertEquals(75, $metrics['tokens']['reviewer']);
-        $this->assertEquals(0.35, $metrics['cost_usd']);
+        $this->assertEqualsWithDelta(0.35, $metrics['cost_usd'], 0.0001);
         $this->assertEquals(1, $metrics['human_interventions']);
         $this->assertEquals(1, $metrics['rework_cycles']);
         $this->assertEquals(2, $metrics['files_changed']);
@@ -97,7 +100,7 @@ class MilestoneMetricsTest extends TestCase
             'execution_id' => null,
         ]);
 
-        UsageRecord::factory()->create(['execution_id' => $execution->id, 'role' => 'builder', 'prompt_tokens' => 100, 'completion_tokens' => 50, 'cost_usd' => 0.1]);
+        UsageRecord::factory()->create(['project_id' => $project->id, 'execution_id' => $execution->id, 'role' => 'builder', 'prompt_tokens' => 100, 'completion_tokens' => 50, 'cost_usd' => 0.1]);
         Event::create([
             'project_id' => $project->id,
             'execution_id' => $execution->id,
