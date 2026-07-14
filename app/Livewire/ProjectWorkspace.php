@@ -39,7 +39,7 @@ class ProjectWorkspace extends Component
 
     private function normalizeTab(): void
     {
-        if (!in_array($this->tab, ['chat', 'overview', 'stats'], true)) {
+        if (!in_array($this->tab, ['chat', 'overview', 'stats', 'roadmap'], true)) {
             $this->tab = 'chat';
         }
     }
@@ -410,6 +410,52 @@ class ProjectWorkspace extends Component
             ->groupBy('status')
             ->pluck('count', 'status')
             ->toArray();
+    }
+
+    private bool $roadmapSynced = false;
+
+    public function getRoadmapProperty(): array
+    {
+        if (!$this->roadmapSynced) {
+            \App\Projects\Roadmap\RoadmapSync::for($this->project)->sync();
+            $this->roadmapSynced = true;
+        }
+
+        $milestones = \App\Models\Milestone::where('project_id', $this->project->id)
+            ->with('tasks')
+            ->orderBy('position')
+            ->get();
+
+        $result = [];
+        foreach ($milestones as $m) {
+            $tasks = [];
+            foreach ($m->tasks as $t) {
+                $tasks[] = [
+                    'id' => $t->id,
+                    'key' => $t->task_key,
+                    'title' => $t->title,
+                    'status' => \App\Projects\Roadmap\RoadmapSync::effectiveStatus($t),
+                ];
+            }
+            $result[] = [
+                'id' => $m->id,
+                'key' => $m->milestone_key,
+                'title' => $m->title,
+                'summary' => $m->summary,
+                'status' => $m->deriveStatus(),
+                'tasks' => $tasks,
+            ];
+        }
+
+        return $result;
+    }
+
+    public function getRecentRoadmapChangesProperty(): \Illuminate\Support\Collection
+    {
+        return \App\Models\RoadmapEvent::where('project_id', $this->project->id)
+            ->orderByDesc('id')
+            ->limit(8)
+            ->get();
     }
 
     #[On('timeline-bump')]

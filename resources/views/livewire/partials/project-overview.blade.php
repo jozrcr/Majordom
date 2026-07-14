@@ -34,7 +34,15 @@
     <div class="rounded-lg border border-border bg-surface-card p-4 space-y-3">
         <h2 class="text-lg font-semibold text-hi">Agreed Plan</h2>
         @if($this->plannedTask)
-            <p class="text-body-sm text-text">First task: <span class="font-mono">{{ $this->plannedTask['key'] }}</span> — {{ $this->plannedTask['title'] }}</p>
+            <div x-data="{ open: false }">
+                <button type="button" @click="open = !open" class="flex w-full items-center justify-between text-left text-body-sm text-text hover:text-hi cursor-pointer">
+                    <span>First task: <span class="font-mono">{{ $this->plannedTask['key'] }}</span> — {{ $this->plannedTask['title'] }}</span>
+                    <span class="transition-transform duration-120" :class="open && 'rotate-180'">▼</span>
+                </button>
+                <div x-show="open" x-cloak class="mt-2 text-body-sm text-t2">
+                    <p>Plan approved. Builder will execute tasks sequentially.</p>
+                </div>
+            </div>
         @else
             <p class="text-body-sm text-mute">No approved plan yet. Consensus is needed to generate the project memory and task briefs.</p>
         @endif
@@ -43,12 +51,16 @@
     <div class="rounded-lg border border-border bg-surface-card p-4 space-y-3">
         <h2 class="text-lg font-semibold text-hi">Recent Consensus</h2>
         @forelse($this->recentConsensus as $msg)
-            <div class="border-b border-border-soft pb-2 last:border-0 last:pb-0">
-                <div class="flex items-center gap-2 mb-1">
+            <div class="border-b border-border-soft pb-2 last:border-0 last:pb-0" x-data="{ open: false }">
+                <button type="button" @click="open = !open" class="flex w-full items-center gap-2 text-left cursor-pointer hover:opacity-80">
                     <span class="rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-surface-active text-mute">{{ $msg->role->value }}</span>
                     <span class="text-xs text-mute">{{ $msg->created_at->diffForHumans() }}</span>
+                    <span class="ml-auto text-mute transition-transform duration-120" :class="open && 'rotate-180'">▼</span>
+                </button>
+                <div x-show="open" x-cloak class="mt-2">
+                    <p class="text-sm text-t2">{{ strip_tags($msg->content) }}</p>
                 </div>
-                <p class="text-sm text-t2 line-clamp-2">{{ Str::limit(strip_tags($msg->content), 150) }}</p>
+                <p class="text-sm text-t2 line-clamp-1 mt-1" x-show="!open">{{ Str::limit(strip_tags($msg->content), 150) }}</p>
             </div>
         @empty
             <p class="text-body-sm text-mute">No consensus messages yet.</p>

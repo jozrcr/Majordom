@@ -326,6 +326,13 @@ non-null (`timeout` falls back to the endpoint's). Numeric values are cast on
 read (`(float)`/`(int)`) because the JSON column round-trip may demote e.g.
 `-1.0` to `-1`.
 
+### 10.1 Roadmap Tab & Sync Rules
+The **Roadmap** tab renders milestones and tasks parsed from `{repo_path}/agents/ROADMAP.md`.
+- **Format:** `## M<NN> — <title>` defines milestones. `- [<mark>] <T-NN> — <title>` defines tasks. Marks: ` ` (todo), `~` (ongoing), `x` (done).
+- **Sync:** `RoadmapSync` parses the file and upserts `milestones` and `tasks` into the DB. It is idempotent and emits `roadmap_events` only on real deltas.
+- **Effective Status:** The UI displays a tri-state status derived from `max(db_status, declared_md_status)` on the ordering `todo < ongoing < done`. This ensures live harness progress overrides the markdown, but markdown can never downgrade a task the DB says is further along.
+- **UI:** Accordions for milestones and tasks, Alpine.js toggles, Tailwind styling. No inline styles.
+
 ## 11. Non-goals / deferred (do not build in v1)
 
 Non-coding capabilities · parallel Builders · visual node-graph editor ·

@@ -66,4 +66,13 @@ class ProjectTabsTest extends TestCase
             ->set('tab', 'zzz')
             ->assertSet('tab', 'chat');
     }
+
+    public function test_roadmap_tab_is_allowed(): void
+    {
+        $project = Project::factory()->create();
+
+        Livewire::test(ProjectWorkspace::class, ['project' => $project])
+            ->set('tab', 'roadmap')
+            ->assertSet('tab', 'roadmap');
+    }
 }
