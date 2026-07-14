@@ -118,3 +118,15 @@ Expected: architect/reviewer → openrouter `https://openrouter.ai/api/v1`
     (M11 tabs). Condensation v1 is structural (role pair + kind + excerpt
     + sizes) — deterministic and testable. Optional LLM digest is a later
     enhancement, NOT in v1.
+
+- **T-43** — structured roadmap: DB-derived 3-level Roadmap tab (milestone →
+  task → description). Architect writes structured roadmap.md; RoadmapSync
+  reads memory roadmap.md + tolerates legacy prose format. Brief:
+  agents/T-43-structured-roadmap.md. Owner: Roadmap must render DB rows, never
+  raw md.
+- **T-44** — per-milestone / per-task metrics (DEFERRED, owner-requested):
+  consensus rounds, tokens by role (UsageRecord), human interventions
+  (Approvals/Questions), rework cycles (Task.revision), files changed / tests
+  added (harness+diff), time-to-completion (timestamps). All source data
+  exists; per-milestone aggregation unlocked by T-43's task→milestone linkage.
+  A Stats-style analytics layer per milestone with per-task drill-down.
