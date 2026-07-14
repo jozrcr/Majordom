@@ -19,8 +19,8 @@
   ('db'|'env'|'none') + `key_config`. Role drafts expose `knobs_inert`
   (provider driver === 'metallama') → 5 sampler inputs disabled + hint;
   `extra_instructions`/`timeout`/`model`/`max_tokens` stay editable.
-  `updatedRoleDrafts` hook recomputes on provider switch. Owner has NOT
-  yet signed off on the merge — flag it in next chat message.
+  `updatedRoleDrafts` hook recomputes on provider switch. Owner
+  SIGNED OFF on the merge 2026-07-16 ("green light on T 38 merge").
 - API key policy (owner-set 2026-07-16): env/config indirection preferred
   (builtins via `meta.api_key_config`); DB storage ONLY with encryption
   (`'api_key' => 'encrypted'` cast, mandatory); key never echoed to UI
@@ -133,8 +133,14 @@ Read order for the incoming model: this file top block → agents/DISPATCH.md
   DISPATCH.md protocol (diff, full pest, acceptance greps, review(T-39)
   commit, worker restart, RESUME.md update). If it never started, summon
   aider yourself with the brief as edit targets + --read list.
-- OWNER ITEMS PENDING: (1) explicit sign-off on the T-38 merge;
-  (2) define "contract detail view" scope before T-40.
+- OWNER ITEMS RESOLVED 2026-07-16: (1) T-38 merge signed off.
+  (2) T-40 "contract detail view" DEFINED: condensed actor→actor
+  exchange trace (architect→builder instructions, builder→reviewer
+  results, verdicts) as a projection over the existing `events` table
+  (EventRecorder payloads), per-execution sequence view with excerpts +
+  expandable full text; enrich payloads at emission seams where
+  instruction text is missing; NO log parsing, NO LLM summaries in v1.
+  Scope details in DISPATCH.md M11/T-40.
 - Conventions that bit us: `--queue` singular on queue:work; verify every
   aider --read path exists; Livewire::test facade (no livewire() helper);
   restart worker after ANY code change; update RESUME.md after every task.

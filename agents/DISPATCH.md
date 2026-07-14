@@ -102,6 +102,19 @@ Expected: architect/reviewer → openrouter `https://openrouter.ai/api/v1`
 
 - **T-39** — tabs scaffold + Overview + Stats. Brief:
   `agents/T-39-project-tabs-overview.md`. Branch: `feat/m11-project-tabs`.
-- **T-40** — "contract detail view" — SCOPE UNCONFIRMED. Ask the owner
-  what "contract" means here (provider/runtime contracts docs vs agreed
-  consensus specs) BEFORE writing the brief. Do not guess.
+- **T-40** — "contract detail view" — SCOPE DEFINED by owner 2026-07-16:
+  condensed insight into actor→actor instruction flows (architect→builder,
+  builder→reviewer, reviewer→architect, etc.). Full logs already exist;
+  goal is a condensed, structured trace. Design:
+  - Projection over the existing `events` table (project_id, execution_id,
+    name, actor, payload) — NO new logging pipeline, NO log parsing.
+  - Model as Exchanges: from_actor → to_actor, kind (instruction | result |
+    verdict | clarification), excerpt (~200 chars), expandable full text,
+    timestamp; join UsageRecord for tokens/cost per hop.
+  - Enrich payloads AT THE EMISSION SEAMS (EventRecorder call sites in
+    ArchitectService/ReviewerService + harness builder task message) where
+    instruction text is not yet captured.
+  - UI: per-execution "Exchanges" detail view, drill-in from timeline
+    (M11 tabs). Condensation v1 is structural (role pair + kind + excerpt
+    + sizes) — deterministic and testable. Optional LLM digest is a later
+    enhancement, NOT in v1.
