@@ -327,13 +327,13 @@ read (`(float)`/`(int)`) because the JSON column round-trip may demote e.g.
 `-1.0` to `-1`.
 
 ### 10.1 Roadmap Tab & Sync Rules
-The **Roadmap** tab renders milestones and tasks parsed from `{repo_path}/agents/ROADMAP.md`.
-- **Format:** `## M<NN> — <title>` defines milestones. `- [<mark>] <T-NN> — <title>` defines tasks. Marks: ` ` (todo), `~` (ongoing), `x` (done).
-- **Sync:** `RoadmapSync` parses the file and upserts `milestones` and `tasks` into the DB. It is idempotent and emits `roadmap_events` only on real deltas.
-- **Effective Status:** The UI displays a tri-state status derived from `max(db_status, declared_md_status)` on the ordering `todo < ongoing < done`. This ensures live harness progress overrides the markdown, but markdown can never downgrade a task the DB says is further along. Sync writes only `declared_status`/`milestone_id`/`position`/`title` — never the live `status` column (harness-owned).
-- **Milestone status** is *derived*, never stored: all tasks done → `done`; all tasks todo → `todo`; any other mix (or any ongoing) → `ongoing`. A single unfinished task keeps the milestone open.
-- **Agreed plan text:** the Overview/Roadmap "Agreed plan" accordion renders the stored plan verbatim from project memory (`roadmap.md`, else `architecture.md`, else `plan_draft.md`) — no summary, no LLM call.
-- **UI:** Accordions for milestones and tasks, Alpine.js toggles, Tailwind styling. No inline styles.
+The **Roadmap** tab renders **DB entities** (Milestone → Task) as a 3-level accordion — milestone (status dot + colour) → task (status + colour) → task detail (description/goal) — NOT raw markdown. The markdown (`roadmap.md`) is only an INPUT to `RoadmapSync`; the screen only ever reads DB rows.
+- **Source precedence:** `RoadmapSync` reads `{$repo_path}/agents/ROADMAP.md` first. If absent, it falls back to project memory `roadmap.md`. If neither yields content, it is a no-op.
+- **Format:** Tolerates both structured `## M<N> — <title>` and legacy prose `## Milestone <N>: <title>`. Keys normalize to `M<N>`. Tasks come from `- [<mark>] <T-NN> — <title>` checkboxes. Non-checkbox lines accumulate into milestone `summary`.
+- **Sync:** Upserts `milestones` and `tasks` into the DB. Idempotent; emits `roadmap_events` only on real deltas (status/title/position changes). Description sync from `tasks/<key>/task.md` in memory is silent (no event).
+- **Effective Status:** UI displays tri-state status derived from `max(db_status, declared_md_status)` on `todo < ongoing < done`. Sync writes `declared_status`/`milestone_id`/`position`/`title`/`description` — never the live `status` column (harness-owned).
+- **Milestone status** is *derived*, never stored: all tasks done → `done`; all tasks todo → `todo`; any other mix → `ongoing`.
+- **UI:** 3-level Alpine.js accordions, Tailwind styling. No inline styles. No raw markdown rendering.
 
 ## 11. Non-goals / deferred (do not build in v1)
 

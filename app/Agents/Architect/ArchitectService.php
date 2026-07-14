@@ -231,6 +231,8 @@ class ArchitectService
             null,
             'architect'
         );
+
+        app(\App\Projects\Roadmap\RoadmapSync::class)->for($project)->sync();
     }
 
     /** @return array<int, array{role: string, content: string}> */
@@ -295,7 +297,7 @@ Consensus is reached. Produce the initial project memory now.
 Respond ONLY with a JSON object of this exact shape:
 {
   "architecture_md": "markdown — the target repo's architecture as you understand it",
-  "roadmap_md": "markdown — ordered milestones, each with a one-line goal",
+  "roadmap_md": "markdown roadmap. Each milestone is a header '## M<N> — <title>' followed by one summary line, then its tasks as checkbox items '- [ ] T-00N — <task title>'. The first task MUST appear as the first checkbox and match first_task_id. Example:\n## M1 — Skeleton\nStand up the project shell.\n- [ ] T-001 — Create repo structure\n- [ ] T-002 — Add build system",
   "first_task_id": "T-001",
   "first_task_md": "markdown — the first task brief: goal, acceptance criteria, files likely involved, test command",
   "summary": "2-3 sentences for the owner: what was agreed and what happens next"

@@ -454,6 +454,7 @@ class ProjectWorkspace extends Component
                     'key' => $t->task_key,
                     'title' => $t->title,
                     'status' => \App\Projects\Roadmap\RoadmapSync::effectiveStatus($t),
+                    'description' => $t->description,
                 ];
             }
             $result[] = [

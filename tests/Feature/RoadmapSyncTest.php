@@ -122,4 +122,55 @@ MD
         RoadmapSync::for($project)->sync();
         $this->assertSame('done', $milestone->fresh()->deriveStatus());
     }
+
+    public function test_sync_parses_legacy_milestone_format(): void
+    {
+        $project = Project::factory()->create(['repo_path' => '/tmp/test-repo']);
+        $mdPath = $project->repo_path . '/agents/ROADMAP.md';
+        File::ensureDirectoryExists(dirname($mdPath));
+        File::put($mdPath, "## Milestone 1: Foundations\nAuth and dashboard.\n- Some prose line.\n");
+
+        RoadmapSync::for($project)->sync();
+
+        $this->assertDatabaseCount('milestones', 1);
+        $this->assertDatabaseHas('milestones', ['project_id' => $project->id, 'milestone_key' => 'M1']);
+        $milestone = \App\Models\Milestone::where('project_id', $project->id)->first();
+        $this->assertStringContainsString('Auth and dashboard.', $milestone->summary);
+        $this->assertStringContainsString('Some prose line.', $milestone->summary);
+    }
+
+    public function test_sync_reads_description_from_memory(): void
+    {
+        $project = Project::factory()->create(['repo_path' => '/tmp/test-repo']);
+        $mdPath = $project->repo_path . '/agents/ROADMAP.md';
+        File::ensureDirectoryExists(dirname($mdPath));
+        File::put($mdPath, "## M1 — Test\n- [ ] T-01 — Task\n");
+
+        // Write task brief to memory
+        app(\App\Projects\Memory\MemoryStore::class)->write($project, 'tasks/T-01/task.md', '# Task Brief\nDo something.');
+
+        RoadmapSync::for($project)->sync();
+
+        $task = Task::where('project_id', $project->id)->first();
+        $this->assertNotNull($task->description);
+        $this->assertStringContainsString('Task Brief', $task->description);
+    }
+
+    public function test_description_only_change_is_idempotent(): void
+    {
+        $project = Project::factory()->create(['repo_path' => '/tmp/test-repo']);
+        $mdPath = $project->repo_path . '/agents/ROADMAP.md';
+        File::ensureDirectoryExists(dirname($mdPath));
+        File::put($mdPath, "## M1 — Test\n- [ ] T-01 — Task\n");
+
+        RoadmapSync::for($project)->sync();
+        $this->assertDatabaseCount('roadmap_events', 1); // task_added
+
+        // Update description in memory
+        app(\App\Projects\Memory\MemoryStore::class)->write($project, 'tasks/T-01/task.md', '# Updated Brief');
+        RoadmapSync::for($project)->sync();
+
+        // No new event should be created for description-only change
+        $this->assertDatabaseCount('roadmap_events', 1);
+    }
 }

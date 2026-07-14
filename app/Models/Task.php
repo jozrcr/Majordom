@@ -24,6 +24,7 @@ class Task extends Model
         'milestone_id',
         'position',
         'declared_status',
+        'description',
     ];
 
     protected function casts(): array

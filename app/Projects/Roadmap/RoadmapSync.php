@@ -24,11 +24,17 @@ class RoadmapSync
     public function sync(): void
     {
         $filePath = rtrim($this->project->repo_path ?? '', '/') . '/agents/ROADMAP.md';
-        if (!file_exists($filePath)) {
+        $content = null;
+        if (file_exists($filePath)) {
+            $content = file_get_contents($filePath);
+        } else {
+            $content = app(\App\Projects\Memory\MemoryStore::class)->read($this->project, 'roadmap.md');
+        }
+
+        if ($content === null || trim($content) === '') {
             return;
         }
 
-        $content = file_get_contents($filePath);
         $parsed = $this->parse($content);
 
         DB::transaction(function () use ($parsed) {
@@ -64,14 +70,15 @@ class RoadmapSync
         $summaryLines = [];
 
         foreach ($lines as $line) {
-            if (preg_match('/^##\s+(M\d+(?:[a-z]?)?)\s*—\s*(.+)$/i', $line, $matches)) {
+            // Tolerates both structured `## M<N> — <title>` and legacy `## Milestone <N>: <title>`
+            if (preg_match('/^##\s+(?:M(?:ilestone)?)\s*(\d+(?:[a-z]?)?)\s*[—:]\s*(.+)$/i', $line, $matches)) {
                 if ($currentMilestone) {
                     $currentMilestone['summary'] = trim(implode("\n", $summaryLines));
                     $milestones[] = $currentMilestone;
                 }
                 $milestonePosition++;
                 $currentMilestone = [
-                    'key' => $matches[1],
+                    'key' => 'M' . $matches[1],
                     'title' => trim($matches[2]),
                     'summary' => '',
                     'position' => $milestonePosition,
@@ -121,6 +128,7 @@ class RoadmapSync
 
     private function syncTasks(array $milestones): void
     {
+        $memoryStore = app(\App\Projects\Memory\MemoryStore::class);
         $parsedTasks = [];
         foreach ($milestones as $m) {
             $milestone = Milestone::where('project_id', $this->project->id)->where('milestone_key', $m['key'])->first();
@@ -141,11 +149,16 @@ class RoadmapSync
                 $data = $parsedTasks[$task->task_key];
                 $oldEffective = self::effectiveStatus($task);
 
+                // Read description from memory
+                $descPath = "tasks/{$task->task_key}/task.md";
+                $newDescription = $memoryStore->read($this->project, $descPath);
+
                 $task->update([
                     'milestone_id' => $data['milestone_id'],
                     'position' => $data['position'],
                     'title' => $data['title'],
                     'declared_status' => $data['declared_status'],
+                    'description' => $newDescription,
                 ]);
 
                 $newEffective = self::effectiveStatus($task);
@@ -170,6 +183,9 @@ class RoadmapSync
 
         foreach ($parsedTasks as $key => $data) {
             if (!Task::where('project_id', $this->project->id)->where('task_key', $key)->exists()) {
+                $descPath = "tasks/{$key}/task.md";
+                $newDescription = $memoryStore->read($this->project, $descPath);
+
                 Task::create([
                     'project_id' => $this->project->id,
                     'task_key' => $key,
@@ -178,6 +194,7 @@ class RoadmapSync
                     'position' => $data['position'],
                     'declared_status' => $data['declared_status'],
                     'status' => TaskStatus::Pending,
+                    'description' => $newDescription,
                 ]);
                 RoadmapEvent::create([
                     'project_id' => $this->project->id,
