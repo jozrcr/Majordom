@@ -11,8 +11,10 @@ use App\Enums\ProjectStatus;
 use App\Models\ConsensusMessage;
 use App\Models\Project;
 use App\Models\Question;
+use App\Models\Task;
 use App\Projects\Memory\MemoryStore;
 use App\Support\RoleResolver;
+use Illuminate\Support\Str;
 
 /**
  * The Architect's consensus orchestration (SPEC §3 phase 1–2, M2 slice).
@@ -234,6 +236,165 @@ class ArchitectService
 
         app(\App\Projects\Roadmap\RoadmapSync::class)->for($project)->sync();
     }
+
+    /**
+     * Decompose a roadmap task into a concrete `task.md` brief (SPEC §3 phase 3).
+     *
+     * The plan (approvePlan) only writes the FIRST task's brief; every later
+     * task exists as a roadmap row with just a title. This turns that title
+     * into a buildable brief on demand — the engine that lets a milestone's
+     * tasks chain (M12). Writes nothing and returns early if a non-empty brief
+     * already exists, so it is safe to call before each build.
+     */
+    public function decomposeTask(Project $project, Task $task): void
+    {
+        $briefPath = "tasks/{$task->task_key}/task.md";
+        if ($this->memory->exists($project, $briefPath)
+            && trim((string) $this->memory->read($project, $briefPath)) !== '') {
+            return; // already has a brief (first task, or a prior decompose)
+        }
+
+        $binding = app(RoleResolver::class)->resolve('architect', $project);
+        $extraSystem = $binding->meta['system_prompt_extra'] ?? null;
+
+        $system = self::DECOMPOSE_PROMPT;
+        if ($extraSystem !== null && trim($extraSystem) !== '') {
+            $system .= "\n\n".trim($extraSystem);
+        }
+
+        $response = $this->providers->forBinding($binding)->chat(new ProviderRequest(
+            model: $binding->model,
+            messages: [
+                ['role' => 'system', 'content' => $system],
+                ['role' => 'user', 'content' => $this->decomposeContext($project, $task)],
+            ],
+            maxTokens: (int) config('majordom.architect.plan_max_tokens', 8000),
+            temperature: $binding->temperature,
+            jsonMode: false, // a task.md brief is markdown, not JSON
+            topP: isset($binding->meta['top_p']) ? (float) $binding->meta['top_p'] : null,
+            frequencyPenalty: isset($binding->meta['frequency_penalty']) ? (float) $binding->meta['frequency_penalty'] : null,
+            presencePenalty: isset($binding->meta['presence_penalty']) ? (float) $binding->meta['presence_penalty'] : null,
+            stop: isset($binding->meta['stop']) ? $binding->meta['stop'] : null,
+            timeout: isset($binding->meta['timeout']) ? (int) $binding->meta['timeout'] : null,
+        ));
+
+        app(UsageLedger::class)->record(
+            $project,
+            'architect',
+            $binding->model,
+            $response->promptTokens,
+            $response->completionTokens
+        );
+
+        $brief = trim($response->content);
+        if ($brief === '') {
+            // Never write an empty brief the Builder can't act on — surface it.
+            app(EventRecorder::class)->record(
+                $project,
+                'task.decompose_failed',
+                ['task_key' => $task->task_key],
+                null,
+                'architect'
+            );
+
+            return;
+        }
+
+        $this->memory->write($project, $briefPath, $brief);
+
+        app(EventRecorder::class)->record(
+            $project,
+            'task.decomposed',
+            ['task_key' => $task->task_key],
+            null,
+            'architect'
+        );
+    }
+
+    /**
+     * Assemble the decompose context: the milestone goal, this task's line, the
+     * project architecture, and a short trail of already-built sibling tasks so
+     * the new brief fits what came before (no duplicate work, consistent style).
+     */
+    private function decomposeContext(Project $project, Task $task): string
+    {
+        $milestone = $task->milestone;
+        $roadmap = $this->memory->read($project, 'roadmap.md') ?? '(no roadmap.md)';
+        $architecture = $this->memory->read($project, 'architecture.md') ?? '(no architecture.md yet)';
+        $style = $this->memory->read($project, 'coding_style.md');
+
+        $milestoneLine = $milestone
+            ? "{$milestone->milestone_key} — {$milestone->title}".($milestone->summary ? "\nGoal: {$milestone->summary}" : '')
+            : '(no milestone)';
+
+        // Prior tasks in the same milestone that already have a brief/handoff —
+        // give the builder continuity without dumping whole diffs.
+        $prior = '';
+        if ($milestone) {
+            $siblings = $milestone->tasks()
+                ->where('position', '<', $task->position ?? PHP_INT_MAX)
+                ->orderBy('position')
+                ->get();
+            foreach ($siblings as $s) {
+                $handoff = $this->memory->read($project, "tasks/{$s->task_key}/handoff.md");
+                $line = "- {$s->task_key}: {$s->title}";
+                if ($handoff) {
+                    $line .= "\n  handoff: ".Str::limit(trim(strip_tags($handoff)), 400);
+                }
+                $prior .= $line."\n";
+            }
+        }
+        $prior = $prior !== '' ? $prior : '(none yet — this is the milestone\'s first task)';
+
+        $styleBlock = $style ? "\n\n## Project coding style\n{$style}" : '';
+
+        return <<<CONTEXT
+Write the build brief for this task:
+
+## Task
+{$task->task_key} — {$task->title}
+
+## Its milestone
+{$milestoneLine}
+
+## Already completed in this milestone
+{$prior}
+
+## Project architecture
+{$architecture}
+
+## Full roadmap (for context only — decompose ONLY the task above)
+{$roadmap}{$styleBlock}
+CONTEXT;
+    }
+
+    private const DECOMPOSE_PROMPT = <<<'PROMPT'
+You are the Architect. Decompose ONE roadmap task into a precise build brief for
+a local coding model driven by an automated harness. The builder has only your
+brief and the repository — be concrete and self-contained.
+
+Respond with GitHub-flavored markdown ONLY (no preamble, no code fences around
+the whole thing), in exactly this shape:
+
+# <task title>
+
+## Goal
+2-4 sentences: what this task must achieve and why, in the context of the milestone.
+
+## Acceptance criteria
+- Bullet list of concrete, checkable outcomes. Prefer observable behavior and
+  specific file/function names. Include the exact test command when relevant.
+
+## Files likely involved
+- Relative paths the builder will create or edit (best-effort; the builder may adjust).
+
+## Notes
+- Any constraints, gotchas, or dependencies on prior tasks. Keep it tight.
+
+Rules: scope strictly to THIS task — do not implement later roadmap items. Assume
+prior tasks in the milestone are already done. Do not invent requirements the
+roadmap/architecture don't support. No questions — produce the brief.
+PROMPT;
 
     /** @return array<int, array{role: string, content: string}> */
     private function buildMessages(Project $project, ?string $extraSystemPrompt = null): array
