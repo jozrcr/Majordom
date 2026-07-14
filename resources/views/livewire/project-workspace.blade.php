@@ -190,7 +190,14 @@
                             @if(!empty($this->openApproval->payload['verdict']['comments']))
                                 <ul class="text-caption text-t3 list-disc pl-4 space-y-1">
                                     @foreach($this->openApproval->payload['verdict']['comments'] as $comment)
-                                        <li>{{ $comment }}</li>
+                                        {{-- Reviewer comments may be plain strings or {file, comment} objects. --}}
+                                        <li>
+                                            @if(is_array($comment))
+                                                @if(!empty($comment['file']))<span class="font-mono text-mute">{{ $comment['file'] }}:</span> @endif{{ $comment['comment'] ?? $comment['text'] ?? '' }}
+                                            @else
+                                                {{ $comment }}
+                                            @endif
+                                        </li>
                                     @endforeach
                                 </ul>
                             @endif
