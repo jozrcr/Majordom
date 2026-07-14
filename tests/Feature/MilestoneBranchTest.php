@@ -182,7 +182,8 @@ test('mergeMilestone records push failure but does not throw', function () {
         "'git' 'worktree' 'remove' '--force'*" => Process::result(output: ''),
     ]);
 
-    expect(fn () => app(CommitService::class)->mergeMilestone($milestone))->not->toThrow();
+    // Must NOT throw — a push failure never rolls back the successful merge.
+    app(CommitService::class)->mergeMilestone($milestone);
     expect(Event::where('name', 'milestone.push_failed')->where('project_id', $project->id)->exists())->toBeTrue();
     
     Setting::put('git.push_after_merge', false);
