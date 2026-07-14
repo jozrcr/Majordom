@@ -4,6 +4,7 @@ namespace App\Livewire;
 
 use App\Agents\Architect\ArchitectService;
 use App\Core\Events\EventRecorder;
+use App\Enums\ApprovalType;
 use App\Enums\QuestionStatus;
 use App\Jobs\RunArchitectTurn;
 use App\Models\Project;
@@ -358,7 +359,8 @@ class ProjectWorkspace extends Component
             return;
         }
 
-        if (trim($this->gateComment ?? '') === '') {
+        if ($approval->type !== ApprovalType::MilestoneMerge
+            && trim($this->gateComment ?? '') === '') {
             $this->addError('gateComment', 'Say why — the comment becomes the revision brief.');
             return;
         }

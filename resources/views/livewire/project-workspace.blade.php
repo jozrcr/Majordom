@@ -226,6 +226,23 @@
                                 </button>
                             </div>
                         </div>
+                    @elseif($this->openApproval->type === \App\Enums\ApprovalType::MilestoneMerge)
+                        <div class="max-w-[640px] rounded-lg border border-ok/40 bg-surface-card p-4 space-y-3">
+                            <p class="font-mono text-micro uppercase tracking-[.14em] text-ok">Milestone complete</p>
+                            <p class="text-body-sm text-text">{{ $this->openApproval->title }}</p>
+                            <p class="font-mono text-meta text-mute">Merging promotes this milestone's branch into your main branch. The next milestone starts automatically.</p>
+                            <input type="text" wire:model="gateComment" placeholder="Optional note…" class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-body text-hi placeholder:text-faint">
+                            <div class="flex items-center gap-3">
+                                <button wire:click="approveApproval" wire:loading.attr="disabled" class="rounded-lg bg-accent px-3 py-1.5 text-body-sm font-semibold text-accent-ink disabled:opacity-55">
+                                    <span wire:loading.remove wire:target="approveApproval">Merge into main &amp; start next</span>
+                                    <span wire:loading wire:target="approveApproval">Merging…</span>
+                                </button>
+                                <button wire:click="rejectApproval" wire:loading.attr="disabled" class="rounded-lg border border-border px-3 py-1.5 text-body-sm font-semibold text-mute disabled:opacity-55 hover:text-hi">
+                                    <span wire:loading.remove wire:target="rejectApproval">Not yet</span>
+                                    <span wire:loading wire:target="rejectApproval">…</span>
+                                </button>
+                            </div>
+                        </div>
                     @endif
                 @endif
 
