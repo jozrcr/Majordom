@@ -15,6 +15,8 @@ uses(\Illuminate\Foundation\Testing\RefreshDatabase::class);
 beforeEach(function () {
     Queue::fake();
     config(['majordom.memory_root' => sys_get_temp_dir().'/majordom-commit-'.uniqid()]);
+    // committerEnv() reads this first, so the git-config subprocess isn't needed under Process::fake.
+    config(['majordom.git.author_name' => 'Test User', 'majordom.git.author_email' => 'test@example.com']);
 
     $this->project = Project::factory()->create(['repo_path' => '/tmp/fake-repo']);
     $this->execution = Execution::factory()->create(['project_id' => $this->project->id]);
@@ -128,4 +130,17 @@ it('ignores untracked files in the clean-tree guard', function () {
     app(CommitService::class)->apply($this->suggestion);
 
     expect($this->suggestion->fresh()->status)->toBe('committed');
+});
+
+it('errors clearly when no git identity is resolvable', function () {
+    config(['majordom.git.author_name' => null, 'majordom.git.author_email' => null]);
+    Process::fake([
+        "'git' 'status' '--porcelain'" => Process::result(output: ''),
+        "'git' 'merge' '--squash'*" => Process::result(output: 'ok'),
+        "'git' 'config' 'user.name'" => Process::result(output: ''),
+        "'git' 'config' 'user.email'" => Process::result(output: ''),
+    ]);
+
+    expect(fn () => app(CommitService::class)->apply($this->suggestion))
+        ->toThrow(RuntimeException::class, 'No git identity');
 });

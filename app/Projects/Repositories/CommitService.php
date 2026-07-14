@@ -45,7 +45,9 @@ class CommitService
             throw new RuntimeException('Squash merge failed: '.trim($merge->errorOutput()));
         }
 
-        $commit = Process::path($repo)->run(['git', 'commit', '-m', $suggestion->message]);
+        $commit = Process::path($repo)
+            ->env($this->committerEnv($repo))
+            ->run(['git', 'commit', '-m', $suggestion->message]);
         if (! $commit->successful()) {
             // Undo the staged squash so the checkout is left as found.
             Process::path($repo)->run(['git', 'reset', '--merge']);
@@ -108,5 +110,36 @@ class CommitService
         if ($suggestion->status !== 'suggested') {
             throw new RuntimeException('This suggestion was already resolved.');
         }
+    }
+
+    /**
+     * Committer identity, passed explicitly so the commit never depends on the
+     * app process's ambient $HOME (snap/systemd can hide ~/.gitconfig, which is
+     * why git reports "unknown author"). Prefer the configured Majordom
+     * identity; else the repo's own resolved git identity; else fail loudly.
+     *
+     * @return array<string, string>
+     */
+    private function committerEnv(string $repo): array
+    {
+        $name = config('majordom.git.author_name')
+            ?: trim(Process::path($repo)->run(['git', 'config', 'user.name'])->output());
+        $email = config('majordom.git.author_email')
+            ?: trim(Process::path($repo)->run(['git', 'config', 'user.email'])->output());
+
+        if ($name === '' || $email === '') {
+            throw new RuntimeException(
+                'No git identity available for the commit. Set MAJORDOM_GIT_AUTHOR_NAME '
+                .'and MAJORDOM_GIT_AUTHOR_EMAIL in .env (the app process may not see your '
+                .'global ~/.gitconfig), or run `git config user.name`/`user.email` in the repo.'
+            );
+        }
+
+        return [
+            'GIT_AUTHOR_NAME' => $name,
+            'GIT_AUTHOR_EMAIL' => $email,
+            'GIT_COMMITTER_NAME' => $name,
+            'GIT_COMMITTER_EMAIL' => $email,
+        ];
     }
 }
