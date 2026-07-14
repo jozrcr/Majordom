@@ -56,9 +56,29 @@
 - WIRE-TESTED: test-joac (legacy prose) → 5 milestone accordions w/
   summaries (fixes the screenshot textarea complaint); majordom self-project
   (structured) → M11 with 4 nested tasks, correct effective statuses.
-- STATUS: M11 branch (T-39 + T-41 + T-43) is **merge-ready pending owner
-  sign-off** + owner visual confirmation in-browser. T-40 (exchange trace)
-  and T-44 (metrics) still to build.
+- T-43 done + em-dash /u fix (`31777cc`) + owner roadmap scroll tweak (`350b9ff`).
+
+## T-40 + T-44 status (Opus session) — exchange trace + metrics
+
+- **T-40 exchange trace** (`a0bc7d7`,`04051b8`, review `a982f9c`): new
+  `exchanges` tab. `ExchangeTrace::for(Execution)` projects the events table →
+  ordered actor→actor hops (instruction/result/rework/verdict/…), excerpt +
+  Alpine-expandable full text, per-role usage strip. Wire-tested exec #13: the
+  4-revision rework loop → parked reads clearly. Review fix: test harness
+  (RefreshDatabase/slug/model).
+- **T-44 milestone metrics** (`fc03755`,`feded7c`, review `f8a9495`):
+  `MilestoneMetrics::forMilestone/forTask/forTasks` → tokens by role, cost,
+  human interventions, rework cycles, files changed, time-to-completion
+  (`tests_added` deferred/null). Surfaced in **Stats tab** as per-milestone
+  accordions w/ per-task drill-down. Review fixes: created missing
+  MilestoneFactory, design-token colors (not raw Tailwind), RefreshDatabase,
+  float-delta assert. Null-safe on never-run milestones (clean zeros).
+- **Suite 293/293 green.** No inline styles anywhere.
+- STATUS: **M11 COMPLETE** on `feat/m11-project-tabs` — 5 tabs (Chat,
+  Overview, Stats+metrics, Roadmap, Exchanges), all reviewed + wire-tested +
+  pushed. **Merge-ready pending owner visual confirm + sign-off.** Metrics
+  populate for NEW structured-roadmap projects (legacy prose projects show
+  milestones but zero-metric until tasks link to executions).
 
 ---
 
