@@ -26,11 +26,36 @@ class CommitService
         private readonly EventRecorder $events,
     ) {}
 
-    /** Squash-promote the WIP branch into the user's checkout and commit. */
+    /** Accept a commit suggestion (M12 milestone checkpoint, or legacy promote). */
     public function apply(CommitSuggestion $suggestion): void
     {
         $this->assertSuggested($suggestion);
         $task = $suggestion->task;
+
+        // M12: for a milestone task the work is ALREADY committed to
+        // majordom/<key> during build — this "commit" is the confirm_commits
+        // checkpoint. Accept it (mark the task done, detach the shared worktree)
+        // and let the loop advance. Promotion to main happens at the milestone
+        // boundary, never per-task.
+        if ($task && $task->milestone_id) {
+            $suggestion->update(['status' => 'committed']);
+            $task->update(['status' => TaskStatus::Approved]);
+            $this->worktrees->remove($task);
+
+            $this->events->record($suggestion->project, 'checkpoint.approved', [
+                'task_key' => $task->task_key,
+                'branch' => $suggestion->branch,
+            ], $suggestion->execution, 'you');
+
+            try {
+                app(\App\Core\Workflow\TaskChain::class)->advance($task->fresh());
+            } catch (\Throwable $e) {
+                report($e);
+            }
+
+            return;
+        }
+
         $repo = $suggestion->project->repo_path;
 
         // Untracked files can't be clobbered by a squash-merge (git aborts
@@ -73,17 +98,6 @@ class CommitService
             'branch' => $suggestion->branch,
             'task_key' => $task?->task_key,
         ], $suggestion->execution, 'you');
-
-        // Autonomy loop (M12): advance to the next task in the milestone.
-        // Fire-and-forget — a chain hiccup must never fail the commit the human
-        // just made (PHILOSOPHY: fire-and-forget never raises into this path).
-        if ($task) {
-            try {
-                app(\App\Core\Workflow\TaskChain::class)->advance($task->fresh());
-            } catch (\Throwable $e) {
-                report($e);
-            }
-        }
     }
 
     /** Owner comments become the next revision brief; a new run starts. */

@@ -24,6 +24,7 @@ class Project extends Model
         'test_command',
         'archived_at',
         'workflow_id',
+        'confirm_commits',
     ];
 
     protected function casts(): array
@@ -32,6 +33,7 @@ class Project extends Model
             'status' => ProjectStatus::class,
             'last_activity_at' => 'datetime',
             'archived_at' => 'datetime',
+            'confirm_commits' => 'boolean',
         ];
     }
 

@@ -78,6 +78,24 @@ class WorkflowEngine
                 'system'
             );
 
+            // M12 autonomy loop: in the auto-commit flow (a `finalize` node, no
+            // per-task commit checkpoint), advance to the next task in the
+            // milestone now. When the chain has a `commit_suggestion` gate
+            // (confirm_commits), the advance waits for the human's approval
+            // (CommitService::apply) instead. Fire-and-forget — never let a
+            // chain hiccup break execution completion.
+            $hasCheckpoint = $execution->nodes()->where('type', 'commit_suggestion')->exists();
+            if (! $hasCheckpoint) {
+                $task = $execution->tasks()->first();
+                if ($task) {
+                    try {
+                        app(\App\Core\Workflow\TaskChain::class)->advance($task->fresh());
+                    } catch (\Throwable $e) {
+                        report($e);
+                    }
+                }
+            }
+
             return;
         }
 
