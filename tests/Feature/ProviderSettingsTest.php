@@ -5,6 +5,7 @@ use App\Models\ProviderEndpoint;
 use App\Models\Role;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
+use Livewire\Livewire;
 
 uses()->group('settings');
 
@@ -18,7 +19,7 @@ test('providers section renders seeded builtin cards', function () {
         'is_builtin' => true,
     ]);
 
-    livewire(SettingsPage::class)
+    Livewire::test(SettingsPage::class)
         ->set('section', 'providers')
         ->assertSee('Builtin Test')
         ->assertSee('builtin_test')
@@ -26,7 +27,7 @@ test('providers section renders seeded builtin cards', function () {
 });
 
 test('add endpoint persists a row and appears in actors role-provider select', function () {
-    livewire(SettingsPage::class)
+    Livewire::test(SettingsPage::class)
         ->set('newEndpoint.name', 'my_provider')
         ->set('newEndpoint.label', 'My Provider')
         ->set('newEndpoint.driver', 'openai_compatible')
@@ -36,7 +37,7 @@ test('add endpoint persists a row and appears in actors role-provider select', f
 
     expect(ProviderEndpoint::where('name', 'my_provider')->exists())->toBeTrue();
 
-    livewire(SettingsPage::class)
+    Livewire::test(SettingsPage::class)
         ->set('section', 'actors')
         ->assertSee('My Provider');
 });
@@ -52,7 +53,7 @@ test('save with blank api_key keeps stored key; non-blank replaces; clear nulls 
         'is_builtin' => false,
     ]);
 
-    $component = livewire(SettingsPage::class)
+    $component = Livewire::test(SettingsPage::class)
         ->set('section', 'providers');
 
     // Blank keeps original
@@ -81,7 +82,7 @@ test('api_key value never appears in rendered HTML', function () {
         'is_builtin' => false,
     ]);
 
-    livewire(SettingsPage::class)
+    Livewire::test(SettingsPage::class)
         ->set('section', 'providers')
         ->assertDontSee('super-secret-key-123');
 });
@@ -96,7 +97,7 @@ test('delete builtin refused', function () {
         'is_builtin' => true,
     ]);
 
-    livewire(SettingsPage::class)
+    Livewire::test(SettingsPage::class)
         ->call('deleteEndpoint', $ep->id)
         ->assertHasErrors(['endpoint' => 'Cannot delete builtin providers.']);
 });
@@ -112,7 +113,7 @@ test('delete endpoint referenced by role refused', function () {
     ]);
     Role::create(['name' => 'test_role', 'provider' => 'used_provider', 'model' => 'gpt-4', 'is_builtin' => false]);
 
-    livewire(SettingsPage::class)
+    Livewire::test(SettingsPage::class)
         ->call('deleteEndpoint', $ep->id)
         ->assertHasErrors(['endpoint' => 'Cannot delete providers referenced by roles.']);
 });
@@ -127,7 +128,7 @@ test('delete unreferenced custom endpoint succeeds', function () {
         'is_builtin' => false,
     ]);
 
-    livewire(SettingsPage::class)
+    Livewire::test(SettingsPage::class)
         ->call('deleteEndpoint', $ep->id)
         ->assertHasNoErrors();
 
@@ -148,7 +149,7 @@ test('testEndpoint success returns ok', function () {
         'test.ok.com/models' => Http::response(['data' => []], 200),
     ]);
 
-    livewire(SettingsPage::class)
+    Livewire::test(SettingsPage::class)
         ->call('testEndpoint', $ep->id)
         ->assertSet("endpointTestResults.{$ep->id}", 'ok');
 });
@@ -164,10 +165,10 @@ test('testEndpoint connection failure returns fail', function () {
     ]);
 
     Http::fake([
-        'test.fail.com/*' => Http::sequence()->pushFault(new ConnectionException('Connection refused')),
+        'test.fail.com/*' => fn () => throw new ConnectionException('Connection refused'),
     ]);
 
-    livewire(SettingsPage::class)
+    Livewire::test(SettingsPage::class)
         ->call('testEndpoint', $ep->id)
         ->assertSet("endpointTestResults.{$ep->id}", 'fail');
 });
