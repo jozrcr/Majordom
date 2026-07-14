@@ -51,28 +51,7 @@ class FakeCoordinator extends ResourceCoordinator
     }
 }
 
-function setupMemoryRoot(): string
-{
-    $root = sys_get_temp_dir().'/majordom-test-'.uniqid();
-    Config::set('majordom.memory_root', $root);
-    return $root;
-}
-
-function createExecutionWithTask(array $taskAttrs = [], array $projectAttrs = []): array
-{
-    $project = Project::factory()->create($projectAttrs);
-    $task = Task::factory()->create(array_merge([
-        'project_id' => $project->id,
-        'task_key' => 'feat-1',
-        'branch' => 'feat/branch-1',
-        'status' => TaskStatus::Pending,
-        'revision' => 1,
-    ], $taskAttrs));
-    $execution = Execution::factory()->create(['project_id' => $project->id]);
-    $execution->tasks()->save($task);
-    $node = Node::factory()->create(['execution_id' => $execution->id]);
-    return [$execution, $task, $node, $project];
-}
+// Shared helpers setupMemoryRoot() / createExecutionWithTask() live in tests/Pest.php
 
 test('DelegateNode writes role.md, creates worktree, and sets task to Building', function () {
     setupMemoryRoot();

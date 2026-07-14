@@ -10,5 +10,10 @@ final readonly class ProviderRequest
         public ?int $maxTokens = null,
         public ?float $temperature = null,
         public bool $jsonMode = false,
+        public ?float $topP = null,
+        public ?float $frequencyPenalty = null,
+        public ?float $presencePenalty = null,
+        public ?array $stop = null,
+        public ?int $timeout = null,
     ) {}
 }

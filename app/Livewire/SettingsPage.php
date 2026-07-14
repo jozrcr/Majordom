@@ -3,10 +3,14 @@
 namespace App\Livewire;
 
 use App\Core\Workflow\ChainStep;
+use App\Models\ProviderEndpoint;
 use App\Models\Role;
 use App\Models\Workflow;
 use App\Support\Setting;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Validation\Rule;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
 use Livewire\Component;
@@ -36,8 +40,14 @@ class SettingsPage extends Component
     public string $chainPick = '';
     public ?int $editingId = null;
     public array $availableRoles = [];
+    public array $providerOptions = [];
 
-    /** Feedback marker: which thing was just saved ('role:{id}', 'workflow-settings'). */
+    // Provider endpoints state
+    public array $endpointDrafts = [];
+    public array $newEndpoint = ['name' => '', 'label' => '', 'driver' => 'openai_compatible', 'base_url' => '', 'api_key' => ''];
+    public array $endpointTestResults = [];
+
+    /** Feedback marker: which thing was just saved ('role:{id}', 'workflow-settings', 'endpoint:{id}'). */
     public ?string $justSaved = null;
 
     public function mount(): void
@@ -45,21 +55,31 @@ class SettingsPage extends Component
         $this->loadRoles();
         $this->loadWorkflow();
         $this->loadIntegrations();
+        $this->loadEndpoints();
         $this->availableRoles = array_values(array_unique(array_merge(
             ['builder', 'reviewer', 'architect'],
             Role::whereNull('project_id')->pluck('name')->toArray(),
         )));
+        $this->providerOptions = ProviderEndpoint::orderBy('name')->pluck('label', 'name')->toArray();
     }
 
     public function loadRoles(): void
     {
         $roles = Role::whereNull('project_id')->orderBy('is_builtin', 'desc')->orderBy('name')->get();
         foreach ($roles as $role) {
+            $meta = $role->meta ?? [];
             $this->roleDrafts[$role->id] = [
                 'provider' => $role->provider,
                 'model' => $role->model,
                 'temperature' => $role->temperature,
                 'max_tokens' => $role->max_tokens,
+                'system_prompt_extra' => $meta['system_prompt_extra'] ?? '',
+                'extra_instructions' => $meta['extra_instructions'] ?? '',
+                'top_p' => $meta['top_p'] ?? '',
+                'frequency_penalty' => $meta['frequency_penalty'] ?? '',
+                'presence_penalty' => $meta['presence_penalty'] ?? '',
+                'stop' => isset($meta['stop']) && is_array($meta['stop']) ? implode(', ', $meta['stop']) : '',
+                'timeout' => $meta['timeout'] ?? '',
             ];
         }
     }
@@ -85,21 +105,49 @@ class SettingsPage extends Component
         $this->reverbHost = config('broadcasting.connections.reverb.host', '') . ':' . (config('broadcasting.connections.reverb.port', ''));
     }
 
+    public function loadEndpoints(): void
+    {
+        $endpoints = ProviderEndpoint::orderBy('is_builtin', 'desc')->orderBy('name')->get();
+        foreach ($endpoints as $ep) {
+            $this->endpointDrafts[$ep->id] = [
+                'name' => $ep->name,
+                'driver' => $ep->driver,
+                'is_builtin' => $ep->is_builtin,
+                'has_key' => $ep->api_key !== null,
+                'label' => $ep->label,
+                'base_url' => $ep->base_url,
+                'timeout' => $ep->timeout,
+                'api_key' => '',
+            ];
+        }
+    }
+
     public function saveRole(string $id): void
     {
         $role = Role::findOrFail($id);
         $validated = $this->validate([
-            "roleDrafts.{$id}.provider" => 'required|in:openrouter,metallama',
+            "roleDrafts.{$id}.provider" => ['required', Rule::exists('provider_endpoints', 'name')],
             "roleDrafts.{$id}.model" => 'required|string',
             "roleDrafts.{$id}.temperature" => 'nullable|numeric|min:0|max:2',
             "roleDrafts.{$id}.max_tokens" => 'nullable|integer|min:0',
+            "roleDrafts.{$id}.system_prompt_extra" => 'nullable|string',
+            "roleDrafts.{$id}.extra_instructions" => 'nullable|string',
+            "roleDrafts.{$id}.top_p" => 'nullable|numeric|min:0|max:1',
+            "roleDrafts.{$id}.frequency_penalty" => 'nullable|numeric|min:-2|max:2',
+            "roleDrafts.{$id}.presence_penalty" => 'nullable|numeric|min:-2|max:2',
+            "roleDrafts.{$id}.stop" => 'nullable|string',
+            "roleDrafts.{$id}.timeout" => 'nullable|integer|min:5|max:3600',
         ]);
+
+        $meta = $role->meta ?? [];
+        $this->applyMeta($meta, $validated, $id);
 
         $role->update([
             'provider' => data_get($validated, "roleDrafts.{$id}.provider"),
             'model' => data_get($validated, "roleDrafts.{$id}.model"),
             'temperature' => data_get($validated, "roleDrafts.{$id}.temperature"),
             'max_tokens' => data_get($validated, "roleDrafts.{$id}.max_tokens"),
+            'meta' => $meta,
         ]);
 
         $this->justSaved = "role:{$id}";
@@ -110,24 +158,62 @@ class SettingsPage extends Component
     {
         $rules = [];
         foreach (array_keys($this->roleDrafts) as $id) {
-            $rules["roleDrafts.{$id}.provider"] = 'required|in:openrouter,metallama';
+            $rules["roleDrafts.{$id}.provider"] = ['required', Rule::exists('provider_endpoints', 'name')];
             $rules["roleDrafts.{$id}.model"] = 'required|string';
             $rules["roleDrafts.{$id}.temperature"] = 'nullable|numeric|min:0|max:2';
             $rules["roleDrafts.{$id}.max_tokens"] = 'nullable|integer|min:0';
+            $rules["roleDrafts.{$id}.system_prompt_extra"] = 'nullable|string';
+            $rules["roleDrafts.{$id}.extra_instructions"] = 'nullable|string';
+            $rules["roleDrafts.{$id}.top_p"] = 'nullable|numeric|min:0|max:1';
+            $rules["roleDrafts.{$id}.frequency_penalty"] = 'nullable|numeric|min:-2|max:2';
+            $rules["roleDrafts.{$id}.presence_penalty"] = 'nullable|numeric|min:-2|max:2';
+            $rules["roleDrafts.{$id}.stop"] = 'nullable|string';
+            $rules["roleDrafts.{$id}.timeout"] = 'nullable|integer|min:5|max:3600';
         }
 
         $validated = $this->validate($rules);
 
         foreach (Role::whereIn('id', array_keys($this->roleDrafts))->get() as $role) {
+            $meta = $role->meta ?? [];
+            $this->applyMeta($meta, $validated, $role->id);
+
             $role->update([
                 'provider' => data_get($validated, "roleDrafts.{$role->id}.provider"),
                 'model' => data_get($validated, "roleDrafts.{$role->id}.model"),
                 'temperature' => data_get($validated, "roleDrafts.{$role->id}.temperature"),
                 'max_tokens' => data_get($validated, "roleDrafts.{$role->id}.max_tokens"),
+                'meta' => $meta,
             ]);
         }
 
         $this->justSaved = 'roles';
+    }
+
+    private function applyMeta(array &$meta, array $validated, string $id): void
+    {
+        $extraSystem = trim(data_get($validated, "roleDrafts.{$id}.system_prompt_extra") ?? '');
+        $extraInstr = trim(data_get($validated, "roleDrafts.{$id}.extra_instructions") ?? '');
+        $topP = trim(data_get($validated, "roleDrafts.{$id}.top_p") ?? '');
+        $freqPen = trim(data_get($validated, "roleDrafts.{$id}.frequency_penalty") ?? '');
+        $presPen = trim(data_get($validated, "roleDrafts.{$id}.presence_penalty") ?? '');
+        $stopRaw = trim(data_get($validated, "roleDrafts.{$id}.stop") ?? '');
+        $timeout = trim(data_get($validated, "roleDrafts.{$id}.timeout") ?? '');
+
+        if ($extraSystem !== '') $meta['system_prompt_extra'] = $extraSystem; else unset($meta['system_prompt_extra']);
+        if ($extraInstr !== '') $meta['extra_instructions'] = $extraInstr; else unset($meta['extra_instructions']);
+        if ($topP !== '') $meta['top_p'] = (float) $topP; else unset($meta['top_p']);
+        if ($freqPen !== '') $meta['frequency_penalty'] = (float) $freqPen; else unset($meta['frequency_penalty']);
+        if ($presPen !== '') $meta['presence_penalty'] = (float) $presPen; else unset($meta['presence_penalty']);
+        
+        if ($stopRaw !== '') {
+            $stopArr = array_map('trim', explode(',', $stopRaw));
+            $stopArr = array_filter($stopArr, fn($s) => $s !== '');
+            $meta['stop'] = array_slice($stopArr, 0, 4);
+        } else {
+            unset($meta['stop']);
+        }
+        
+        if ($timeout !== '') $meta['timeout'] = (int) $timeout; else unset($meta['timeout']);
     }
 
     public function deleteRole(string $id): void
@@ -143,7 +229,7 @@ class SettingsPage extends Component
     {
         $validated = $this->validate([
             'newRole.name' => 'required|string|alpha_dash|unique:roles,name',
-            'newRole.provider' => 'required|in:openrouter,metallama',
+            'newRole.provider' => ['required', Rule::exists('provider_endpoints', 'name')],
             'newRole.model' => 'required|string',
         ]);
 
@@ -160,6 +246,13 @@ class SettingsPage extends Component
             'model' => $role->model,
             'temperature' => null,
             'max_tokens' => null,
+            'system_prompt_extra' => '',
+            'extra_instructions' => '',
+            'top_p' => '',
+            'frequency_penalty' => '',
+            'presence_penalty' => '',
+            'stop' => '',
+            'timeout' => '',
         ];
         $this->reset('newRole');
     }
@@ -284,6 +377,97 @@ class SettingsPage extends Component
     {
         unset($this->chainDraft[$index]);
         $this->chainDraft = array_values($this->chainDraft);
+    }
+
+    // Provider Endpoints CRUD
+    public function saveEndpoint(string $id): void
+    {
+        $ep = ProviderEndpoint::findOrFail($id);
+        $validated = $this->validate([
+            "endpointDrafts.{$id}.label" => 'required|string',
+            "endpointDrafts.{$id}.base_url" => 'required|url',
+            "endpointDrafts.{$id}.timeout" => 'required|integer|min:5|max:3600',
+            "endpointDrafts.{$id}.api_key" => 'nullable|string',
+        ]);
+
+        $updateData = [
+            'label' => data_get($validated, "endpointDrafts.{$id}.label"),
+            'base_url' => rtrim(data_get($validated, "endpointDrafts.{$id}.base_url"), '/'),
+            'timeout' => data_get($validated, "endpointDrafts.{$id}.timeout"),
+        ];
+
+        $newKey = data_get($validated, "endpointDrafts.{$id}.api_key");
+        if ($newKey !== null && $newKey !== '') {
+            $updateData['api_key'] = $newKey;
+        }
+
+        $ep->update($updateData);
+        $this->loadEndpoints();
+        $this->justSaved = "endpoint:{$id}";
+    }
+
+    public function clearEndpointKey(string $id): void
+    {
+        $ep = ProviderEndpoint::findOrFail($id);
+        $ep->update(['api_key' => null]);
+        $this->loadEndpoints();
+    }
+
+    public function addEndpoint(): void
+    {
+        $validated = $this->validate([
+            'newEndpoint.name' => 'required|alpha_dash|unique:provider_endpoints,name',
+            'newEndpoint.label' => 'required|string',
+            'newEndpoint.driver' => 'required|in:openai_compatible,metallama',
+            'newEndpoint.base_url' => 'required|url',
+            'newEndpoint.api_key' => 'nullable|string',
+        ]);
+
+        ProviderEndpoint::create([
+            'name' => strtolower(data_get($validated, 'newEndpoint.name')),
+            'label' => data_get($validated, 'newEndpoint.label'),
+            'driver' => data_get($validated, 'newEndpoint.driver'),
+            'base_url' => rtrim(data_get($validated, 'newEndpoint.base_url'), '/'),
+            'api_key' => data_get($validated, 'newEndpoint.api_key') ?: null,
+            'timeout' => 30,
+            'is_builtin' => false,
+        ]);
+
+        $this->reset('newEndpoint');
+        $this->loadEndpoints();
+    }
+
+    public function deleteEndpoint(string $id): void
+    {
+        $ep = ProviderEndpoint::findOrFail($id);
+        if ($ep->is_builtin) {
+            $this->addError('endpoint', 'Cannot delete builtin providers.');
+            return;
+        }
+        if (Role::where('provider', $ep->name)->exists()) {
+            $this->addError('endpoint', 'Cannot delete providers referenced by roles.');
+            return;
+        }
+        $ep->delete();
+        $this->loadEndpoints();
+    }
+
+    public function testEndpoint(string $id): void
+    {
+        $ep = ProviderEndpoint::findOrFail($id);
+        try {
+            $response = Http::baseUrl($ep->chatBaseUrl())
+                ->timeout(5)
+                ->withHeaders(['Accept' => 'application/json'])
+                ->when($ep->resolvedApiKey(), fn($h) => $h->withToken($ep->resolvedApiKey()))
+                ->get('/models');
+
+            $this->endpointTestResults[$id] = $response->successful() ? 'ok' : 'fail';
+        } catch (ConnectionException $e) {
+            $this->endpointTestResults[$id] = 'fail';
+        } catch (\Throwable $e) {
+            $this->endpointTestResults[$id] = 'fail';
+        }
     }
 
     public function render()

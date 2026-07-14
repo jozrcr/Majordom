@@ -48,3 +48,26 @@ function something()
 {
     // ..
 }
+
+function setupMemoryRoot(): string
+{
+    $root = sys_get_temp_dir().'/majordom-test-'.uniqid();
+    \Illuminate\Support\Facades\Config::set('majordom.memory_root', $root);
+    return $root;
+}
+
+function createExecutionWithTask(array $taskAttrs = [], array $projectAttrs = []): array
+{
+    $project = \App\Models\Project::factory()->create($projectAttrs);
+    $task = \App\Models\Task::factory()->create(array_merge([
+        'project_id' => $project->id,
+        'task_key' => 'feat-1',
+        'branch' => 'feat/branch-1',
+        'status' => \App\Enums\TaskStatus::Pending,
+        'revision' => 1,
+    ], $taskAttrs));
+    $execution = \App\Models\Execution::factory()->create(['project_id' => $project->id]);
+    $execution->tasks()->save($task);
+    $node = \App\Models\Node::factory()->create(['execution_id' => $execution->id]);
+    return [$execution, $task, $node, $project];
+}

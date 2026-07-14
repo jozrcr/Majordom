@@ -2,7 +2,7 @@
 
 namespace App\Agents\Architect;
 
-use App\Agents\Providers\Provider;
+use App\Agents\Providers\ProviderRegistry;
 use App\Agents\Providers\ProviderRequest;
 use App\Core\Events\EventRecorder;
 use App\Core\Usage\UsageLedger;
@@ -24,7 +24,7 @@ use App\Support\RoleResolver;
 class ArchitectService
 {
     public function __construct(
-        private readonly Provider $provider,
+        private readonly ProviderRegistry $providers,
         private readonly MemoryStore $memory,
     ) {}
 
@@ -47,12 +47,18 @@ class ArchitectService
 
         $binding = app(RoleResolver::class)->resolve('architect', $project);
 
-        $response = $this->provider->chat(new ProviderRequest(
+        $extraSystem = $binding->meta['system_prompt_extra'] ?? null;
+        $response = $this->providers->forBinding($binding)->chat(new ProviderRequest(
             model: $binding->model,
-            messages: $this->buildMessages($project),
+            messages: $this->buildMessages($project, $extraSystem),
             maxTokens: $binding->maxTokens,
             temperature: $binding->temperature,
             jsonMode: true,
+            topP: isset($binding->meta['top_p']) ? (float) $binding->meta['top_p'] : null,
+            frequencyPenalty: isset($binding->meta['frequency_penalty']) ? (float) $binding->meta['frequency_penalty'] : null,
+            presencePenalty: isset($binding->meta['presence_penalty']) ? (float) $binding->meta['presence_penalty'] : null,
+            stop: isset($binding->meta['stop']) ? $binding->meta['stop'] : null,
+            timeout: isset($binding->meta['timeout']) ? (int) $binding->meta['timeout'] : null,
         ));
 
         app(UsageLedger::class)->record(
@@ -152,15 +158,21 @@ class ArchitectService
     {
         $binding = app(RoleResolver::class)->resolve('architect', $project);
 
-        $response = $this->provider->chat(new ProviderRequest(
+        $extraSystem = $binding->meta['system_prompt_extra'] ?? null;
+        $response = $this->providers->forBinding($binding)->chat(new ProviderRequest(
             model: $binding->model,
-            messages: array_merge($this->buildMessages($project), [[
+            messages: array_merge($this->buildMessages($project, $extraSystem), [[
                 'role' => 'user',
                 'content' => self::PLAN_PROMPT,
             ]]),
             maxTokens: (int) config('majordom.architect.plan_max_tokens', 8000),
             temperature: $binding->temperature,
             jsonMode: true,
+            topP: isset($binding->meta['top_p']) ? (float) $binding->meta['top_p'] : null,
+            frequencyPenalty: isset($binding->meta['frequency_penalty']) ? (float) $binding->meta['frequency_penalty'] : null,
+            presencePenalty: isset($binding->meta['presence_penalty']) ? (float) $binding->meta['presence_penalty'] : null,
+            stop: isset($binding->meta['stop']) ? $binding->meta['stop'] : null,
+            timeout: isset($binding->meta['timeout']) ? (int) $binding->meta['timeout'] : null,
         ));
 
         app(UsageLedger::class)->record(
@@ -222,11 +234,11 @@ class ArchitectService
     }
 
     /** @return array<int, array{role: string, content: string}> */
-    private function buildMessages(Project $project): array
+    private function buildMessages(Project $project, ?string $extraSystemPrompt = null): array
     {
         $messages = [[
             'role' => 'system',
-            'content' => $this->systemPrompt($project),
+            'content' => $this->systemPrompt($project, $extraSystemPrompt),
         ]];
 
         foreach ($project->consensusMessages()->orderBy('id')->get() as $m) {
@@ -241,14 +253,14 @@ class ArchitectService
         return $messages;
     }
 
-    private function systemPrompt(Project $project): string
+    private function systemPrompt(Project $project, ?string $extraSystemPrompt = null): string
     {
         $open = $project->openQuestions()->pluck('text')->all();
         $openBlock = $open === []
             ? 'There are currently no unanswered questions.'
             : "Unanswered questions you have already raised (do NOT re-raise them):\n- ".implode("\n- ", $open);
 
-        return <<<PROMPT
+        $prompt = <<<PROMPT
 You are the Architect of the software project "{$project->name}" (repository: {$project->repo_path}).
 Your single goal in this conversation is to reach consensus with the human owner on WHAT to build — before any plan is made.
 
@@ -270,6 +282,12 @@ Rules:
 4. Keep "reply" concise; the owner reads it in a chat pane.
 5. The owner may answer a question in their own words instead of picking an option — including deferring to you ("your call"). Treat a deferral as a real answer: make a sensible decision, state it explicitly in "reply", and do not re-ask.
 PROMPT;
+
+        if ($extraSystemPrompt !== null && trim($extraSystemPrompt) !== '') {
+            $prompt .= "\n\n" . trim($extraSystemPrompt);
+        }
+
+        return $prompt;
     }
 
     private const PLAN_PROMPT = <<<'PROMPT'

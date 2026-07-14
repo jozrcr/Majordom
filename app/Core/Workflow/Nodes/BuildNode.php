@@ -12,6 +12,7 @@ use App\Enums\NodeStatus;
 use App\Enums\TaskStatus;
 use App\Models\Execution;
 use App\Models\Node;
+use App\Models\ProviderEndpoint;
 use App\Models\Task;
 use App\Projects\Memory\MemoryStore;
 use App\Runtime\Metallama\ResourceCoordinator;
@@ -34,17 +35,18 @@ class BuildNode extends NodeJob
         $roleName = $node->input['role'] ?? 'builder';
         $binding = app(RoleResolver::class)->resolve($roleName, $task->project);
 
-        // Frontier roles (e.g. a rescue) drive aider against OpenRouter's
-        // OpenAI-compatible endpoint — no local model to boot or serialize.
-        if ($binding->provider === 'metallama') {
+        $endpoint = ProviderEndpoint::named($binding->provider);
+        if (! $endpoint) {
+            return NodeResult::failed("Unknown provider endpoint: {$binding->provider}");
+        }
+
+        if ($endpoint->driver === 'metallama') {
             $managedModel = $binding->meta['managed_model'] ?? $binding->model;
             app(ResourceCoordinator::class)->ensure($managedModel);
-            $endpointBaseUrl = config('majordom.metallama.base_url').'/ollama/v1';
-            $apiKey = null;
-        } else {
-            $endpointBaseUrl = config('majordom.providers.openrouter.base_url');
-            $apiKey = config('majordom.providers.openrouter.api_key');
         }
+
+        $endpointBaseUrl = $endpoint->chatBaseUrl();
+        $apiKey = $endpoint->resolvedApiKey();
 
         $memory = app(MemoryStore::class);
         $project = $task->project;
@@ -60,6 +62,11 @@ class BuildNode extends NodeJob
             }
         }
         $taskPrompt = $memory->read($project, $taskBriefPath) ?? '';
+
+        $extraInstructions = $binding->meta['extra_instructions'] ?? null;
+        if ($extraInstructions !== null && trim($extraInstructions) !== '') {
+            $taskPrompt .= "\n\n## Owner role instructions\n\n" . trim($extraInstructions);
+        }
 
         // Collect fileHints from latest review node
         $fileHints = [];

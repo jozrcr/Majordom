@@ -49,9 +49,25 @@ class OpenAiCompatibleProvider implements Provider
             $body['response_format'] = ['type' => 'json_object'];
         }
 
+        if ($request->topP !== null) {
+            $body['top_p'] = $request->topP;
+        }
+
+        if ($request->frequencyPenalty !== null) {
+            $body['frequency_penalty'] = $request->frequencyPenalty;
+        }
+
+        if ($request->presencePenalty !== null) {
+            $body['presence_penalty'] = $request->presencePenalty;
+        }
+
+        if ($request->stop !== null) {
+            $body['stop'] = $request->stop;
+        }
+
         try {
             $response = Http::baseUrl($this->baseUrl)
-                ->timeout($this->timeout)
+                ->timeout($request->timeout ?? $this->timeout)
                 ->acceptJson()
                 ->withToken($this->apiKey)
                 ->withHeaders($this->extraHeaders)

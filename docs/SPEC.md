@@ -175,7 +175,8 @@ app/
     Metallama/     the HTTP client + resource coordinator  (docs/METALLAMA.md)
   Agents/
     Harness/       the Harness interface + AiderHarness     (docs/HARNESS.md)
-    Providers/     Provider interface + Anthropic / OpenAI-compatible clients
+    Providers/     Provider interface + OpenAI-compatible client + ProviderRegistry
+                   (resolves role → provider_endpoints row → configured client)
     Architect/     prompts + consensus/plan/decompose/review orchestration
     Builder/       task-brief assembly + harness invocation
     Reviewer/      diff-review orchestration
@@ -287,9 +288,35 @@ Reverb for live updates.
 
 Two layers: **global defaults** and **per-project overrides**. Resolution order:
 `project override > global default > built-in default`. Stored in DB (`settings`,
-`services`, `roles`) with a thin resolver in `Support/`. This is where "swap the
-model/source for a role" lives (Q16), and it's why roles are indirection over
-services rather than hardcoded model names.
+`provider_endpoints`, `roles`) with a thin resolver in `Support/`. This is where
+"swap the model/source for a role" lives (Q16), and it's why roles are indirection
+over services rather than hardcoded model names.
+
+**Provider endpoints** (M10): every LLM target is a `provider_endpoints` row —
+`name`, `driver` (`openai_compatible` | `metallama`), `base_url`, encrypted
+`api_key`, `timeout`, `meta`. Roles reference endpoints by name;
+`ProviderRegistry` turns a `RoleBinding` into a configured client, and
+`BuildNode` only engages the metallama `ResourceCoordinator` when the resolved
+endpoint's driver is `metallama` (frontier roles bypass it entirely). Built-in
+rows (openrouter, metallama) do **not** freeze their secrets/URLs at migration
+time: they carry `meta.api_key_config` / `meta.base_url_config` pointers so the
+live value keeps tracking config/env; custom rows store literal values and the
+column wins. Rule: any change to provider resolution updates this section in
+the same commit.
+
+**Role developer view** (M10/T-37): each role card carries optional advanced
+knobs in `roles.meta` (no dedicated columns): `system_prompt_extra` (thinker
+roles — appended as a trailing paragraph to the built-in system prompt, never
+replacing it: the structured-JSON output contracts live in the built-in part),
+`extra_instructions` (builder-type roles — appended to the task message as an
+`## Owner role instructions` block, since aider owns its own system prompt),
+plus `top_p`, `frequency_penalty`, `presence_penalty`, `stop` (≤4 strings),
+`timeout`. Absent key = today's behavior: the UI omits keys on blank input,
+`ProviderRequest` carries them as nullables appended after the original
+params, and `OpenAiCompatibleProvider` includes them in the body only when
+non-null (`timeout` falls back to the endpoint's). Numeric values are cast on
+read (`(float)`/`(int)`) because the JSON column round-trip may demote e.g.
+`-1.0` to `-1`.
 
 ## 11. Non-goals / deferred (do not build in v1)
 

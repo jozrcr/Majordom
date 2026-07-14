@@ -83,20 +83,6 @@ test('ArchitectService uses a DB role', function () {
 
     $project = Project::factory()->create();
 
-    $capturedModel = null;
-    app()->bind(\App\Agents\Providers\Provider::class, function () use (&$capturedModel) {
-        return new class {
-            public function chat($request) {
-                // Capture the model from the incoming ProviderRequest
-                return (object)[
-                    'content' => json_encode(['reply' => 'ok', 'questions' => [], 'consensus_reached' => false]),
-                    'promptTokens' => 10,
-                    'completionTokens' => 20,
-                ];
-            }
-        };
-    });
-
     $fakeProvider = new class implements \App\Agents\Providers\Provider {
         public static $lastRequest = null;
         public function chat(\App\Agents\Providers\ProviderRequest $request): \App\Agents\Providers\ProviderResponse {
@@ -110,7 +96,7 @@ test('ArchitectService uses a DB role', function () {
     app()->instance(\App\Agents\Providers\Provider::class, $fakeProvider);
 
     $service = new \App\Agents\Architect\ArchitectService(
-        app(\App\Agents\Providers\Provider::class),
+        app(\App\Agents\Providers\ProviderRegistry::class),
         app(\App\Projects\Memory\MemoryStore::class)
     );
 
