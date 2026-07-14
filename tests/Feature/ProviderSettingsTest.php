@@ -172,3 +172,126 @@ test('testEndpoint connection failure returns fail', function () {
         ->call('testEndpoint', $ep->id)
         ->assertSet("endpointTestResults.{$ep->id}", 'fail');
 });
+
+test('save while not changing key leaves stored key untouched', function () {
+    $ep = ProviderEndpoint::create([
+        'name' => 'key_unchanged',
+        'label' => 'Key Unchanged',
+        'driver' => 'openai_compatible',
+        'base_url' => 'https://unchanged.com',
+        'api_key' => 'original',
+        'timeout' => 30,
+        'is_builtin' => false,
+    ]);
+
+    Livewire::test(SettingsPage::class)
+        ->set('section', 'providers')
+        ->set("endpointDrafts.{$ep->id}.api_key", 'leaked-key')
+        ->call("saveEndpoint", $ep->id);
+
+    expect($ep->fresh()->api_key)->toBe('original');
+});
+
+test('startChangeKey + set + save persists new key and resets state', function () {
+    $ep = ProviderEndpoint::create([
+        'name' => 'key_change',
+        'label' => 'Key Change',
+        'driver' => 'openai_compatible',
+        'base_url' => 'https://change.com',
+        'api_key' => 'old',
+        'timeout' => 30,
+        'is_builtin' => false,
+    ]);
+
+    $component = Livewire::test(SettingsPage::class)
+        ->set('section', 'providers')
+        ->call("startChangeKey", $ep->id)
+        ->assertSet("changingKey.{$ep->id}", true)
+        ->set("endpointDrafts.{$ep->id}.api_key", 'new-secret')
+        ->call("saveEndpoint", $ep->id);
+
+    expect($ep->fresh()->api_key)->toBe('new-secret');
+    $component->assertSet("changingKey.{$ep->id}", false)
+        ->assertSet("endpointDrafts.{$ep->id}.api_key", '');
+});
+
+test('cancelChangeKey blanks draft and prevents save', function () {
+    $ep = ProviderEndpoint::create([
+        'name' => 'key_cancel',
+        'label' => 'Key Cancel',
+        'driver' => 'openai_compatible',
+        'base_url' => 'https://cancel.com',
+        'api_key' => 'original',
+        'timeout' => 30,
+        'is_builtin' => false,
+    ]);
+
+    $component = Livewire::test(SettingsPage::class)
+        ->set('section', 'providers')
+        ->call("startChangeKey", $ep->id)
+        ->set("endpointDrafts.{$ep->id}.api_key", 'temp-key')
+        ->call("cancelChangeKey", $ep->id);
+
+    $component->assertSet("changingKey.{$ep->id}", false)
+        ->assertSet("endpointDrafts.{$ep->id}.api_key", '');
+        
+    $component->call("saveEndpoint", $ep->id);
+    expect($ep->fresh()->api_key)->toBe('original');
+});
+
+test('env-sourced endpoint has key_source env and startChangeKey is no-op', function () {
+    $ep = ProviderEndpoint::create([
+        'name' => 'env_key',
+        'label' => 'Env Key',
+        'driver' => 'openai_compatible',
+        'base_url' => 'https://env.com',
+        'api_key' => null,
+        'meta' => ['api_key_config' => 'services.openai.key'],
+        'timeout' => 30,
+        'is_builtin' => true,
+    ]);
+
+    $component = Livewire::test(SettingsPage::class)
+        ->set('section', 'providers')
+        ->assertSet("endpointDrafts.{$ep->id}.key_source", 'env')
+        ->assertSet("endpointDrafts.{$ep->id}.key_config", 'services.openai.key')
+        ->call("startChangeKey", $ep->id);
+
+    $component->assertSet("changingKey.{$ep->id}", false);
+});
+
+test('clear action nulls db key and updates key_source to none', function () {
+    $ep = ProviderEndpoint::create([
+        'name' => 'key_clear',
+        'label' => 'Key Clear',
+        'driver' => 'openai_compatible',
+        'base_url' => 'https://clear.com',
+        'api_key' => 'secret',
+        'timeout' => 30,
+        'is_builtin' => false,
+    ]);
+
+    Livewire::test(SettingsPage::class)
+        ->set('section', 'providers')
+        ->call("clearEndpointKey", $ep->id);
+
+    expect($ep->fresh()->api_key)->toBeNull();
+    
+    Livewire::test(SettingsPage::class)
+        ->set('section', 'providers')
+        ->assertSet("endpointDrafts.{$ep->id}.key_source", 'none');
+});
+
+test('creation with a key still works', function () {
+    Livewire::test(SettingsPage::class)
+        ->set('newEndpoint.name', 'new_with_key')
+        ->set('newEndpoint.label', 'New With Key')
+        ->set('newEndpoint.driver', 'openai_compatible')
+        ->set('newEndpoint.base_url', 'https://new.com/v1')
+        ->set('newEndpoint.api_key', 'brand-new-key')
+        ->call('addEndpoint')
+        ->assertHasNoErrors();
+
+    $ep = ProviderEndpoint::where('name', 'new_with_key')->first();
+    expect($ep->api_key)->toBe('brand-new-key');
+});

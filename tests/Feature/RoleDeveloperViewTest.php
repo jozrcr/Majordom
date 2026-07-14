@@ -243,3 +243,30 @@ test('Livewire blank developer fields do not pollute meta', function () {
     $role->refresh();
     expect($role->meta)->not->toHaveKey('top_p');
 });
+
+test('role pointing at metallama endpoint has knobs_inert true', function () {
+    ProviderEndpoint::create(['name' => 'meta_ep', 'label' => 'Meta', 'driver' => 'metallama', 'base_url' => 'http://meta.local', 'timeout' => 30, 'is_builtin' => false]);
+    $role = Role::create(['name' => 'meta-role', 'provider' => 'meta_ep', 'model' => 'llama', 'is_builtin' => false]);
+
+    Livewire::test(SettingsPage::class)
+        ->assertSet("roleDrafts.{$role->id}.knobs_inert", true);
+});
+
+test('role pointing at openai endpoint has knobs_inert false', function () {
+    ProviderEndpoint::create(['name' => 'open_ep', 'label' => 'Open', 'driver' => 'openai_compatible', 'base_url' => 'http://open.local', 'timeout' => 30, 'is_builtin' => false]);
+    $role = Role::create(['name' => 'open-role', 'provider' => 'open_ep', 'model' => 'gpt-4', 'is_builtin' => false]);
+
+    Livewire::test(SettingsPage::class)
+        ->assertSet("roleDrafts.{$role->id}.knobs_inert", false);
+});
+
+test('changing draft provider flips knobs_inert', function () {
+    ProviderEndpoint::create(['name' => 'open_flip', 'label' => 'Open Flip', 'driver' => 'openai_compatible', 'base_url' => 'http://open.local', 'timeout' => 30, 'is_builtin' => false]);
+    ProviderEndpoint::create(['name' => 'meta_flip', 'label' => 'Meta Flip', 'driver' => 'metallama', 'base_url' => 'http://meta.local', 'timeout' => 30, 'is_builtin' => false]);
+    $role = Role::create(['name' => 'flip-role', 'provider' => 'open_flip', 'model' => 'gpt-4', 'is_builtin' => false]);
+
+    Livewire::test(SettingsPage::class)
+        ->assertSet("roleDrafts.{$role->id}.knobs_inert", false)
+        ->set("roleDrafts.{$role->id}.provider", 'meta_flip')
+        ->assertSet("roleDrafts.{$role->id}.knobs_inert", true);
+});
