@@ -94,6 +94,17 @@ class WorktreeManager
             return;
         }
 
+        // A shared milestone worktree is removed at milestone merge, never
+        // per-task — just detach this task from it so a sibling can keep using
+        // it (M12). Only per-task (legacy) worktrees are physically removed here.
+        if ($task->milestone_id
+            && $task->worktree_path === $this->pathForMilestone($task->project, $task->milestone)) {
+            $task->worktree_path = null;
+            $task->save();
+
+            return;
+        }
+
         $repoPath = $task->project->repo_path;
         $result = Process::path($repoPath)->run([
             'git', 'worktree', 'remove', '--force', $task->worktree_path
