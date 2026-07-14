@@ -8,14 +8,17 @@ use App\Models\Project;
 use App\Models\Task;
 use App\Models\UsageRecord;
 use App\Projects\Exchanges\ExchangeTrace;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
 use Tests\TestCase;
 
 class ExchangeTraceTest extends TestCase
 {
+    use RefreshDatabase;
+
     public function test_trace_maps_events_correctly(): void
     {
-        $project = Project::create(['name' => 'test-proj', 'repo_path' => '/tmp/test']);
+        $project = Project::create(['name' => 'test-proj', 'slug' => 'test-proj', 'repo_path' => '/tmp/test']);
         $execution = Execution::create(['project_id' => $project->id, 'status' => \App\Enums\ExecutionStatus::Running]);
         $task = Task::create([
             'project_id' => $project->id,
@@ -86,7 +89,7 @@ class ExchangeTraceTest extends TestCase
 
     public function test_instruction_deduplicated(): void
     {
-        $project = Project::create(['name' => 'test-proj', 'repo_path' => '/tmp/test']);
+        $project = Project::create(['name' => 'test-proj', 'slug' => 'test-proj', 'repo_path' => '/tmp/test']);
         $execution = Execution::create(['project_id' => $project->id, 'status' => \App\Enums\ExecutionStatus::Running]);
         Task::create([
             'project_id' => $project->id,
@@ -106,12 +109,12 @@ class ExchangeTraceTest extends TestCase
 
     public function test_usage_groups_by_role(): void
     {
-        $project = Project::create(['name' => 'test-proj', 'repo_path' => '/tmp/test']);
+        $project = Project::create(['name' => 'test-proj', 'slug' => 'test-proj', 'repo_path' => '/tmp/test']);
         $execution = Execution::create(['project_id' => $project->id, 'status' => \App\Enums\ExecutionStatus::Running]);
 
-        UsageRecord::create(['project_id' => $project->id, 'execution_id' => $execution->id, 'role' => 'architect', 'prompt_tokens' => 100, 'completion_tokens' => 50, 'cost_usd' => 0.01]);
-        UsageRecord::create(['project_id' => $project->id, 'execution_id' => $execution->id, 'role' => 'architect', 'prompt_tokens' => 200, 'completion_tokens' => 100, 'cost_usd' => 0.02]);
-        UsageRecord::create(['project_id' => $project->id, 'execution_id' => $execution->id, 'role' => 'builder', 'prompt_tokens' => 500, 'completion_tokens' => 300, 'cost_usd' => 0.05]);
+        UsageRecord::create(['project_id' => $project->id, 'execution_id' => $execution->id, 'model' => 'test-model', 'role' => 'architect', 'prompt_tokens' => 100, 'completion_tokens' => 50, 'cost_usd' => 0.01]);
+        UsageRecord::create(['project_id' => $project->id, 'execution_id' => $execution->id, 'model' => 'test-model', 'role' => 'architect', 'prompt_tokens' => 200, 'completion_tokens' => 100, 'cost_usd' => 0.02]);
+        UsageRecord::create(['project_id' => $project->id, 'execution_id' => $execution->id, 'model' => 'test-model', 'role' => 'builder', 'prompt_tokens' => 500, 'completion_tokens' => 300, 'cost_usd' => 0.05]);
 
         $usage = ExchangeTrace::usageFor($execution);
 
@@ -126,7 +129,7 @@ class ExchangeTraceTest extends TestCase
 
     public function test_exchanges_tab_allowed_and_normalized(): void
     {
-        $project = Project::create(['name' => 'test-proj', 'repo_path' => '/tmp/test']);
+        $project = Project::create(['name' => 'test-proj', 'slug' => 'test-proj', 'repo_path' => '/tmp/test']);
 
         Livewire::test(\App\Livewire\ProjectWorkspace::class, ['project' => $project])
             ->set('tab', 'exchanges')
