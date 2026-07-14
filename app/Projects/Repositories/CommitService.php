@@ -73,6 +73,17 @@ class CommitService
             'branch' => $suggestion->branch,
             'task_key' => $task?->task_key,
         ], $suggestion->execution, 'you');
+
+        // Autonomy loop (M12): advance to the next task in the milestone.
+        // Fire-and-forget — a chain hiccup must never fail the commit the human
+        // just made (PHILOSOPHY: fire-and-forget never raises into this path).
+        if ($task) {
+            try {
+                app(\App\Core\Workflow\TaskChain::class)->advance($task->fresh());
+            } catch (\Throwable $e) {
+                report($e);
+            }
+        }
     }
 
     /** Owner comments become the next revision brief; a new run starts. */
