@@ -39,9 +39,26 @@
   repo_path=base_path, project id=2) and synced the real agents/ROADMAP.md
   → 11 milestones / 35 tasks; M1–M10 derive done, M11 ongoing; idempotent
   (2nd sync 0 new events). Owner can view it in-browser now.
-- STATUS: T-41 done + reviewed on `feat/m11-project-tabs`. The whole M11
-  branch (T-39 + T-41) is **merge-ready pending owner sign-off**. T-40
-  (exchange trace) still to build — could go on this branch or its own.
+- T-41 done + reviewed on `feat/m11-project-tabs`.
+
+## T-43 status (Opus session) — structured DB-derived roadmap
+
+- Owner refined the vision: Roadmap tab must render **DB entities, never raw
+  md**; Architect writes structured roadmap.md (milestones + nested task
+  checkboxes); 3-level accordion (milestone → task → description). Metrics
+  deferred to **T-44** (owner-requested; note in DISPATCH.md).
+- Qwen build (`bd991d1`, `150817d`) — **CLEAN, no review fixes needed.**
+  Suite **285/285 green** (incl. Architect/plan-flow tests — the PLAN_PROMPT
+  change was safe). RoadmapSync now: source = repo agents/ROADMAP.md else
+  memory roadmap.md; parser tolerates structured `## M<N> —` AND legacy
+  `## Milestone N:` prose; task `description` synced from tasks/<key>/task.md.
+  Raw-md blob removed from Roadmap tab.
+- WIRE-TESTED: test-joac (legacy prose) → 5 milestone accordions w/
+  summaries (fixes the screenshot textarea complaint); majordom self-project
+  (structured) → M11 with 4 nested tasks, correct effective statuses.
+- STATUS: M11 branch (T-39 + T-41 + T-43) is **merge-ready pending owner
+  sign-off** + owner visual confirmation in-browser. T-40 (exchange trace)
+  and T-44 (metrics) still to build.
 
 ---
 
