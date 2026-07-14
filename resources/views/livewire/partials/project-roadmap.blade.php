@@ -1,4 +1,4 @@
-<div class="flex h-full flex-col gap-6 overflow-y-auto p-6">
+<div class="flex h-full flex-col gap-6 p-6">
     @forelse($this->roadmap as $milestone)
         <div class="rounded-lg border border-border bg-surface-card overflow-hidden">
             <div x-data="{ open: false }">
@@ -10,7 +10,7 @@
                     <span class="transition-transform duration-120 text-mute" :class="open && 'rotate-180'">▼</span>
                 </button>
 
-                <div x-show="open" x-cloak class="border-t border-border-soft bg-surface px-4 py-3 space-y-3">
+                <div x-show="open" x-cloak class="border-t border-border-soft bg-surface px-4 py-3 space-y-3  overflow-y-scroll">
                     @if($milestone['summary'])
                         <p class="text-body-sm text-t2 mb-3">{{ $milestone['summary'] }}</p>
                     @endif
@@ -18,7 +18,7 @@
                     <ul class="space-y-2">
                         @foreach($milestone['tasks'] as $task)
                             <li>
-                                <div x-data="{ open: false }">
+                                <div x-data="{ open: false }" class="">
                                     <button type="button" @click="open = !open" class="flex w-full items-center gap-2 text-sm text-left hover:text-hi transition-colors">
                                         <span class="h-2 w-2 rounded-full {{ $task['status'] === 'done' ? 'bg-ok' : ($task['status'] === 'ongoing' ? 'bg-status-working' : 'bg-status-idle') }}"></span>
                                         <span class="font-mono text-meta text-hi">{{ $task['key'] }}</span>
