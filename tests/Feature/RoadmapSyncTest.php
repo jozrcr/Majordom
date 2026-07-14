@@ -17,7 +17,7 @@ class RoadmapSyncTest extends TestCase
     {
         $project = Project::factory()->create(['repo_path' => '/tmp/test-repo']);
         $mdPath = $project->repo_path . '/agents/ROADMAP.md';
-        File::ensureDirectory(dirname($mdPath));
+        File::ensureDirectoryExists(dirname($mdPath));
         File::put($mdPath, <<<MD
 # Majordom — Roadmap
 
@@ -42,7 +42,7 @@ MD
     {
         $project = Project::factory()->create(['repo_path' => '/tmp/test-repo']);
         $mdPath = $project->repo_path . '/agents/ROADMAP.md';
-        File::ensureDirectory(dirname($mdPath));
+        File::ensureDirectoryExists(dirname($mdPath));
         File::put($mdPath, "## M1 — Test\n- [ ] T-01 — Task\n");
 
         RoadmapSync::for($project)->sync();
@@ -56,7 +56,7 @@ MD
     {
         $project = Project::factory()->create(['repo_path' => '/tmp/test-repo']);
         $mdPath = $project->repo_path . '/agents/ROADMAP.md';
-        File::ensureDirectory(dirname($mdPath));
+        File::ensureDirectoryExists(dirname($mdPath));
         File::put($mdPath, "## M1 — Test\n- [ ] T-01 — Task\n");
 
         RoadmapSync::for($project)->sync();
@@ -75,7 +75,7 @@ MD
     {
         $project = Project::factory()->create(['repo_path' => '/tmp/test-repo']);
         $mdPath = $project->repo_path . '/agents/ROADMAP.md';
-        File::ensureDirectory(dirname($mdPath));
+        File::ensureDirectoryExists(dirname($mdPath));
         File::put($mdPath, "## M1 — Test\n- [ ] T-01 — Task\n");
 
         RoadmapSync::for($project)->sync();
@@ -97,10 +97,29 @@ MD
     {
         $project = Project::factory()->create(['repo_path' => '/tmp/test-repo', 'slug' => 'test-slug']);
         $mdPath = $project->repo_path . '/agents/ROADMAP.md';
-        File::ensureDirectory(dirname($mdPath));
+        File::ensureDirectoryExists(dirname($mdPath));
         File::put($mdPath, "## M1 — Test\n- [ ] T-01 — Task\n");
 
         $this->artisan('majordom:sync-roadmap', ['project' => 'test-slug'])
             ->assertSuccessful();
+    }
+
+    public function test_milestone_with_unfinished_task_is_not_done(): void
+    {
+        $project = Project::factory()->create(['repo_path' => '/tmp/test-repo']);
+        $mdPath = $project->repo_path . '/agents/ROADMAP.md';
+        File::ensureDirectoryExists(dirname($mdPath));
+        // One done, one todo — a mix must read as ongoing, never done.
+        File::put($mdPath, "## M1 — Mixed\n- [x] T-01 — A\n- [ ] T-02 — B\n");
+
+        RoadmapSync::for($project)->sync();
+        $milestone = \App\Models\Milestone::where('project_id', $project->id)->first();
+
+        $this->assertSame('ongoing', $milestone->deriveStatus());
+
+        // All done → done.
+        File::put($mdPath, "## M1 — Mixed\n- [x] T-01 — A\n- [x] T-02 — B\n");
+        RoadmapSync::for($project)->sync();
+        $this->assertSame('done', $milestone->fresh()->deriveStatus());
     }
 }

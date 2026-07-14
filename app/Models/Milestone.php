@@ -31,29 +31,24 @@ class Milestone extends Model
 
     public function deriveStatus(): string
     {
-        $tasks = $this->relationLoaded('tasks') ? $this->tasks : $this->tasks;
+        $tasks = $this->tasks;
         if ($tasks->isEmpty()) {
             return 'todo';
         }
 
-        $hasDone = false;
-        $hasOngoing = false;
+        $statuses = $tasks->map(
+            fn (Task $task) => \App\Projects\Roadmap\RoadmapSync::effectiveStatus($task)
+        );
 
-        foreach ($tasks as $task) {
-            $status = \App\Projects\Roadmap\RoadmapSync::effectiveStatus($task);
-            if ($status === 'done') {
-                $hasDone = true;
-            } elseif ($status === 'ongoing') {
-                $hasOngoing = true;
-            }
-        }
-
-        if ($hasDone && !$hasOngoing) {
+        // All done → done; none started (all todo) → todo; any mix or any
+        // ongoing → ongoing. A single unfinished task keeps the milestone open.
+        if ($statuses->every(fn (string $s) => $s === 'done')) {
             return 'done';
         }
-        if ($hasOngoing) {
-            return 'ongoing';
+        if ($statuses->every(fn (string $s) => $s === 'todo')) {
+            return 'todo';
         }
-        return 'todo';
+
+        return 'ongoing';
     }
 }

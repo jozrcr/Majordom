@@ -263,6 +263,25 @@ class ProjectWorkspace extends Component
         return ['key' => $taskId, 'title' => $title];
     }
 
+    /**
+     * The stored agreed-plan text the Architect wrote at plan approval
+     * (roadmap.md, else architecture.md, else the raw plan_draft.md). Shown
+     * verbatim in the Overview/Roadmap "Agreed plan" accordion — no summary,
+     * no LLM call, just the source of truth from project memory.
+     */
+    public function getPlanTextProperty(): ?string
+    {
+        $store = app(\App\Projects\Memory\MemoryStore::class);
+        foreach (['roadmap.md', 'architecture.md', 'plan_draft.md'] as $doc) {
+            $text = $store->read($this->project, $doc);
+            if ($text !== null && trim($text) !== '') {
+                return $text;
+            }
+        }
+
+        return null;
+    }
+
     public function getOpenApprovalProperty(): ?\App\Models\Approval
     {
         return $this->project->openApprovals()->first();

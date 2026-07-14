@@ -2,14 +2,24 @@
     {{-- Agreed Plan Accordion --}}
     <div class="rounded-lg border border-border bg-surface-card p-4 space-y-3">
         <h2 class="text-lg font-semibold text-hi">Agreed Plan</h2>
-        @if($this->plannedTask)
+        @if($this->planText || $this->plannedTask)
             <div x-data="{ open: false }">
                 <button type="button" @click="open = !open" class="flex w-full items-center justify-between text-left text-body-sm text-text hover:text-hi cursor-pointer">
-                    <span>First task: <span class="font-mono">{{ $this->plannedTask['key'] }}</span> — {{ $this->plannedTask['title'] }}</span>
+                    <span>
+                        @if($this->plannedTask)
+                            First task: <span class="font-mono">{{ $this->plannedTask['key'] }}</span> — {{ $this->plannedTask['title'] }}
+                        @else
+                            View the agreed plan
+                        @endif
+                    </span>
                     <span class="transition-transform duration-120" :class="open && 'rotate-180'">▼</span>
                 </button>
-                <div x-show="open" x-cloak class="mt-2 text-body-sm text-t2">
-                    <p>Plan approved. Builder will execute tasks sequentially.</p>
+                <div x-show="open" x-cloak class="mt-2">
+                    @if($this->planText)
+                        <pre class="whitespace-pre-wrap font-mono text-xs text-t2 leading-relaxed">{{ $this->planText }}</pre>
+                    @else
+                        <p class="text-body-sm text-t2">Plan approved. Builder will execute tasks sequentially.</p>
+                    @endif
                 </div>
             </div>
         @else

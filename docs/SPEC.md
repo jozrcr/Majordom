@@ -330,7 +330,9 @@ read (`(float)`/`(int)`) because the JSON column round-trip may demote e.g.
 The **Roadmap** tab renders milestones and tasks parsed from `{repo_path}/agents/ROADMAP.md`.
 - **Format:** `## M<NN> — <title>` defines milestones. `- [<mark>] <T-NN> — <title>` defines tasks. Marks: ` ` (todo), `~` (ongoing), `x` (done).
 - **Sync:** `RoadmapSync` parses the file and upserts `milestones` and `tasks` into the DB. It is idempotent and emits `roadmap_events` only on real deltas.
-- **Effective Status:** The UI displays a tri-state status derived from `max(db_status, declared_md_status)` on the ordering `todo < ongoing < done`. This ensures live harness progress overrides the markdown, but markdown can never downgrade a task the DB says is further along.
+- **Effective Status:** The UI displays a tri-state status derived from `max(db_status, declared_md_status)` on the ordering `todo < ongoing < done`. This ensures live harness progress overrides the markdown, but markdown can never downgrade a task the DB says is further along. Sync writes only `declared_status`/`milestone_id`/`position`/`title` — never the live `status` column (harness-owned).
+- **Milestone status** is *derived*, never stored: all tasks done → `done`; all tasks todo → `todo`; any other mix (or any ongoing) → `ongoing`. A single unfinished task keeps the milestone open.
+- **Agreed plan text:** the Overview/Roadmap "Agreed plan" accordion renders the stored plan verbatim from project memory (`roadmap.md`, else `architecture.md`, else `plan_draft.md`) — no summary, no LLM call.
 - **UI:** Accordions for milestones and tasks, Alpine.js toggles, Tailwind styling. No inline styles.
 
 ## 11. Non-goals / deferred (do not build in v1)
