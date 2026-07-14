@@ -125,7 +125,10 @@ Read order for the incoming model: this file top block → agents/DISPATCH.md
 - main @ `1942bb8`, pushed to origin. Suite 270/701 green.
 - Queue worker task `btcvcg3y3` on current main (harness,default,
   tries=1, timeout=1800). Serve :8890 · Reverb :8815 · metallama :8010.
-- IN FLIGHT: T-39 build on `feat/m11-project-tabs` via aider (brief:
+- IN FLIGHT: T-39 build on `feat/m11-project-tabs` via aider — background
+  task `b1f3iyeby`, log `/tmp/claude-1000/-home-joz-Documents-AI-Tools-Majordom/724fe8bd-c6e4-4bf5-917d-f731c8d77c32/tasks/b1f3iyeby.output`.
+  Startup verified 2026-07-16: v0.86.2, whole edit format, 5 edit targets
+  + 5 read-only files in chat (brief:
   agents/T-39-project-tabs-overview.md). If the run finished: review per
   DISPATCH.md protocol (diff, full pest, acceptance greps, review(T-39)
   commit, worker restart, RESUME.md update). If it never started, summon
