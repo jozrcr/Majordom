@@ -7,11 +7,14 @@ use App\Enums\ApprovalType;
 use App\Livewire\ProjectWorkspace;
 use App\Models\Approval;
 use App\Models\Project;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
 use Tests\TestCase;
 
 class MilestoneGateUiTest extends TestCase
 {
+    use RefreshDatabase;
+
     public function test_milestone_merge_card_renders_correctly(): void
     {
         $project = Project::factory()->create();
@@ -53,7 +56,7 @@ class MilestoneGateUiTest extends TestCase
             'type' => ApprovalType::Review,
             'status' => ApprovalStatus::Open,
             'title' => 'Review PR #42',
-            'payload' => [],
+            'payload' => ['testsPassed' => true, 'filesChanged' => [], 'verdict' => ['summary' => 'ok'], 'diff' => ''],
         ]);
 
         Livewire::test(ProjectWorkspace::class, ['project' => $project])
