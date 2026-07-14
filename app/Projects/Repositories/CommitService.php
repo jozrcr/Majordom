@@ -6,6 +6,7 @@ use App\Core\Events\EventRecorder;
 use App\Core\Workflow\ImplementFeatureWorkflow;
 use App\Enums\TaskStatus;
 use App\Models\CommitSuggestion;
+use App\Models\Milestone;
 use App\Models\Task;
 use App\Projects\Memory\MemoryStore;
 use Illuminate\Support\Facades\Process;
@@ -111,6 +112,42 @@ class CommitService
         $this->events->record($suggestion->project, 'commit.rejected', [
             'task_key' => $suggestion->task?->task_key, 'comment' => $comment,
         ], $suggestion->execution, 'you');
+    }
+
+    /** Merge a milestone branch into main (gated promotion). */
+    public function mergeMilestone(Milestone $m): void
+    {
+        $repo = $m->project->repo_path;
+        $branch = 'majordom/'.$m->milestone_key;
+
+        $status = Process::path($repo)->run(['git', 'status', '--porcelain']);
+        $dirty = collect(explode("\n", trim($status->output())))
+            ->filter(fn ($line) => $line !== '' && ! str_starts_with($line, '??'));
+        if ($dirty->isNotEmpty()) {
+            throw new RuntimeException('Your working tree has uncommitted changes — commit or stash them first.');
+        }
+
+        $verify = Process::path($repo)->run(['git', 'rev-parse', '--verify', $branch]);
+        if (! $verify->successful()) {
+            throw new RuntimeException("No milestone branch {$branch} to merge.");
+        }
+
+        $merge = Process::path($repo)
+            ->env($this->committerEnv($repo))
+            ->run(['git', 'merge', '--no-ff', $branch, '-m', "Merge milestone {$m->milestone_key}: {$m->title}"]);
+
+        if (! $merge->successful()) {
+            Process::path($repo)->run(['git', 'merge', '--abort']);
+            throw new RuntimeException('Milestone merge failed: '.trim($merge->errorOutput()));
+        }
+
+        $this->events->record($m->project, 'milestone.merged', [
+            'milestone_key' => $m->milestone_key,
+        ], null, 'you');
+
+        $this->worktrees->removeMilestoneWorktree($m->project, $m);
+
+        // push hook (T-49)
     }
 
     private function assertSuggested(CommitSuggestion $suggestion): void

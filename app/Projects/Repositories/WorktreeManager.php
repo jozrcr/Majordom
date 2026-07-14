@@ -2,6 +2,8 @@
 
 namespace App\Projects\Repositories;
 
+use App\Models\Milestone;
+use App\Models\Project;
 use App\Models\Task;
 use Illuminate\Support\Facades\Process;
 use RuntimeException;
@@ -103,5 +105,78 @@ class WorktreeManager
 
         $task->worktree_path = null;
         $task->save();
+    }
+
+    public function branchForMilestone(Milestone $m): string
+    {
+        return 'majordom/'.$m->milestone_key;
+    }
+
+    public function pathForMilestone(Project $p, Milestone $m): string
+    {
+        return $this->root.'/'.$p->slug.'/'.$m->milestone_key;
+    }
+
+    public function ensureMilestoneWorktree(Project $p, Milestone $m): string
+    {
+        $repoPath = $p->repo_path;
+        if (!is_dir($repoPath) || !is_dir($repoPath.'/.git')) {
+            throw new RuntimeException("Not a git repository: {$repoPath}");
+        }
+
+        $path = $this->pathForMilestone($p, $m);
+        if (is_dir($path)) {
+            return $path;
+        }
+
+        $head = Process::path($repoPath)->run(['git', 'rev-parse', '--verify', 'HEAD']);
+        if (! $head->successful()) {
+            throw new RuntimeException(
+                'The repository has no commits yet — make an initial commit, then start the build again.'
+            );
+        }
+
+        $branch = $this->branchForMilestone($m);
+        $dirPath = dirname($path);
+        if (!is_dir($dirPath)) {
+            mkdir($dirPath, 0755, true);
+        }
+
+        $result = Process::path($repoPath)->run([
+            'git', 'worktree', 'add', '-b', $branch, $path, 'HEAD'
+        ]);
+
+        if (!$result->successful()) {
+            $stderr = $result->errorOutput();
+            if (str_contains($stderr, 'already exists')) {
+                $result = Process::path($repoPath)->run([
+                    'git', 'worktree', 'add', $path, $branch
+                ]);
+                if (!$result->successful()) {
+                    throw new RuntimeException("Git worktree add failed: {$result->errorOutput()}");
+                }
+            } else {
+                throw new RuntimeException("Git worktree add failed: {$stderr}");
+            }
+        }
+
+        return $path;
+    }
+
+    public function removeMilestoneWorktree(Project $p, Milestone $m): void
+    {
+        $path = $this->pathForMilestone($p, $m);
+        if (!is_dir($path)) {
+            return;
+        }
+
+        $repoPath = $p->repo_path;
+        $result = Process::path($repoPath)->run([
+            'git', 'worktree', 'remove', '--force', $path
+        ]);
+
+        if (!$result->successful()) {
+            throw new RuntimeException("Git worktree remove failed: {$result->errorOutput()}");
+        }
     }
 }
