@@ -42,7 +42,7 @@ test('add endpoint persists a row and appears in actors role-provider select', f
         ->assertSee('My Provider');
 });
 
-test('save with blank api_key keeps stored key; non-blank replaces; clear nulls it', function () {
+test('save keeps stored key unless changing; startChangeKey replaces; clear nulls it', function () {
     $ep = ProviderEndpoint::create([
         'name' => 'key_test',
         'label' => 'Key Test',
@@ -61,8 +61,14 @@ test('save with blank api_key keeps stored key; non-blank replaces; clear nulls 
         ->call("saveEndpoint", $ep->id);
     expect($ep->fresh()->api_key)->toBe('original-secret');
 
-    // Non-blank replaces
+    // Non-blank without changing mode does NOT replace (T-38)
     $component->set("endpointDrafts.{$ep->id}.api_key", 'new-secret')
+        ->call("saveEndpoint", $ep->id);
+    expect($ep->fresh()->api_key)->toBe('original-secret');
+
+    // Explicit change flow replaces
+    $component->call("startChangeKey", $ep->id)
+        ->set("endpointDrafts.{$ep->id}.api_key", 'new-secret')
         ->call("saveEndpoint", $ep->id);
     expect($ep->fresh()->api_key)->toBe('new-secret');
 
