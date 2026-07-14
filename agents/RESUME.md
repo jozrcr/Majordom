@@ -20,6 +20,29 @@
 - T-40 scope is DEFINED (exchange trace over `events` table) — see
   DISPATCH.md M11/T-40. Brief not yet written.
 
+## T-41 status (Opus session, in flight)
+
+- Design SETTLED w/ owner: source = `agents/ROADMAP.md` (per-project at
+  `{repo_path}/agents/ROADMAP.md`); one-way md→DB sync; git + light
+  `roadmap_events` feed for history; live DB status overrides md declared
+  status UPWARD only. ROADMAP.md authored w/ real M1–M11 history.
+- Brief `agents/T-41-roadmap-tab.md` + ROADMAP.md committed `7eef425`.
+- Qwen build (`1779aaf`, `604d3d6`) + REVIEWED by Opus (`5018308`).
+  **Suite 282/282 green.** Review fixes: (1) Task `$fillable` missing
+  milestone_id/position/declared_status — mass-assignment silently dropped
+  them (my brief scoped Task.php read-only — my miss); (2) deriveStatus:
+  done+todo mix is ongoing not done; (3) real stored plan text (planText
+  prop reads roadmap.md/architecture.md/plan_draft.md) replaces Qwen's
+  hardcoded placeholder; (4) File::ensureDirectory→ensureDirectoryExists;
+  +2 tests; SPEC §10.1 augmented.
+- WIRE-TESTED live: seeded a **"majordom" self-project** (slug=majordom,
+  repo_path=base_path, project id=2) and synced the real agents/ROADMAP.md
+  → 11 milestones / 35 tasks; M1–M10 derive done, M11 ongoing; idempotent
+  (2nd sync 0 new events). Owner can view it in-browser now.
+- STATUS: T-41 done + reviewed on `feat/m11-project-tabs`. The whole M11
+  branch (T-39 + T-41) is **merge-ready pending owner sign-off**. T-40
+  (exchange trace) still to build — could go on this branch or its own.
+
 ---
 
 > Fresh session: read CLAUDE.md → this file → **agents/DISPATCH.md** (how to
