@@ -1,4 +1,26 @@
-# Session resume — state as of 2026-07-16 (T-38 MERGED to main; next: M11)
+# Session resume — state as of 2026-07-16 (T-39 reviewed on branch; awaiting merge sign-off)
+
+## T-39 status (Opus session)
+
+- T-39 (project tabs Chat/Overview/Stats) BUILT by Qwen (`1c38d56`,
+  `07fd690`) + REVIEWED by Opus (`9b156a8`) on `feat/m11-project-tabs`
+  (pushed to origin). Suite **274/274 green**.
+- Review fixes: partials referenced bare `$plannedTask`/`$recentConsensus`/
+  `$usageStats`/`$executionCounts` — computed props need `$this->` inside
+  `@include`; added `updatedTab()` so live tab changes (not just mount)
+  normalize unknown values → chat; test UsageRecord needs `model` (NOT
+  NULL); SPEC §9 documents the tabbed workspace.
+- NOT merged — merges to main are owner-gated (T-38 precedent). Awaiting
+  owner "green light" on the T-39 merge.
+- Owner now runs their OWN dev stack via `npm run dev` (concurrently:
+  serve/worker/reverb/telegram/vite, `--kill-others`). My standalone
+  background worker was stopped to avoid a duplicate — DO NOT spawn a
+  separate `queue:work`; the owner's stack owns processes now. T-39 is
+  UI-only so no worker restart was needed regardless.
+- T-40 scope is DEFINED (exchange trace over `events` table) — see
+  DISPATCH.md M11/T-40. Brief not yet written.
+
+---
 
 > Fresh session: read CLAUDE.md → this file → **agents/DISPATCH.md** (how to
 > summon the Qwen builder via aider + the review protocol). Persistent memory
