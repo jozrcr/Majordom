@@ -73,13 +73,14 @@ it('resets the staged squash when the commit itself fails', function () {
         "'git' 'status' '--porcelain'" => Process::result(output: ''),
         "'git' 'merge' '--squash'*" => Process::result(output: 'ok'),
         "'git' 'commit' '-m'*" => Process::result(exitCode: 1, errorOutput: 'hook rejected'),
-        "'git' 'reset' '--merge'" => Process::result(output: ''),
+        "'git' 'reset' '--hard' 'HEAD'" => Process::result(output: ''),
+        "'git' 'clean' '-fd'" => Process::result(output: ''),
     ]);
 
     expect(fn () => app(CommitService::class)->apply($this->suggestion))
         ->toThrow(RuntimeException::class, 'hook rejected');
 
-    Process::assertRan(fn ($p) => is_array($p->command) && $p->command === ['git', 'reset', '--merge']);
+    Process::assertRan(fn ($p) => is_array($p->command) && $p->command === ['git', 'reset', '--hard', 'HEAD']);
     expect($this->suggestion->fresh()->status)->toBe('suggested');
 });
 
