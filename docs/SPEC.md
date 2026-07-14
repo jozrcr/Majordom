@@ -343,6 +343,12 @@ A condensed, per-execution view of hand-offs between actors (architect → build
 - **Usage:** `ExchangeTrace::usageFor(Execution)` groups `UsageRecord` by role for a compact header strip.
 - **UI:** Rendered in the `exchanges` tab. Execution picker, usage strip, vertical card list with Alpine accordions for full text. Tailwind only, no inline styles.
 
+### 10.3 Milestone Metrics
+A per-milestone (and per-task) projection of delivery metrics, surfaced in the **Stats** tab. Derived entirely from existing `UsageRecord`, `Event`, `Task`, and `Execution` rows — no new logging or LLM calls.
+- **Projection:** `MilestoneMetrics::forMilestone(Milestone)` and `::forTask(Task)` compute aggregates scoped to the execution IDs linked to the milestone's tasks.
+- **Metrics:** `tokens` (prompt+completion summed per architect/builder/reviewer), `cost_usd`, `human_interventions` (count of `approval.granted`, `question.answered`, `human_review.waiting_human`, `human_task.waiting_human`), `rework_cycles` (count of `review.retry`/`review.failed`, maxed against `task.revision - 1`), `files_changed` (distinct union of `build.completed` payload files), `time_to_completion` (span of events in seconds), `tests_added` (deferred, always null).
+- **UI:** Rendered in the Stats tab as an accordion per milestone with a compact metric grid. Tasks drill down client-side. Null-safe on sparse/never-run tasks.
+
 ## 11. Non-goals / deferred (do not build in v1)
 
 Non-coding capabilities · parallel Builders · visual node-graph editor ·

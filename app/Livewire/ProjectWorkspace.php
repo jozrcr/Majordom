@@ -472,6 +472,43 @@ class ProjectWorkspace extends Component
         return $result;
     }
 
+    public function getMilestoneMetricsProperty(): array
+    {
+        if (!$this->roadmapSynced) {
+            \App\Projects\Roadmap\RoadmapSync::for($this->project)->sync();
+            $this->roadmapSynced = true;
+        }
+
+        $milestones = \App\Models\Milestone::where('project_id', $this->project->id)
+            ->with('tasks')
+            ->orderBy('position')
+            ->get();
+
+        $allTasks = $milestones->flatMap->tasks;
+        $taskMetricsMap = \App\Projects\Metrics\MilestoneMetrics::forTasks($allTasks);
+
+        $result = [];
+        foreach ($milestones as $m) {
+            $tasks = [];
+            foreach ($m->tasks as $t) {
+                $tasks[] = [
+                    'key' => $t->task_key,
+                    'title' => $t->title,
+                    'metrics' => $taskMetricsMap[$t->id],
+                ];
+            }
+            $result[] = [
+                'key' => $m->milestone_key,
+                'title' => $m->title,
+                'status' => $m->deriveStatus(),
+                'metrics' => \App\Projects\Metrics\MilestoneMetrics::forMilestone($m),
+                'tasks' => $tasks,
+            ];
+        }
+
+        return $result;
+    }
+
     public function getRecentRoadmapChangesProperty(): \Illuminate\Support\Collection
     {
         return \App\Models\RoadmapEvent::where('project_id', $this->project->id)
