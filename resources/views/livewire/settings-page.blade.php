@@ -50,7 +50,7 @@
                                     </div>
                                     <div>
                                         <label class="text-xs font-medium text-t3">Temperature</label>
-                                        <input type="number" step="0.1" wire:model.live="roleDrafts.{{ $id }}.temperature" class="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm text-hi" />
+                                        <input type="number" step="0.1" wire:model.live="roleDrafts.{{ $id }}.temperature" class="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm text-hi {{ $draft['knobs_inert'] ? 'opacity-50 cursor-not-allowed' : '' }}" {{ $draft['knobs_inert'] ? 'disabled' : '' }} />
                                         @error("roleDrafts.{$id}.temperature") <span class="text-xs text-status-failed">{{ $message }}</span> @enderror
                                     </div>
                                     <div>
@@ -81,24 +81,27 @@
                                         <div class="grid grid-cols-2 gap-4">
                                             <div>
                                                 <label class="text-xs font-medium text-t3">Top P</label>
-                                                <input type="number" step="0.01" wire:model.live="roleDrafts.{{ $id }}.top_p" class="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm text-hi" />
+                                                <input type="number" step="0.01" wire:model.live="roleDrafts.{{ $id }}.top_p" class="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm text-hi {{ $draft['knobs_inert'] ? 'opacity-50 cursor-not-allowed' : '' }}" {{ $draft['knobs_inert'] ? 'disabled' : '' }} />
                                             </div>
                                             <div>
                                                 <label class="text-xs font-medium text-t3">Frequency penalty</label>
-                                                <input type="number" step="0.1" wire:model.live="roleDrafts.{{ $id }}.frequency_penalty" class="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm text-hi" />
+                                                <input type="number" step="0.1" wire:model.live="roleDrafts.{{ $id }}.frequency_penalty" class="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm text-hi {{ $draft['knobs_inert'] ? 'opacity-50 cursor-not-allowed' : '' }}" {{ $draft['knobs_inert'] ? 'disabled' : '' }} />
                                             </div>
                                             <div>
                                                 <label class="text-xs font-medium text-t3">Presence penalty</label>
-                                                <input type="number" step="0.1" wire:model.live="roleDrafts.{{ $id }}.presence_penalty" class="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm text-hi" />
+                                                <input type="number" step="0.1" wire:model.live="roleDrafts.{{ $id }}.presence_penalty" class="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm text-hi {{ $draft['knobs_inert'] ? 'opacity-50 cursor-not-allowed' : '' }}" {{ $draft['knobs_inert'] ? 'disabled' : '' }} />
                                             </div>
                                             <div>
                                                 <label class="text-xs font-medium text-t3">Timeout (s)</label>
                                                 <input type="number" wire:model.live="roleDrafts.{{ $id }}.timeout" class="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm text-hi" />
                                             </div>
                                         </div>
+                                        @if($draft['knobs_inert'])
+                                            <p class="text-[10px] text-mute">Sampler params are preset by metallama for this provider — these fields have no effect.</p>
+                                        @endif
                                         <div>
                                             <label class="text-xs font-medium text-t3">Stop sequences (comma-separated)</label>
-                                            <input type="text" wire:model.live="roleDrafts.{{ $id }}.stop" class="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm text-hi" />
+                                            <input type="text" wire:model.live="roleDrafts.{{ $id }}.stop" class="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm text-hi {{ $draft['knobs_inert'] ? 'opacity-50 cursor-not-allowed' : '' }}" {{ $draft['knobs_inert'] ? 'disabled' : '' }} />
                                         </div>
                                     </div>
                                 </div>
@@ -181,12 +184,24 @@
                                 </div>
                                 <div>
                                     <label class="text-xs font-medium text-t3">API Key</label>
-                                    <div class="flex gap-2">
-                                        <input type="password" wire:model.live="endpointDrafts.{{ $id }}.api_key" placeholder="{{ $draft['has_key'] ? 'unchanged — key is set' : 'no key' }}" class="flex-1 rounded border border-border bg-surface px-2 py-1.5 font-mono text-sm text-hi" />
-                                        @if($draft['has_key'])
-                                            <button wire:click="clearEndpointKey('{{ $id }}')" class="rounded border border-border px-2 py-1.5 text-xs text-mute hover:text-hi hover:bg-surface-chip transition-colors">clear</button>
+                                    <div class="flex items-center gap-2">
+                                        @if($draft['key_source'] === 'db')
+                                            <span class="text-xs text-status-completed">Key set ✓</span>
+                                            <button wire:click="startChangeKey('{{ $id }}')" class="rounded border border-border px-2 py-1 text-xs text-hi hover:bg-surface-chip transition-colors">Change API key</button>
+                                            <button wire:click="clearEndpointKey('{{ $id }}')" class="rounded border border-border px-2 py-1 text-xs text-mute hover:text-hi hover:bg-surface-chip transition-colors">clear</button>
+                                        @elseif($draft['key_source'] === 'env')
+                                            <span class="rounded bg-surface-chip px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[.1em] text-t3">from env ({{ $draft['key_config'] }})</span>
+                                        @else
+                                            <span class="text-xs text-mute">No key</span>
+                                            <button wire:click="startChangeKey('{{ $id }}')" class="rounded border border-border px-2 py-1 text-xs text-hi hover:bg-surface-chip transition-colors">Change API key</button>
                                         @endif
                                     </div>
+                                    @if($changingKey[$id] ?? false)
+                                        <div class="mt-2 flex gap-2">
+                                            <input type="password" wire:model.live="endpointDrafts.{{ $id }}.api_key" placeholder="Enter new API key" class="flex-1 rounded border border-border bg-surface px-2 py-1.5 font-mono text-sm text-hi" />
+                                            <button wire:click="cancelChangeKey('{{ $id }}')" class="rounded border border-border px-2 py-1.5 text-xs text-mute hover:text-hi hover:bg-surface-chip transition-colors">Cancel</button>
+                                        </div>
+                                    @endif
                                     @error("endpointDrafts.{$id}.api_key") <span class="text-xs text-status-failed">{{ $message }}</span> @enderror
                                 </div>
                             </div>

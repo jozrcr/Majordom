@@ -46,6 +46,7 @@ class SettingsPage extends Component
     public array $endpointDrafts = [];
     public array $newEndpoint = ['name' => '', 'label' => '', 'driver' => 'openai_compatible', 'base_url' => '', 'api_key' => ''];
     public array $endpointTestResults = [];
+    public array $changingKey = [];
 
     /** Feedback marker: which thing was just saved ('role:{id}', 'workflow-settings', 'endpoint:{id}'). */
     public ?string $justSaved = null;
@@ -80,7 +81,22 @@ class SettingsPage extends Component
                 'presence_penalty' => $meta['presence_penalty'] ?? '',
                 'stop' => isset($meta['stop']) && is_array($meta['stop']) ? implode(', ', $meta['stop']) : '',
                 'timeout' => $meta['timeout'] ?? '',
+                'knobs_inert' => $this->isMetallamaProvider($role->provider),
             ];
+        }
+    }
+
+    private function isMetallamaProvider(string $providerName): bool
+    {
+        $ep = ProviderEndpoint::named($providerName);
+        return $ep !== null && $ep->driver === 'metallama';
+    }
+
+    public function updatedRoleDrafts($value, $key): void
+    {
+        if (str_ends_with($key, '.provider')) {
+            $id = explode('.', $key)[0];
+            $this->roleDrafts[$id]['knobs_inert'] = $this->isMetallamaProvider($value);
         }
     }
 
@@ -109,11 +125,20 @@ class SettingsPage extends Component
     {
         $endpoints = ProviderEndpoint::orderBy('is_builtin', 'desc')->orderBy('name')->get();
         foreach ($endpoints as $ep) {
+            $keySource = 'none';
+            $keyConfig = null;
+            if ($ep->api_key !== null) {
+                $keySource = 'db';
+            } elseif (!empty($ep->meta['api_key_config'])) {
+                $keySource = 'env';
+                $keyConfig = $ep->meta['api_key_config'];
+            }
             $this->endpointDrafts[$ep->id] = [
                 'name' => $ep->name,
                 'driver' => $ep->driver,
                 'is_builtin' => $ep->is_builtin,
-                'has_key' => $ep->api_key !== null,
+                'key_source' => $keySource,
+                'key_config' => $keyConfig,
                 'label' => $ep->label,
                 'base_url' => $ep->base_url,
                 'timeout' => $ep->timeout,
@@ -253,6 +278,7 @@ class SettingsPage extends Component
             'presence_penalty' => '',
             'stop' => '',
             'timeout' => '',
+            'knobs_inert' => $this->isMetallamaProvider($role->provider),
         ];
         $this->reset('newRole');
     }
@@ -397,11 +423,15 @@ class SettingsPage extends Component
         ];
 
         $newKey = data_get($validated, "endpointDrafts.{$id}.api_key");
-        if ($newKey !== null && $newKey !== '') {
+        if (($this->changingKey[$id] ?? false) && $newKey !== null && $newKey !== '') {
             $updateData['api_key'] = $newKey;
         }
 
         $ep->update($updateData);
+        
+        $this->changingKey[$id] = false;
+        $this->endpointDrafts[$id]['api_key'] = '';
+        
         $this->loadEndpoints();
         $this->justSaved = "endpoint:{$id}";
     }
@@ -411,6 +441,20 @@ class SettingsPage extends Component
         $ep = ProviderEndpoint::findOrFail($id);
         $ep->update(['api_key' => null]);
         $this->loadEndpoints();
+    }
+
+    public function startChangeKey(string $id): void
+    {
+        if (($this->endpointDrafts[$id]['key_source'] ?? 'none') === 'env') {
+            return;
+        }
+        $this->changingKey[$id] = true;
+    }
+
+    public function cancelChangeKey(string $id): void
+    {
+        $this->changingKey[$id] = false;
+        $this->endpointDrafts[$id]['api_key'] = '';
     }
 
     public function addEndpoint(): void
