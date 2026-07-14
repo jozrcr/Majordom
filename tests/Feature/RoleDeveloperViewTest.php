@@ -29,8 +29,6 @@ use Livewire\Livewire;
 uses(RefreshDatabase::class);
 
 test('ProviderRequest passthrough includes sampler params when set', function () {
-    Http::fake();
-    
     $provider = new OpenAiCompatibleProvider(
         baseUrl: 'http://test.local/v1',
         apiKey: 'sk-test',
@@ -47,8 +45,8 @@ test('ProviderRequest passthrough includes sampler params when set', function ()
         timeout: 60,
     );
 
-    Http::fakeSequence()
-        ->pushJson(200, ['choices' => [['message' => ['content' => '{}'], 'finish_reason' => 'stop']], 'usage' => ['prompt_tokens' => 1, 'completion_tokens' => 1]]);
+    // ResponseSequence has no pushJson(); plain Http::fake stub instead.
+    Http::fake(['*' => Http::response(['choices' => [['message' => ['content' => '{}'], 'finish_reason' => 'stop']], 'usage' => ['prompt_tokens' => 1, 'completion_tokens' => 1]], 200)]);
 
     $provider->chat($request);
 
@@ -56,14 +54,12 @@ test('ProviderRequest passthrough includes sampler params when set', function ()
         $body = $request->data();
         return $body['top_p'] === 0.9
             && $body['frequency_penalty'] === 0.5
-            && $body['presence_penalty'] === -1.0
+            && (float) $body['presence_penalty'] === -1.0 // json_encode(-1.0) → "-1", decodes as int
             && $body['stop'] === ['\n', 'END'];
     });
 });
 
 test('ProviderRequest passthrough omits sampler params when null', function () {
-    Http::fake();
-    
     $provider = new OpenAiCompatibleProvider(
         baseUrl: 'http://test.local/v1',
         apiKey: 'sk-test',
@@ -75,8 +71,8 @@ test('ProviderRequest passthrough omits sampler params when null', function () {
         messages: [['role' => 'user', 'content' => 'hi']],
     );
 
-    Http::fakeSequence()
-        ->pushJson(200, ['choices' => [['message' => ['content' => '{}'], 'finish_reason' => 'stop']], 'usage' => ['prompt_tokens' => 1, 'completion_tokens' => 1]]);
+    // ResponseSequence has no pushJson(); plain Http::fake stub instead.
+    Http::fake(['*' => Http::response(['choices' => [['message' => ['content' => '{}'], 'finish_reason' => 'stop']], 'usage' => ['prompt_tokens' => 1, 'completion_tokens' => 1]], 200)]);
 
     $provider->chat($request);
 
@@ -90,7 +86,7 @@ test('ProviderRequest passthrough omits sampler params when null', function () {
 });
 
 test('ArchitectService appends system_prompt_extra to system prompt', function () {
-    $project = Project::create(['name' => 'test', 'repo_path' => '/tmp/test']);
+    $project = Project::create(['name' => 'test', 'slug' => 'test', 'repo_path' => '/tmp/test']);
     $role = Role::create(['project_id' => null, 'name' => 'architect', 'provider' => 'openrouter', 'model' => 'gpt-4', 'meta' => ['system_prompt_extra' => 'CUSTOM INSTRUCTION']]);
     
     $fakeProvider = new class implements Provider {
@@ -110,7 +106,7 @@ test('ArchitectService appends system_prompt_extra to system prompt', function (
 });
 
 test('ArchitectService omits system_prompt_extra when absent', function () {
-    $project = Project::create(['name' => 'test2', 'repo_path' => '/tmp/test2']);
+    $project = Project::create(['name' => 'test2', 'slug' => 'test2', 'repo_path' => '/tmp/test2']);
     Role::create(['project_id' => null, 'name' => 'architect', 'provider' => 'openrouter', 'model' => 'gpt-4', 'meta' => []]);
     
     $fakeProvider = new class implements Provider {
@@ -232,7 +228,7 @@ test('Livewire round-trips developer fields into roles.meta', function () {
     expect($meta['extra_instructions'])->toBe('Extra instr');
     expect($meta['top_p'])->toBe(0.8);
     expect($meta['frequency_penalty'])->toBe(0.5);
-    expect($meta['presence_penalty'])->toBe(-1.0);
+    expect((float) $meta['presence_penalty'])->toBe(-1.0); // JSON column round-trip stores -1.0 as -1; services cast (float) on read
     expect($meta['stop'])->toBe(['END', 'STOP']);
     expect($meta['timeout'])->toBe(120);
 });

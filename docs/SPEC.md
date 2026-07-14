@@ -304,6 +304,20 @@ live value keeps tracking config/env; custom rows store literal values and the
 column wins. Rule: any change to provider resolution updates this section in
 the same commit.
 
+**Role developer view** (M10/T-37): each role card carries optional advanced
+knobs in `roles.meta` (no dedicated columns): `system_prompt_extra` (thinker
+roles — appended as a trailing paragraph to the built-in system prompt, never
+replacing it: the structured-JSON output contracts live in the built-in part),
+`extra_instructions` (builder-type roles — appended to the task message as an
+`## Owner role instructions` block, since aider owns its own system prompt),
+plus `top_p`, `frequency_penalty`, `presence_penalty`, `stop` (≤4 strings),
+`timeout`. Absent key = today's behavior: the UI omits keys on blank input,
+`ProviderRequest` carries them as nullables appended after the original
+params, and `OpenAiCompatibleProvider` includes them in the body only when
+non-null (`timeout` falls back to the endpoint's). Numeric values are cast on
+read (`(float)`/`(int)`) because the JSON column round-trip may demote e.g.
+`-1.0` to `-1`.
+
 ## 11. Non-goals / deferred (do not build in v1)
 
 Non-coding capabilities · parallel Builders · visual node-graph editor ·
