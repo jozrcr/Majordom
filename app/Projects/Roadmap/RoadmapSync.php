@@ -71,7 +71,7 @@ class RoadmapSync
 
         foreach ($lines as $line) {
             // Tolerates both structured `## M<N> — <title>` and legacy `## Milestone <N>: <title>`
-            if (preg_match('/^##\s+(?:M(?:ilestone)?)\s*(\d+(?:[a-z]?)?)\s*[—:]\s*(.+)$/i', $line, $matches)) {
+            if (preg_match('/^##\s+(?:M(?:ilestone)?)\s*(\d+(?:[a-z]?)?)\s*[—:]\s*(.+)$/iu', $line, $matches)) {
                 if ($currentMilestone) {
                     $currentMilestone['summary'] = trim(implode("\n", $summaryLines));
                     $milestones[] = $currentMilestone;
@@ -85,7 +85,7 @@ class RoadmapSync
                     'tasks' => [],
                 ];
                 $summaryLines = [];
-            } elseif ($currentMilestone && preg_match('/^-\s+\[([ x~])\]\s+(T-\d+(?:[a-z]?)?)\s*—\s*(.+)$/i', $line, $matches)) {
+            } elseif ($currentMilestone && preg_match('/^-\s+\[([ x~])\]\s+(T-\d+(?:[a-z]?)?)\s*—\s*(.+)$/iu', $line, $matches)) {
                 $mark = $matches[1];
                 $status = match ($mark) {
                     ' ' => 'todo',

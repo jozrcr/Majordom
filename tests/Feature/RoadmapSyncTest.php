@@ -123,6 +123,23 @@ MD
         $this->assertSame('done', $milestone->fresh()->deriveStatus());
     }
 
+    public function test_em_dash_title_has_no_stray_bytes(): void
+    {
+        $project = Project::factory()->create(['repo_path' => '/tmp/test-repo']);
+        $mdPath = $project->repo_path . '/agents/ROADMAP.md';
+        File::ensureDirectoryExists(dirname($mdPath));
+        File::put($mdPath, "## M1 — Project Skeleton & D-Bus Daemon\n- [ ] T-01 — Create repo structure\n");
+
+        RoadmapSync::for($project)->sync();
+
+        $milestone = \App\Models\Milestone::where('project_id', $project->id)->first();
+        // The em-dash separator must be consumed whole (regex /u) — no leading
+        // stray continuation bytes bleeding into the title.
+        $this->assertSame('Project Skeleton & D-Bus Daemon', $milestone->title);
+        $task = Task::where('project_id', $project->id)->first();
+        $this->assertSame('Create repo structure', $task->title);
+    }
+
     public function test_sync_parses_legacy_milestone_format(): void
     {
         $project = Project::factory()->create(['repo_path' => '/tmp/test-repo']);
