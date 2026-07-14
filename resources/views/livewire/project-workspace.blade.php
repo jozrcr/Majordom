@@ -236,7 +236,6 @@
                         <textarea readonly rows="6" class="w-full rounded-md border border-border-soft bg-surface p-3 font-mono text-[12px] text-body">{{ $this->commitSuggestion->message }}</textarea>
                         <div x-data="{ open: false }">
                             <button type="button" @click="open = !open" class="cursor-pointer font-mono text-meta text-mute hover:text-t3">view diff</button>
-                            <template x-if="true"></template>
                             <div x-show="open" x-cloak>
                             <div class="mt-2 max-h-[420px] overflow-auto rounded-md border border-border-soft bg-surface font-mono text-[12px] leading-[1.75]">
                                 @php
