@@ -22,90 +22,92 @@
 
     {{-- Content --}}
     <main class="flex-1 p-8">
-        <div class="mx-auto max-w-[760px]">
+        <div class="mx-auto max-w-3xl">
             @if($section === 'actors')
                 <h2 class="mb-6 text-lg font-semibold text-hi">Actors & roles</h2>
-                <div class="space-y-6">
+                <div class="space-y-6 ">
                     @foreach($roleDrafts as $id => $draft)
                         @php $role = \App\Models\Role::find($id); @endphp
-                        <div class="grid grid-cols-[170px_1fr] gap-4 items-start border-b border-border pb-4">
-                            <div class="flex flex-col gap-1">
-                                <label class="text-xs font-medium text-t3">Name</label>
-                                <input type="text" value="{{ $role->name }}" readonly class="w-full rounded border border-border bg-surface-chip px-2 py-1.5 font-mono text-sm text-hi {{ $role->is_builtin ? 'opacity-60' : '' }}" />
-                            </div>
-                            <div class="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label class="text-xs font-medium text-t3">Provider</label>
-                                    <select wire:model.live="roleDrafts.{{ $id }}.provider" class="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm text-hi">
-                                        @foreach($providerOptions as $name => $label)
-                                            <option value="{{ $name }}">{{ $label }}</option>
-                                        @endforeach
-                                    </select>
+                        <div class="bg-surface-card p-6 rounded-lg">
+                            <div class="grid grid-cols-[170px_1fr] gap-4 items-start border-b border-border pb-4">
+                                <div class="flex flex-col gap-1">
+                                    <label class="text-xs font-medium text-t3">Name</label>
+                                    <input type="text" value="{{ $role->name }}" readonly class="w-full rounded border border-border bg-surface-chip px-2 py-1.5 font-mono text-sm text-hi {{ $role->is_builtin ? 'opacity-60' : '' }}" />
                                 </div>
-                                <div>
-                                    <label class="text-xs font-medium text-t3">Model</label>
-                                    <input type="text" wire:model.live="roleDrafts.{{ $id }}.model" class="w-full rounded border border-border bg-surface px-2 py-1.5 font-mono text-sm text-hi" />
-                                    @error("roleDrafts.{$id}.model") <span class="text-xs text-status-failed">{{ $message }}</span> @enderror
-                                </div>
-                                <div>
-                                    <label class="text-xs font-medium text-t3">Temperature</label>
-                                    <input type="number" step="0.1" wire:model.live="roleDrafts.{{ $id }}.temperature" class="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm text-hi" />
-                                    @error("roleDrafts.{$id}.temperature") <span class="text-xs text-status-failed">{{ $message }}</span> @enderror
-                                </div>
-                                <div>
-                                    <label class="text-xs font-medium text-t3">Max tokens</label>
-                                    <input type="number" wire:model.live="roleDrafts.{{ $id }}.max_tokens" class="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm text-hi" />
-                                    @error("roleDrafts.{$id}.max_tokens") <span class="text-xs text-status-failed">{{ $message }}</span> @enderror
-                                </div>
-                            </div>
-                        </div>
-                        <div class="mt-2">
-                            <div x-data="{ open: false }">
-                                <button @click="open = !open" class="flex items-center gap-1 text-xs font-medium text-t3 hover:text-hi transition-colors">
-                                    <span x-text="open ? '▾' : '▸'"></span> Developer
-                                </button>
-                                <div x-show="open" x-transition class="mt-3 space-y-4">
+                                <div class="grid grid-cols-2 gap-4">
                                     <div>
-                                        <label class="text-xs font-medium text-t3">
-                                            {{ $role->name === 'builder' || ($role->meta['managed_model'] ?? false) 
-                                                ? 'Additional instructions (injected into the task message)' 
-                                                : 'Additional system instructions (appended to built-in prompt)' }}
-                                        </label>
-                                        <textarea 
-                                            wire:model.live="roleDrafts.{{ $id }}.{{ $role->name === 'builder' || ($role->meta['managed_model'] ?? false) ? 'extra_instructions' : 'system_prompt_extra' }}" 
-                                            rows="3"
-                                            class="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm text-hi"
-                                        ></textarea>
-                                    </div>
-                                    <div class="grid grid-cols-2 gap-4">
-                                        <div>
-                                            <label class="text-xs font-medium text-t3">Top P</label>
-                                            <input type="number" step="0.01" wire:model.live="roleDrafts.{{ $id }}.top_p" class="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm text-hi" />
-                                        </div>
-                                        <div>
-                                            <label class="text-xs font-medium text-t3">Frequency penalty</label>
-                                            <input type="number" step="0.1" wire:model.live="roleDrafts.{{ $id }}.frequency_penalty" class="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm text-hi" />
-                                        </div>
-                                        <div>
-                                            <label class="text-xs font-medium text-t3">Presence penalty</label>
-                                            <input type="number" step="0.1" wire:model.live="roleDrafts.{{ $id }}.presence_penalty" class="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm text-hi" />
-                                        </div>
-                                        <div>
-                                            <label class="text-xs font-medium text-t3">Timeout (s)</label>
-                                            <input type="number" wire:model.live="roleDrafts.{{ $id }}.timeout" class="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm text-hi" />
-                                        </div>
+                                        <label class="text-xs font-medium text-t3">Provider</label>
+                                        <select wire:model.live="roleDrafts.{{ $id }}.provider" class="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm text-hi">
+                                            @foreach($providerOptions as $name => $label)
+                                                <option value="{{ $name }}">{{ $label }}</option>
+                                            @endforeach
+                                        </select>
                                     </div>
                                     <div>
-                                        <label class="text-xs font-medium text-t3">Stop sequences (comma-separated)</label>
-                                        <input type="text" wire:model.live="roleDrafts.{{ $id }}.stop" class="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm text-hi" />
+                                        <label class="text-xs font-medium text-t3">Model</label>
+                                        <input type="text" wire:model.live="roleDrafts.{{ $id }}.model" class="w-full rounded border border-border bg-surface px-2 py-1.5 font-mono text-sm text-hi" />
+                                        @error("roleDrafts.{$id}.model") <span class="text-xs text-status-failed">{{ $message }}</span> @enderror
+                                    </div>
+                                    <div>
+                                        <label class="text-xs font-medium text-t3">Temperature</label>
+                                        <input type="number" step="0.1" wire:model.live="roleDrafts.{{ $id }}.temperature" class="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm text-hi" />
+                                        @error("roleDrafts.{$id}.temperature") <span class="text-xs text-status-failed">{{ $message }}</span> @enderror
+                                    </div>
+                                    <div>
+                                        <label class="text-xs font-medium text-t3">Max tokens</label>
+                                        <input type="number" wire:model.live="roleDrafts.{{ $id }}.max_tokens" class="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm text-hi" />
+                                        @error("roleDrafts.{$id}.max_tokens") <span class="text-xs text-status-failed">{{ $message }}</span> @enderror
                                     </div>
                                 </div>
                             </div>
-                        </div>
-                        <div class="flex gap-2">
-                            @if(!$role->is_builtin)
-                                <button wire:click="deleteRole('{{ $id }}')" wire:confirm="Delete this role?" class="rounded border border-status-failed px-3 py-1.5 text-xs font-medium text-status-failed hover:bg-status-failed/10 transition-colors">Delete</button>
-                            @endif
+                            <div class="mt-2">
+                                <div x-data="{ open: false }">
+                                    <button @click="open = !open" class="flex items-center gap-1 text-xs font-medium text-t3 hover:text-hi transition-colors">
+                                        <span x-text="open ? '▾' : '▸'"></span> Developer
+                                    </button>
+                                    <div x-show="open" x-transition class="mt-3 space-y-4">
+                                        <div>
+                                            <label class="text-xs font-medium text-t3">
+                                                {{ $role->name === 'builder' || ($role->meta['managed_model'] ?? false) 
+                                                    ? 'Additional instructions (injected into the task message)' 
+                                                    : 'Additional system instructions (appended to built-in prompt)' }}
+                                            </label>
+                                            <textarea 
+                                                wire:model.live="roleDrafts.{{ $id }}.{{ $role->name === 'builder' || ($role->meta['managed_model'] ?? false) ? 'extra_instructions' : 'system_prompt_extra' }}" 
+                                                rows="3"
+                                                class="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm text-hi"
+                                            ></textarea>
+                                        </div>
+                                        <div class="grid grid-cols-2 gap-4">
+                                            <div>
+                                                <label class="text-xs font-medium text-t3">Top P</label>
+                                                <input type="number" step="0.01" wire:model.live="roleDrafts.{{ $id }}.top_p" class="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm text-hi" />
+                                            </div>
+                                            <div>
+                                                <label class="text-xs font-medium text-t3">Frequency penalty</label>
+                                                <input type="number" step="0.1" wire:model.live="roleDrafts.{{ $id }}.frequency_penalty" class="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm text-hi" />
+                                            </div>
+                                            <div>
+                                                <label class="text-xs font-medium text-t3">Presence penalty</label>
+                                                <input type="number" step="0.1" wire:model.live="roleDrafts.{{ $id }}.presence_penalty" class="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm text-hi" />
+                                            </div>
+                                            <div>
+                                                <label class="text-xs font-medium text-t3">Timeout (s)</label>
+                                                <input type="number" wire:model.live="roleDrafts.{{ $id }}.timeout" class="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm text-hi" />
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label class="text-xs font-medium text-t3">Stop sequences (comma-separated)</label>
+                                            <input type="text" wire:model.live="roleDrafts.{{ $id }}.stop" class="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm text-hi" />
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="flex gap-2">
+                                @if(!$role->is_builtin)
+                                    <button wire:click="deleteRole('{{ $id }}')" wire:confirm="Delete this role?" class="rounded border border-status-failed px-3 py-1.5 text-xs font-medium text-status-failed hover:bg-status-failed/10 transition-colors">Delete</button>
+                                @endif
+                            </div>
                         </div>
                     @endforeach
                 </div>
