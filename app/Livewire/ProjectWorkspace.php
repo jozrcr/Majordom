@@ -7,6 +7,7 @@ use App\Core\Events\EventRecorder;
 use App\Enums\QuestionStatus;
 use App\Jobs\RunArchitectTurn;
 use App\Models\Project;
+use App\Projects\Exchanges\ExchangeTrace;
 use Illuminate\Support\Facades\Cache;
 use Livewire\Attributes\On;
 use Livewire\Attributes\Url;
@@ -24,6 +25,7 @@ class ProjectWorkspace extends Component
     public ?string $gateComment = null;
     public ?int $selectedEventId = null;
     public ?int $workflowId = null;
+    public ?int $selectedExecutionId = null;
 
     public function mount(Project $project): void
     {
@@ -39,7 +41,7 @@ class ProjectWorkspace extends Component
 
     private function normalizeTab(): void
     {
-        if (!in_array($this->tab, ['chat', 'overview', 'stats', 'roadmap'], true)) {
+        if (!in_array($this->tab, ['chat', 'overview', 'stats', 'roadmap', 'exchanges'], true)) {
             $this->tab = 'chat';
         }
     }
@@ -476,6 +478,33 @@ class ProjectWorkspace extends Component
             ->orderByDesc('id')
             ->limit(8)
             ->get();
+    }
+
+    public function getExecutionsProperty(): \Illuminate\Support\Collection
+    {
+        return $this->project->executions()->orderByDesc('id')->get();
+    }
+
+    public function getExchangesProperty(): array
+    {
+        $executions = $this->executions;
+        if ($executions->isEmpty()) {
+            return ['execution' => null, 'usage' => [], 'rows' => []];
+        }
+
+        $execution = $this->selectedExecutionId
+            ? $executions->firstWhere('id', $this->selectedExecutionId)
+            : $executions->first();
+
+        if (!$execution) {
+            return ['execution' => null, 'usage' => [], 'rows' => []];
+        }
+
+        return [
+            'execution' => $execution,
+            'usage' => ExchangeTrace::usageFor($execution),
+            'rows' => ExchangeTrace::for($execution),
+        ];
     }
 
     #[On('timeline-bump')]

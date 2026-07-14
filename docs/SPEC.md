@@ -335,6 +335,14 @@ The **Roadmap** tab renders **DB entities** (Milestone → Task) as a 3-level ac
 - **Milestone status** is *derived*, never stored: all tasks done → `done`; all tasks todo → `todo`; any other mix → `ongoing`.
 - **UI:** 3-level Alpine.js accordions, Tailwind styling. No inline styles. No raw markdown rendering.
 
+### 10.2 Exchange Trace
+A condensed, per-execution view of hand-offs between actors (architect → builder → reviewer → …). Derived as a **projection over the existing `events` table** (+ `Task.description` for instruction content + `UsageRecord` for per-role tokens/cost). No new logging pipeline, no log parsing, no LLM summaries.
+- **Projection:** `ExchangeTrace::for(Execution)` walks ordered events and maps them to typed exchanges (`instruction`, `result`, `failure`, `verdict`, `rework`, `clarification`, `consensus`, `commit`).
+- **Mapping:** Strict event-name-to-exchange table. `task.delegated`/`delegate.started` emits the instruction exactly once per execution. `build.completed`/`failed`, `test.completed`, `review.completed`/`retry`/`failed`, `human_review.waiting_human`, `consensus.message`, `question.answered`, `commit.applied` map to their respective kinds.
+- **Content:** `excerpt` is the first ~200 chars of `full` (single-lined). `full` is assembled from event payloads or `Task.description`. Null-safe everywhere.
+- **Usage:** `ExchangeTrace::usageFor(Execution)` groups `UsageRecord` by role for a compact header strip.
+- **UI:** Rendered in the `exchanges` tab. Execution picker, usage strip, vertical card list with Alpine accordions for full text. Tailwind only, no inline styles.
+
 ## 11. Non-goals / deferred (do not build in v1)
 
 Non-coding capabilities · parallel Builders · visual node-graph editor ·

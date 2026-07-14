@@ -9,6 +9,7 @@
             <button wire:click="$set('tab', 'overview')" class="px-3 py-2 text-sm font-medium transition-colors {{ $tab === 'overview' ? 'text-accent border-b-2 border-accent' : 'text-mute hover:text-t3' }}">Overview</button>
             <button wire:click="$set('tab', 'stats')" class="px-3 py-2 text-sm font-medium transition-colors {{ $tab === 'stats' ? 'text-accent border-b-2 border-accent' : 'text-mute hover:text-t3' }}">Stats</button>
             <button wire:click="$set('tab', 'roadmap')" class="px-3 py-2 text-sm font-medium transition-colors {{ $tab === 'roadmap' ? 'text-accent border-b-2 border-accent' : 'text-mute hover:text-t3' }}">Roadmap</button>
+            <button wire:click="$set('tab', 'exchanges')" class="px-3 py-2 text-sm font-medium transition-colors {{ $tab === 'exchanges' ? 'text-accent border-b-2 border-accent' : 'text-mute hover:text-t3' }}">Exchanges</button>
         </div>
 
         @if($tab === 'chat')
@@ -299,6 +300,8 @@
             @include('livewire.partials.project-stats')
         @elseif($tab === 'roadmap')
             @include('livewire.partials.project-roadmap')
+        @elseif($tab === 'exchanges')
+            @include('livewire.partials.project-exchanges')
         @endif
     </div>
 
