@@ -27,6 +27,7 @@ class SettingsPage extends Component
     public array $workflow = [
         'max_revisions' => 3,
         'overnight_spend_cap_usd' => 5.0,
+        'push_after_merge' => false,
     ];
 
     public bool $metallamaOk = false;
@@ -104,6 +105,7 @@ class SettingsPage extends Component
     {
         $this->workflow['max_revisions'] = Setting::get('workflow.max_revisions', config('majordom.workflow.max_revisions', 3));
         $this->workflow['overnight_spend_cap_usd'] = Setting::get('workflow.overnight_spend_cap_usd', config('majordom.workflow.overnight_spend_cap_usd', 5.0));
+        $this->workflow['push_after_merge'] = (bool) Setting::get('git.push_after_merge', false);
     }
 
     public function loadIntegrations(): void
@@ -288,10 +290,12 @@ class SettingsPage extends Component
         $validated = $this->validate([
             'workflow.max_revisions' => 'required|integer|min:1|max:10',
             'workflow.overnight_spend_cap_usd' => 'required|numeric|min:0.05|max:100',
+            'workflow.push_after_merge' => 'boolean',
         ]);
 
         Setting::put('workflow.max_revisions', data_get($validated, 'workflow.max_revisions'));
         Setting::put('workflow.overnight_spend_cap_usd', data_get($validated, 'workflow.overnight_spend_cap_usd'));
+        Setting::put('git.push_after_merge', (bool) data_get($validated, 'workflow.push_after_merge'));
 
         $this->justSaved = 'workflow-settings';
     }

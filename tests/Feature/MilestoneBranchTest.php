@@ -1,9 +1,11 @@
 <?php
 
+use App\Models\Event;
 use App\Models\Milestone;
 use App\Models\Project;
 use App\Projects\Repositories\CommitService;
 use App\Projects\Repositories\WorktreeManager;
+use App\Support\Setting;
 use Illuminate\Support\Facades\Process;
 
 uses(\Illuminate\Foundation\Testing\RefreshDatabase::class);
@@ -75,7 +77,7 @@ test('mergeMilestone merges --no-ff, records the event, removes the worktree', f
 
     app(CommitService::class)->mergeMilestone($milestone);
 
-    expect(\App\Models\Event::where('name', 'milestone.merged')->where('project_id', $project->id)->exists())->toBeTrue();
+    expect(Event::where('name', 'milestone.merged')->where('project_id', $project->id)->exists())->toBeTrue();
     Process::assertRan(fn ($p) => is_array($p->command) && $p->command[1] === 'merge' && $p->command[2] === '--no-ff');
     Process::assertRan(fn ($p) => is_array($p->command) && $p->command === ['git', 'worktree', 'remove', '--force', $expected]);
 });
@@ -103,4 +105,85 @@ test('mergeMilestone throws when the milestone branch does not exist', function 
 
     expect(fn () => app(CommitService::class)->mergeMilestone($milestone))
         ->toThrow(RuntimeException::class, 'No milestone branch majordom/M5 to merge.');
+});
+
+test('mergeMilestone pushes when setting is on and remote exists', function () {
+    Setting::put('git.push_after_merge', true);
+    $repo = fakeRepo();
+    $project = Project::factory()->create(['repo_path' => $repo]);
+    $milestone = Milestone::factory()->create(['project_id' => $project->id, 'milestone_key' => 'M6', 'title' => 'Push Test']);
+
+    $root = sys_get_temp_dir().'/majordom-wt-'.uniqid();
+    $expected = $root.'/'.$project->slug.'/M6';
+    mkdir($expected, 0755, true);
+    app()->instance(WorktreeManager::class, new WorktreeManager($root));
+
+    Process::fake([
+        "'git' 'status' '--porcelain'" => Process::result(output: ''),
+        "'git' 'rev-parse' '--verify' 'majordom/M6'" => Process::result(output: "abc\n"),
+        "'git' 'merge' '--no-ff' 'majordom/M6'*" => Process::result(output: 'merged'),
+        "'git' 'remote'" => Process::result(output: "origin\n"),
+        "'git' 'push'" => Process::result(output: 'ok'),
+        "'git' 'worktree' 'remove' '--force'*" => Process::result(output: ''),
+    ]);
+
+    app(CommitService::class)->mergeMilestone($milestone);
+
+    expect(Event::where('name', 'milestone.pushed')->where('project_id', $project->id)->exists())->toBeTrue();
+    Process::assertRan(fn ($p) => is_array($p->command) && $p->command === ['git', 'push']);
+    
+    Setting::put('git.push_after_merge', false);
+});
+
+test('mergeMilestone skips push when setting is on but no remote exists', function () {
+    Setting::put('git.push_after_merge', true);
+    $repo = fakeRepo();
+    $project = Project::factory()->create(['repo_path' => $repo]);
+    $milestone = Milestone::factory()->create(['project_id' => $project->id, 'milestone_key' => 'M7', 'title' => 'No Remote']);
+
+    $root = sys_get_temp_dir().'/majordom-wt-'.uniqid();
+    $expected = $root.'/'.$project->slug.'/M7';
+    mkdir($expected, 0755, true);
+    app()->instance(WorktreeManager::class, new WorktreeManager($root));
+
+    Process::fake([
+        "'git' 'status' '--porcelain'" => Process::result(output: ''),
+        "'git' 'rev-parse' '--verify' 'majordom/M7'" => Process::result(output: "abc\n"),
+        "'git' 'merge' '--no-ff' 'majordom/M7'*" => Process::result(output: 'merged'),
+        "'git' 'remote'" => Process::result(output: ''),
+        "'git' 'worktree' 'remove' '--force'*" => Process::result(output: ''),
+    ]);
+
+    app(CommitService::class)->mergeMilestone($milestone);
+
+    expect(Event::where('name', 'milestone.push_skipped')->where('project_id', $project->id)->exists())->toBeTrue();
+    Process::assertNotRan(fn ($p) => is_array($p->command) && $p->command === ['git', 'push']);
+    
+    Setting::put('git.push_after_merge', false);
+});
+
+test('mergeMilestone records push failure but does not throw', function () {
+    Setting::put('git.push_after_merge', true);
+    $repo = fakeRepo();
+    $project = Project::factory()->create(['repo_path' => $repo]);
+    $milestone = Milestone::factory()->create(['project_id' => $project->id, 'milestone_key' => 'M8', 'title' => 'Push Fail']);
+
+    $root = sys_get_temp_dir().'/majordom-wt-'.uniqid();
+    $expected = $root.'/'.$project->slug.'/M8';
+    mkdir($expected, 0755, true);
+    app()->instance(WorktreeManager::class, new WorktreeManager($root));
+
+    Process::fake([
+        "'git' 'status' '--porcelain'" => Process::result(output: ''),
+        "'git' 'rev-parse' '--verify' 'majordom/M8'" => Process::result(output: "abc\n"),
+        "'git' 'merge' '--no-ff' 'majordom/M8'*" => Process::result(output: 'merged'),
+        "'git' 'remote'" => Process::result(output: "origin\n"),
+        "'git' 'push'" => Process::result(exitCode: 1, errorOutput: 'fatal: unable to access'),
+        "'git' 'worktree' 'remove' '--force'*" => Process::result(output: ''),
+    ]);
+
+    expect(fn () => app(CommitService::class)->mergeMilestone($milestone))->not->toThrow();
+    expect(Event::where('name', 'milestone.push_failed')->where('project_id', $project->id)->exists())->toBeTrue();
+    
+    Setting::put('git.push_after_merge', false);
 });

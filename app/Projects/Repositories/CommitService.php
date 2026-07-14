@@ -9,6 +9,7 @@ use App\Models\CommitSuggestion;
 use App\Models\Milestone;
 use App\Models\Task;
 use App\Projects\Memory\MemoryStore;
+use App\Support\Setting;
 use Illuminate\Support\Facades\Process;
 use RuntimeException;
 
@@ -147,7 +148,30 @@ class CommitService
 
         $this->worktrees->removeMilestoneWorktree($m->project, $m);
 
-        // push hook (T-49)
+        if (Setting::get('git.push_after_merge', false)) {
+            $remoteCheck = Process::path($repo)->run(['git', 'remote']);
+            if (trim($remoteCheck->output()) === '') {
+                $this->events->record($m->project, 'milestone.push_skipped', [
+                    'milestone_key' => $m->milestone_key,
+                    'reason' => 'no remote',
+                ], null, 'you');
+            } else {
+                $push = Process::path($repo)
+                    ->env($this->committerEnv($repo))
+                    ->run(['git', 'push']);
+
+                if ($push->successful()) {
+                    $this->events->record($m->project, 'milestone.pushed', [
+                        'milestone_key' => $m->milestone_key,
+                    ], null, 'you');
+                } else {
+                    $this->events->record($m->project, 'milestone.push_failed', [
+                        'milestone_key' => $m->milestone_key,
+                        'error' => trim($push->errorOutput()),
+                    ], null, 'you');
+                }
+            }
+        }
     }
 
     private function assertSuggested(CommitSuggestion $suggestion): void
