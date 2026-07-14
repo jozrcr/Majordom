@@ -33,8 +33,8 @@
 
     <div class="rounded-lg border border-border bg-surface-card p-4 space-y-3">
         <h2 class="text-lg font-semibold text-hi">Agreed Plan</h2>
-        @if($plannedTask)
-            <p class="text-body-sm text-text">First task: <span class="font-mono">{{ $plannedTask['key'] }}</span> — {{ $plannedTask['title'] }}</p>
+        @if($this->plannedTask)
+            <p class="text-body-sm text-text">First task: <span class="font-mono">{{ $this->plannedTask['key'] }}</span> — {{ $this->plannedTask['title'] }}</p>
         @else
             <p class="text-body-sm text-mute">No approved plan yet. Consensus is needed to generate the project memory and task briefs.</p>
         @endif
@@ -42,7 +42,7 @@
 
     <div class="rounded-lg border border-border bg-surface-card p-4 space-y-3">
         <h2 class="text-lg font-semibold text-hi">Recent Consensus</h2>
-        @forelse($recentConsensus as $msg)
+        @forelse($this->recentConsensus as $msg)
             <div class="border-b border-border-soft pb-2 last:border-0 last:pb-0">
                 <div class="flex items-center gap-2 mb-1">
                     <span class="rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-surface-active text-mute">{{ $msg->role->value }}</span>

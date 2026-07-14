@@ -1,7 +1,7 @@
 <div class="flex h-full flex-col gap-6 overflow-y-auto p-6">
     @php
-        $stats = $usageStats;
-        $execCounts = $executionCounts;
+        $stats = $this->usageStats;
+        $execCounts = $this->executionCounts;
         $hasData = $stats['by_role']->isNotEmpty() || !empty($execCounts);
     @endphp
 

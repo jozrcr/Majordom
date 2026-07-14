@@ -262,15 +262,23 @@ Reverb for live updates.
 
 - **Home — Project dashboard.** Cards per project: name, active milestone, a
   status light (`idle` / `working` / **`needs you`**), last activity.
-- **Project workspace** — four regions:
-  1. **Consensus chat** — the primary surface; talk to the Architect, answer its
-     questions, approve the plan. The captured system-of-record for intent.
-  2. **Roadmap** — milestones → tasks, editable, reflecting `roadmap.md`.
-  3. **Activity timeline** — the live event feed (Reverb): delegated → building →
-     review → …
-  4. **Review surface** — appears at a gate: inline **diff viewer** with
-     approve / reject / comment, plus an "open in VS Code" deep-link escape hatch
-     (Q31).
+- **Project workspace** — tabbed (M11); the `tab` state is querystring-persisted
+  (`#[Url]`) and normalized to `chat` on any unknown value:
+  - **Chat** (default) — the four core regions:
+    1. **Consensus chat** — the primary surface; talk to the Architect, answer its
+       questions, approve the plan. The captured system-of-record for intent.
+    2. **Roadmap** — milestones → tasks, editable, reflecting `roadmap.md`.
+    3. **Activity timeline** — the live event feed (Reverb): delegated → building →
+       review → …
+    4. **Review surface** — appears at a gate: inline **diff viewer** with
+       approve / reject / comment, plus an "open in VS Code" deep-link escape hatch
+       (Q31).
+  - **Overview** — read-only project facts (status, repo, test command, workflow,
+    last activity), the agreed plan (first task from `getPlannedTaskProperty`), and
+    recent consensus messages.
+  - **Stats** — usage totals per role (tokens + `cost_usd`) from `UsageRecord`, a
+    grand total, and execution counts by status. A richer per-project cost
+    dashboard (dataviz) is a later enhancement.
 - **"Needs You" inbox** — global across all projects; the queue of open
   Approvals/Questions/Test-invites. **This is exactly what Telegram/Discord
   mirror** — one queue, three windows (app, phone, desktop). Backbone of the

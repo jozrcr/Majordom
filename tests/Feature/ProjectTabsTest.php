@@ -38,6 +38,7 @@ class ProjectTabsTest extends TestCase
         UsageRecord::create([
             'project_id' => $project->id,
             'role' => 'architect',
+            'model' => 'test-model',
             'prompt_tokens' => 100,
             'completion_tokens' => 50,
             'cost_usd' => 0.005,
@@ -46,6 +47,7 @@ class ProjectTabsTest extends TestCase
         UsageRecord::create([
             'project_id' => $project->id,
             'role' => 'builder',
+            'model' => 'test-model',
             'prompt_tokens' => 200,
             'completion_tokens' => 100,
             'cost_usd' => 0.010,

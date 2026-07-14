@@ -29,6 +29,16 @@ class ProjectWorkspace extends Component
     {
         $this->project = $project;
         $this->workflowId = $project->workflow_id;
+        $this->normalizeTab();
+    }
+
+    public function updatedTab(): void
+    {
+        $this->normalizeTab();
+    }
+
+    private function normalizeTab(): void
+    {
         if (!in_array($this->tab, ['chat', 'overview', 'stats'], true)) {
             $this->tab = 'chat';
         }
