@@ -21,6 +21,10 @@ class Task extends Model
         'status',
         'revision',
         'clarified_at_revision',
+        'milestone_id',
+        'position',
+        'declared_status',
+        'description',
     ];
 
     protected function casts(): array
@@ -38,5 +42,10 @@ class Task extends Model
     public function execution(): BelongsTo
     {
         return $this->belongsTo(Execution::class);
+    }
+
+    public function milestone(): BelongsTo
+    {
+        return $this->belongsTo(Milestone::class);
     }
 }

@@ -262,15 +262,23 @@ Reverb for live updates.
 
 - **Home — Project dashboard.** Cards per project: name, active milestone, a
   status light (`idle` / `working` / **`needs you`**), last activity.
-- **Project workspace** — four regions:
-  1. **Consensus chat** — the primary surface; talk to the Architect, answer its
-     questions, approve the plan. The captured system-of-record for intent.
-  2. **Roadmap** — milestones → tasks, editable, reflecting `roadmap.md`.
-  3. **Activity timeline** — the live event feed (Reverb): delegated → building →
-     review → …
-  4. **Review surface** — appears at a gate: inline **diff viewer** with
-     approve / reject / comment, plus an "open in VS Code" deep-link escape hatch
-     (Q31).
+- **Project workspace** — tabbed (M11); the `tab` state is querystring-persisted
+  (`#[Url]`) and normalized to `chat` on any unknown value:
+  - **Chat** (default) — the four core regions:
+    1. **Consensus chat** — the primary surface; talk to the Architect, answer its
+       questions, approve the plan. The captured system-of-record for intent.
+    2. **Roadmap** — milestones → tasks, editable, reflecting `roadmap.md`.
+    3. **Activity timeline** — the live event feed (Reverb): delegated → building →
+       review → …
+    4. **Review surface** — appears at a gate: inline **diff viewer** with
+       approve / reject / comment, plus an "open in VS Code" deep-link escape hatch
+       (Q31).
+  - **Overview** — read-only project facts (status, repo, test command, workflow,
+    last activity), the agreed plan (first task from `getPlannedTaskProperty`), and
+    recent consensus messages.
+  - **Stats** — usage totals per role (tokens + `cost_usd`) from `UsageRecord`, a
+    grand total, and execution counts by status. A richer per-project cost
+    dashboard (dataviz) is a later enhancement.
 - **"Needs You" inbox** — global across all projects; the queue of open
   Approvals/Questions/Test-invites. **This is exactly what Telegram/Discord
   mirror** — one queue, three windows (app, phone, desktop). Backbone of the
@@ -317,6 +325,29 @@ params, and `OpenAiCompatibleProvider` includes them in the body only when
 non-null (`timeout` falls back to the endpoint's). Numeric values are cast on
 read (`(float)`/`(int)`) because the JSON column round-trip may demote e.g.
 `-1.0` to `-1`.
+
+### 10.1 Roadmap Tab & Sync Rules
+The **Roadmap** tab renders **DB entities** (Milestone → Task) as a 3-level accordion — milestone (status dot + colour) → task (status + colour) → task detail (description/goal) — NOT raw markdown. The markdown (`roadmap.md`) is only an INPUT to `RoadmapSync`; the screen only ever reads DB rows.
+- **Source precedence:** `RoadmapSync` reads `{$repo_path}/agents/ROADMAP.md` first. If absent, it falls back to project memory `roadmap.md`. If neither yields content, it is a no-op.
+- **Format:** Tolerates both structured `## M<N> — <title>` and legacy prose `## Milestone <N>: <title>`. Keys normalize to `M<N>`. Tasks come from `- [<mark>] <T-NN> — <title>` checkboxes. Non-checkbox lines accumulate into milestone `summary`.
+- **Sync:** Upserts `milestones` and `tasks` into the DB. Idempotent; emits `roadmap_events` only on real deltas (status/title/position changes). Description sync from `tasks/<key>/task.md` in memory is silent (no event).
+- **Effective Status:** UI displays tri-state status derived from `max(db_status, declared_md_status)` on `todo < ongoing < done`. Sync writes `declared_status`/`milestone_id`/`position`/`title`/`description` — never the live `status` column (harness-owned).
+- **Milestone status** is *derived*, never stored: all tasks done → `done`; all tasks todo → `todo`; any other mix → `ongoing`.
+- **UI:** 3-level Alpine.js accordions, Tailwind styling. No inline styles. No raw markdown rendering.
+
+### 10.2 Exchange Trace
+A condensed, per-execution view of hand-offs between actors (architect → builder → reviewer → …). Derived as a **projection over the existing `events` table** (+ `Task.description` for instruction content + `UsageRecord` for per-role tokens/cost). No new logging pipeline, no log parsing, no LLM summaries.
+- **Projection:** `ExchangeTrace::for(Execution)` walks ordered events and maps them to typed exchanges (`instruction`, `result`, `failure`, `verdict`, `rework`, `clarification`, `consensus`, `commit`).
+- **Mapping:** Strict event-name-to-exchange table. `task.delegated`/`delegate.started` emits the instruction exactly once per execution. `build.completed`/`failed`, `test.completed`, `review.completed`/`retry`/`failed`, `human_review.waiting_human`, `consensus.message`, `question.answered`, `commit.applied` map to their respective kinds.
+- **Content:** `excerpt` is the first ~200 chars of `full` (single-lined). `full` is assembled from event payloads or `Task.description`. Null-safe everywhere.
+- **Usage:** `ExchangeTrace::usageFor(Execution)` groups `UsageRecord` by role for a compact header strip.
+- **UI:** Rendered in the `exchanges` tab. Execution picker, usage strip, vertical card list with Alpine accordions for full text. Tailwind only, no inline styles.
+
+### 10.3 Milestone Metrics
+A per-milestone (and per-task) projection of delivery metrics, surfaced in the **Stats** tab. Derived entirely from existing `UsageRecord`, `Event`, `Task`, and `Execution` rows — no new logging or LLM calls.
+- **Projection:** `MilestoneMetrics::forMilestone(Milestone)` and `::forTask(Task)` compute aggregates scoped to the execution IDs linked to the milestone's tasks.
+- **Metrics:** `tokens` (prompt+completion summed per architect/builder/reviewer), `cost_usd`, `human_interventions` (count of `approval.granted`, `question.answered`, `human_review.waiting_human`, `human_task.waiting_human`), `rework_cycles` (count of `review.retry`/`review.failed`, maxed against `task.revision - 1`), `files_changed` (distinct union of `build.completed` payload files), `time_to_completion` (span of events in seconds), `tests_added` (deferred, always null).
+- **UI:** Rendered in the Stats tab as an accordion per milestone with a compact metric grid. Tasks drill down client-side. Null-safe on sparse/never-run tasks.
 
 ## 11. Non-goals / deferred (do not build in v1)
 

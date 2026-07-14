@@ -44,6 +44,16 @@ return [
         'timeout' => (int) env('MAJORDOM_HARNESS_TIMEOUT', 1800), // seconds
     ],
 
+    // Committer identity for the human-gated promotion commit. The app process
+    // may run without the user's ~/.gitconfig visible (snap/systemd sandbox a
+    // different $HOME), so git can't resolve author identity on its own. When
+    // set, these are passed explicitly to the commit; otherwise CommitService
+    // falls back to the repo's own resolved git identity.
+    'git' => [
+        'author_name' => env('MAJORDOM_GIT_AUTHOR_NAME'),
+        'author_email' => env('MAJORDOM_GIT_AUTHOR_EMAIL'),
+    ],
+
     'providers' => [
         'openrouter' => [
             'base_url' => env('OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1'),

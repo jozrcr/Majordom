@@ -102,6 +102,31 @@ Expected: architect/reviewer → openrouter `https://openrouter.ai/api/v1`
 
 - **T-39** — tabs scaffold + Overview + Stats. Brief:
   `agents/T-39-project-tabs-overview.md`. Branch: `feat/m11-project-tabs`.
-- **T-40** — "contract detail view" — SCOPE UNCONFIRMED. Ask the owner
-  what "contract" means here (provider/runtime contracts docs vs agreed
-  consensus specs) BEFORE writing the brief. Do not guess.
+- **T-40** — "contract detail view" — SCOPE DEFINED by owner 2026-07-16:
+  condensed insight into actor→actor instruction flows (architect→builder,
+  builder→reviewer, reviewer→architect, etc.). Full logs already exist;
+  goal is a condensed, structured trace. Design:
+  - Projection over the existing `events` table (project_id, execution_id,
+    name, actor, payload) — NO new logging pipeline, NO log parsing.
+  - Model as Exchanges: from_actor → to_actor, kind (instruction | result |
+    verdict | clarification), excerpt (~200 chars), expandable full text,
+    timestamp; join UsageRecord for tokens/cost per hop.
+  - Enrich payloads AT THE EMISSION SEAMS (EventRecorder call sites in
+    ArchitectService/ReviewerService + harness builder task message) where
+    instruction text is not yet captured.
+  - UI: per-execution "Exchanges" detail view, drill-in from timeline
+    (M11 tabs). Condensation v1 is structural (role pair + kind + excerpt
+    + sizes) — deterministic and testable. Optional LLM digest is a later
+    enhancement, NOT in v1.
+
+- **T-43** — structured roadmap: DB-derived 3-level Roadmap tab (milestone →
+  task → description). Architect writes structured roadmap.md; RoadmapSync
+  reads memory roadmap.md + tolerates legacy prose format. Brief:
+  agents/T-43-structured-roadmap.md. Owner: Roadmap must render DB rows, never
+  raw md.
+- **T-44** — per-milestone / per-task metrics (DEFERRED, owner-requested):
+  consensus rounds, tokens by role (UsageRecord), human interventions
+  (Approvals/Questions), rework cycles (Task.revision), files changed / tests
+  added (harness+diff), time-to-completion (timestamps). All source data
+  exists; per-milestone aggregation unlocked by T-43's task→milestone linkage.
+  A Stats-style analytics layer per milestone with per-task drill-down.

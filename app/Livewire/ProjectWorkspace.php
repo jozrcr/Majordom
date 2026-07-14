@@ -7,13 +7,17 @@ use App\Core\Events\EventRecorder;
 use App\Enums\QuestionStatus;
 use App\Jobs\RunArchitectTurn;
 use App\Models\Project;
+use App\Projects\Exchanges\ExchangeTrace;
 use Illuminate\Support\Facades\Cache;
 use Livewire\Attributes\On;
+use Livewire\Attributes\Url;
 use Livewire\Component;
 
 class ProjectWorkspace extends Component
 {
     public Project $project;
+    #[Url]
+    public string $tab = 'chat';
     public string $draft = '';
     public array $answerDrafts = [];
     /** Free-text answers; when non-empty they win over a picked option. */
@@ -21,11 +25,25 @@ class ProjectWorkspace extends Component
     public ?string $gateComment = null;
     public ?int $selectedEventId = null;
     public ?int $workflowId = null;
+    public ?int $selectedExecutionId = null;
 
     public function mount(Project $project): void
     {
         $this->project = $project;
         $this->workflowId = $project->workflow_id;
+        $this->normalizeTab();
+    }
+
+    public function updatedTab(): void
+    {
+        $this->normalizeTab();
+    }
+
+    private function normalizeTab(): void
+    {
+        if (!in_array($this->tab, ['chat', 'overview', 'stats', 'roadmap', 'exchanges'], true)) {
+            $this->tab = 'chat';
+        }
     }
 
     public function updatedWorkflowId(?int $value): void
@@ -247,6 +265,25 @@ class ProjectWorkspace extends Component
         return ['key' => $taskId, 'title' => $title];
     }
 
+    /**
+     * The stored agreed-plan text the Architect wrote at plan approval
+     * (roadmap.md, else architecture.md, else the raw plan_draft.md). Shown
+     * verbatim in the Overview/Roadmap "Agreed plan" accordion — no summary,
+     * no LLM call, just the source of truth from project memory.
+     */
+    public function getPlanTextProperty(): ?string
+    {
+        $store = app(\App\Projects\Memory\MemoryStore::class);
+        foreach (['roadmap.md', 'architecture.md', 'plan_draft.md'] as $doc) {
+            $text = $store->read($this->project, $doc);
+            if ($text !== null && trim($text) !== '') {
+                return $text;
+            }
+        }
+
+        return null;
+    }
+
     public function getOpenApprovalProperty(): ?\App\Models\Approval
     {
         return $this->project->openApprovals()->first();
@@ -360,6 +397,151 @@ class ProjectWorkspace extends Component
         }
 
         return ['event' => $event, 'node' => $node];
+    }
+
+    public function getRecentConsensusProperty(): \Illuminate\Support\Collection
+    {
+        return $this->project->consensusMessages()
+            ->orderByDesc('id')
+            ->limit(10)
+            ->get();
+    }
+
+    public function getUsageStatsProperty(): array
+    {
+        $byRole = \App\Models\UsageRecord::where('project_id', $this->project->id)
+            ->selectRaw('role, SUM(prompt_tokens) as prompt_tokens, SUM(completion_tokens) as completion_tokens, SUM(cost_usd) as cost_usd')
+            ->groupBy('role')
+            ->get();
+
+        $total = \App\Models\UsageRecord::where('project_id', $this->project->id)
+            ->selectRaw('SUM(prompt_tokens) as prompt_tokens, SUM(completion_tokens) as completion_tokens, SUM(cost_usd) as cost_usd')
+            ->first();
+
+        return [
+            'by_role' => $byRole,
+            'total' => $total,
+        ];
+    }
+
+    public function getExecutionCountsProperty(): array
+    {
+        return $this->project->executions()
+            ->selectRaw('status, COUNT(*) as count')
+            ->groupBy('status')
+            ->pluck('count', 'status')
+            ->toArray();
+    }
+
+    private bool $roadmapSynced = false;
+
+    public function getRoadmapProperty(): array
+    {
+        if (!$this->roadmapSynced) {
+            \App\Projects\Roadmap\RoadmapSync::for($this->project)->sync();
+            $this->roadmapSynced = true;
+        }
+
+        $milestones = \App\Models\Milestone::where('project_id', $this->project->id)
+            ->with('tasks')
+            ->orderBy('position')
+            ->get();
+
+        $result = [];
+        foreach ($milestones as $m) {
+            $tasks = [];
+            foreach ($m->tasks as $t) {
+                $tasks[] = [
+                    'id' => $t->id,
+                    'key' => $t->task_key,
+                    'title' => $t->title,
+                    'status' => \App\Projects\Roadmap\RoadmapSync::effectiveStatus($t),
+                    'description' => $t->description,
+                ];
+            }
+            $result[] = [
+                'id' => $m->id,
+                'key' => $m->milestone_key,
+                'title' => $m->title,
+                'summary' => $m->summary,
+                'status' => $m->deriveStatus(),
+                'tasks' => $tasks,
+            ];
+        }
+
+        return $result;
+    }
+
+    public function getMilestoneMetricsProperty(): array
+    {
+        if (!$this->roadmapSynced) {
+            \App\Projects\Roadmap\RoadmapSync::for($this->project)->sync();
+            $this->roadmapSynced = true;
+        }
+
+        $milestones = \App\Models\Milestone::where('project_id', $this->project->id)
+            ->with('tasks')
+            ->orderBy('position')
+            ->get();
+
+        $allTasks = $milestones->flatMap->tasks;
+        $taskMetricsMap = \App\Projects\Metrics\MilestoneMetrics::forTasks($allTasks);
+
+        $result = [];
+        foreach ($milestones as $m) {
+            $tasks = [];
+            foreach ($m->tasks as $t) {
+                $tasks[] = [
+                    'key' => $t->task_key,
+                    'title' => $t->title,
+                    'metrics' => $taskMetricsMap[$t->id],
+                ];
+            }
+            $result[] = [
+                'key' => $m->milestone_key,
+                'title' => $m->title,
+                'status' => $m->deriveStatus(),
+                'metrics' => \App\Projects\Metrics\MilestoneMetrics::forMilestone($m),
+                'tasks' => $tasks,
+            ];
+        }
+
+        return $result;
+    }
+
+    public function getRecentRoadmapChangesProperty(): \Illuminate\Support\Collection
+    {
+        return \App\Models\RoadmapEvent::where('project_id', $this->project->id)
+            ->orderByDesc('id')
+            ->limit(8)
+            ->get();
+    }
+
+    public function getExecutionsProperty(): \Illuminate\Support\Collection
+    {
+        return $this->project->executions()->orderByDesc('id')->get();
+    }
+
+    public function getExchangesProperty(): array
+    {
+        $executions = $this->executions;
+        if ($executions->isEmpty()) {
+            return ['execution' => null, 'usage' => [], 'rows' => []];
+        }
+
+        $execution = $this->selectedExecutionId
+            ? $executions->firstWhere('id', $this->selectedExecutionId)
+            : $executions->first();
+
+        if (!$execution) {
+            return ['execution' => null, 'usage' => [], 'rows' => []];
+        }
+
+        return [
+            'execution' => $execution,
+            'usage' => ExchangeTrace::usageFor($execution),
+            'rows' => ExchangeTrace::for($execution),
+        ];
     }
 
     #[On('timeline-bump')]

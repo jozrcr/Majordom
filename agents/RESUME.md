@@ -1,4 +1,86 @@
-# Session resume — state as of 2026-07-16 (T-38 MERGED to main; next: M11)
+# Session resume — state as of 2026-07-16 (T-39 reviewed on branch; awaiting merge sign-off)
+
+## T-39 status (Opus session)
+
+- T-39 (project tabs Chat/Overview/Stats) BUILT by Qwen (`1c38d56`,
+  `07fd690`) + REVIEWED by Opus (`9b156a8`) on `feat/m11-project-tabs`
+  (pushed to origin). Suite **274/274 green**.
+- Review fixes: partials referenced bare `$plannedTask`/`$recentConsensus`/
+  `$usageStats`/`$executionCounts` — computed props need `$this->` inside
+  `@include`; added `updatedTab()` so live tab changes (not just mount)
+  normalize unknown values → chat; test UsageRecord needs `model` (NOT
+  NULL); SPEC §9 documents the tabbed workspace.
+- NOT merged — merges to main are owner-gated (T-38 precedent). Awaiting
+  owner "green light" on the T-39 merge.
+- Owner now runs their OWN dev stack via `npm run dev` (concurrently:
+  serve/worker/reverb/telegram/vite, `--kill-others`). My standalone
+  background worker was stopped to avoid a duplicate — DO NOT spawn a
+  separate `queue:work`; the owner's stack owns processes now. T-39 is
+  UI-only so no worker restart was needed regardless.
+- T-40 scope is DEFINED (exchange trace over `events` table) — see
+  DISPATCH.md M11/T-40. Brief not yet written.
+
+## T-41 status (Opus session, in flight)
+
+- Design SETTLED w/ owner: source = `agents/ROADMAP.md` (per-project at
+  `{repo_path}/agents/ROADMAP.md`); one-way md→DB sync; git + light
+  `roadmap_events` feed for history; live DB status overrides md declared
+  status UPWARD only. ROADMAP.md authored w/ real M1–M11 history.
+- Brief `agents/T-41-roadmap-tab.md` + ROADMAP.md committed `7eef425`.
+- Qwen build (`1779aaf`, `604d3d6`) + REVIEWED by Opus (`5018308`).
+  **Suite 282/282 green.** Review fixes: (1) Task `$fillable` missing
+  milestone_id/position/declared_status — mass-assignment silently dropped
+  them (my brief scoped Task.php read-only — my miss); (2) deriveStatus:
+  done+todo mix is ongoing not done; (3) real stored plan text (planText
+  prop reads roadmap.md/architecture.md/plan_draft.md) replaces Qwen's
+  hardcoded placeholder; (4) File::ensureDirectory→ensureDirectoryExists;
+  +2 tests; SPEC §10.1 augmented.
+- WIRE-TESTED live: seeded a **"majordom" self-project** (slug=majordom,
+  repo_path=base_path, project id=2) and synced the real agents/ROADMAP.md
+  → 11 milestones / 35 tasks; M1–M10 derive done, M11 ongoing; idempotent
+  (2nd sync 0 new events). Owner can view it in-browser now.
+- T-41 done + reviewed on `feat/m11-project-tabs`.
+
+## T-43 status (Opus session) — structured DB-derived roadmap
+
+- Owner refined the vision: Roadmap tab must render **DB entities, never raw
+  md**; Architect writes structured roadmap.md (milestones + nested task
+  checkboxes); 3-level accordion (milestone → task → description). Metrics
+  deferred to **T-44** (owner-requested; note in DISPATCH.md).
+- Qwen build (`bd991d1`, `150817d`) — **CLEAN, no review fixes needed.**
+  Suite **285/285 green** (incl. Architect/plan-flow tests — the PLAN_PROMPT
+  change was safe). RoadmapSync now: source = repo agents/ROADMAP.md else
+  memory roadmap.md; parser tolerates structured `## M<N> —` AND legacy
+  `## Milestone N:` prose; task `description` synced from tasks/<key>/task.md.
+  Raw-md blob removed from Roadmap tab.
+- WIRE-TESTED: test-joac (legacy prose) → 5 milestone accordions w/
+  summaries (fixes the screenshot textarea complaint); majordom self-project
+  (structured) → M11 with 4 nested tasks, correct effective statuses.
+- T-43 done + em-dash /u fix (`31777cc`) + owner roadmap scroll tweak (`350b9ff`).
+
+## T-40 + T-44 status (Opus session) — exchange trace + metrics
+
+- **T-40 exchange trace** (`a0bc7d7`,`04051b8`, review `a982f9c`): new
+  `exchanges` tab. `ExchangeTrace::for(Execution)` projects the events table →
+  ordered actor→actor hops (instruction/result/rework/verdict/…), excerpt +
+  Alpine-expandable full text, per-role usage strip. Wire-tested exec #13: the
+  4-revision rework loop → parked reads clearly. Review fix: test harness
+  (RefreshDatabase/slug/model).
+- **T-44 milestone metrics** (`fc03755`,`feded7c`, review `f8a9495`):
+  `MilestoneMetrics::forMilestone/forTask/forTasks` → tokens by role, cost,
+  human interventions, rework cycles, files changed, time-to-completion
+  (`tests_added` deferred/null). Surfaced in **Stats tab** as per-milestone
+  accordions w/ per-task drill-down. Review fixes: created missing
+  MilestoneFactory, design-token colors (not raw Tailwind), RefreshDatabase,
+  float-delta assert. Null-safe on never-run milestones (clean zeros).
+- **Suite 293/293 green.** No inline styles anywhere.
+- STATUS: **M11 COMPLETE** on `feat/m11-project-tabs` — 5 tabs (Chat,
+  Overview, Stats+metrics, Roadmap, Exchanges), all reviewed + wire-tested +
+  pushed. **Merge-ready pending owner visual confirm + sign-off.** Metrics
+  populate for NEW structured-roadmap projects (legacy prose projects show
+  milestones but zero-metric until tasks link to executions).
+
+---
 
 > Fresh session: read CLAUDE.md → this file → **agents/DISPATCH.md** (how to
 > summon the Qwen builder via aider + the review protocol). Persistent memory
@@ -19,8 +101,8 @@
   ('db'|'env'|'none') + `key_config`. Role drafts expose `knobs_inert`
   (provider driver === 'metallama') → 5 sampler inputs disabled + hint;
   `extra_instructions`/`timeout`/`model`/`max_tokens` stay editable.
-  `updatedRoleDrafts` hook recomputes on provider switch. Owner has NOT
-  yet signed off on the merge — flag it in next chat message.
+  `updatedRoleDrafts` hook recomputes on provider switch. Owner
+  SIGNED OFF on the merge 2026-07-16 ("green light on T 38 merge").
 - API key policy (owner-set 2026-07-16): env/config indirection preferred
   (builtins via `meta.api_key_config`); DB storage ONLY with encryption
   (`'api_key' => 'encrypted'` cast, mandatory); key never echoed to UI
@@ -125,13 +207,22 @@ Read order for the incoming model: this file top block → agents/DISPATCH.md
 - main @ `1942bb8`, pushed to origin. Suite 270/701 green.
 - Queue worker task `btcvcg3y3` on current main (harness,default,
   tries=1, timeout=1800). Serve :8890 · Reverb :8815 · metallama :8010.
-- IN FLIGHT: T-39 build on `feat/m11-project-tabs` via aider (brief:
+- IN FLIGHT: T-39 build on `feat/m11-project-tabs` via aider — background
+  task `b1f3iyeby`, log `/tmp/claude-1000/-home-joz-Documents-AI-Tools-Majordom/724fe8bd-c6e4-4bf5-917d-f731c8d77c32/tasks/b1f3iyeby.output`.
+  Startup verified 2026-07-16: v0.86.2, whole edit format, 5 edit targets
+  + 5 read-only files in chat (brief:
   agents/T-39-project-tabs-overview.md). If the run finished: review per
   DISPATCH.md protocol (diff, full pest, acceptance greps, review(T-39)
   commit, worker restart, RESUME.md update). If it never started, summon
   aider yourself with the brief as edit targets + --read list.
-- OWNER ITEMS PENDING: (1) explicit sign-off on the T-38 merge;
-  (2) define "contract detail view" scope before T-40.
+- OWNER ITEMS RESOLVED 2026-07-16: (1) T-38 merge signed off.
+  (2) T-40 "contract detail view" DEFINED: condensed actor→actor
+  exchange trace (architect→builder instructions, builder→reviewer
+  results, verdicts) as a projection over the existing `events` table
+  (EventRecorder payloads), per-execution sequence view with excerpts +
+  expandable full text; enrich payloads at emission seams where
+  instruction text is missing; NO log parsing, NO LLM summaries in v1.
+  Scope details in DISPATCH.md M11/T-40.
 - Conventions that bit us: `--queue` singular on queue:work; verify every
   aider --read path exists; Livewire::test facade (no livewire() helper);
   restart worker after ANY code change; update RESUME.md after every task.
