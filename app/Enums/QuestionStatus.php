@@ -6,4 +6,5 @@ enum QuestionStatus: string
 {
     case Open = 'open';
     case Answered = 'answered';
+    case Discarded = 'discarded';
 }

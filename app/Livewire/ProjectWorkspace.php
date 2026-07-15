@@ -104,6 +104,48 @@ class ProjectWorkspace extends Component
         }
     }
 
+    /**
+     * Dismiss a question the owner can't or won't answer (e.g. the model asked
+     * something malformed or answered itself unhelpfully) so it stops blocking.
+     * A discarded question is ignored — for a reviewer escalation the loop
+     * re-arms without that clarification; for consensus the Architect re-prompts.
+     */
+    public function discardQuestion(int $questionId): void
+    {
+        $question = $this->project->questions()->findOrFail($questionId);
+
+        if ($question->status !== QuestionStatus::Open) {
+            return;
+        }
+
+        $question->update(['status' => QuestionStatus::Discarded]);
+
+        app(EventRecorder::class)->record(
+            $this->project,
+            'question.discarded',
+            ['question_id' => $questionId],
+            $question->execution,
+            'you'
+        );
+
+        // Reviewer-escalated questions resume the execution once none are open.
+        if ($question->execution_id) {
+            $execution = $question->execution;
+            if ($execution && $execution->questions()->open()->count() === 0) {
+                app(\App\Core\Workflow\WorkflowEngine::class)->resumeAfterClarification($execution);
+            }
+
+            return;
+        }
+
+        if ($this->project->openQuestions()->count() === 0) {
+            Cache::put("architect-turn:{$this->project->id}", 'thinking', now()->addMinutes(15));
+            RunArchitectTurn::dispatch($this->project->id, null)
+                ->onConnection('harness')
+                ->onQueue('harness');
+        }
+    }
+
     public ?string $commitComment = null;
     public string $buildProfile = 'attended';
 
