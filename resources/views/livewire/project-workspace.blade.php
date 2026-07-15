@@ -308,14 +308,41 @@
             </div>
 
             <div class="border-t border-border py-4">
-                <form wire:submit="send" class="flex gap-2">
-                    <textarea wire:model="draft" rows="2" placeholder="Describe what to build…" class="flex-1 rounded-lg border border-border-strong bg-surface px-3 py-2 text-body text-hi placeholder:text-faint" @disabled($this->thinking)></textarea>
-                    <button type="submit" wire:loading.attr="disabled" class="rounded-lg border border-border-hover px-3 py-1.5 text-body-sm font-semibold text-[#c7d2df] hover:bg-surface-active disabled:opacity-55" @disabled($this->thinking)>
-                        <span wire:loading.remove wire:target="send">Send</span>
-                        <span wire:loading wire:target="send">Sending…</span>
-                    </button>
-                </form>
-                @error('draft') <p class="text-caption text-failed-text mt-1">{{ $message }}</p> @enderror
+                @if(! $this->planExists)
+                    {{-- Consensus phase: free chat with the Architect. --}}
+                    <form wire:submit="send" class="flex gap-2">
+                        <textarea wire:model="draft" rows="2" placeholder="Describe what to build…" class="flex-1 rounded-lg border border-border-strong bg-surface px-3 py-2 text-body text-hi placeholder:text-faint" @disabled($this->thinking)></textarea>
+                        <button type="submit" wire:loading.attr="disabled" class="rounded-lg border border-border-hover px-3 py-1.5 text-body-sm font-semibold text-[#c7d2df] hover:bg-surface-active disabled:opacity-55" @disabled($this->thinking)>
+                            <span wire:loading.remove wire:target="send">Send</span>
+                            <span wire:loading wire:target="send">Sending…</span>
+                        </button>
+                    </form>
+                    @error('draft') <p class="text-caption text-failed-text mt-1">{{ $message }}</p> @enderror
+                @elseif($chatMode === null)
+                    {{-- Post-plan: free chat is off; steer via defined actions. --}}
+                    <div class="flex flex-wrap items-center gap-2">
+                        <span class="font-mono text-meta text-mute mr-1">steer the project:</span>
+                        <button wire:click="setChatMode('add_context')" @disabled($this->thinking) class="rounded-lg border border-border px-3 py-1.5 text-body-sm font-medium text-hi hover:bg-surface-active disabled:opacity-55">Add context</button>
+                        <button wire:click="setChatMode('redefine')" @disabled($this->thinking) class="rounded-lg border border-border px-3 py-1.5 text-body-sm font-medium text-hi hover:bg-surface-active disabled:opacity-55">Redefine milestones / specs</button>
+                    </div>
+                @else
+                    {{-- A mode is active: labeled composer. --}}
+                    <form wire:submit="submitChatMode" class="space-y-2">
+                        <p class="font-mono text-meta text-accent">
+                            {{ $chatMode === 'add_context'
+                                ? 'Adding context — a durable constraint every future task will follow.'
+                                : 'Redefining the roadmap — the Architect amends milestones/tasks (keys stay stable).' }}
+                        </p>
+                        <textarea wire:model="draft" rows="2" placeholder="{{ $chatMode === 'add_context' ? 'e.g. Must also work on Wayland…' : 'e.g. Split milestone 3 into UI and daemon…' }}" class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-body text-hi placeholder:text-faint" @disabled($this->thinking)></textarea>
+                        <div class="flex items-center gap-2">
+                            <button type="submit" wire:loading.attr="disabled" class="rounded-lg bg-accent px-3 py-1.5 text-body-sm font-semibold text-accent-ink disabled:opacity-55" @disabled($this->thinking)>
+                                {{ $chatMode === 'add_context' ? 'Add' : 'Redefine' }}
+                            </button>
+                            <button type="button" wire:click="cancelChatMode" class="rounded-lg border border-border px-3 py-1.5 text-body-sm font-medium text-mute hover:text-hi">Cancel</button>
+                        </div>
+                        @error('draft') <p class="text-caption text-failed-text">{{ $message }}</p> @enderror
+                    </form>
+                @endif
             </div>
         @elseif($tab === 'overview')
             @include('livewire.partials.project-overview')
