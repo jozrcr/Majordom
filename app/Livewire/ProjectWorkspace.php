@@ -413,8 +413,35 @@ class ProjectWorkspace extends Component
             $this->project,
             $this->plannedTask['key'],
             $this->plannedTask['title'],
-            in_array($this->buildProfile, ['attended', 'overnight'], true) ? $this->buildProfile : 'attended',
+            in_array($this->buildProfile, ['attended', 'overnight', 'full_auto'], true) ? $this->buildProfile : 'attended',
         );
+    }
+
+    /**
+     * Switch the autonomy profile mid-flight (M13). Applies to the latest
+     * execution so the running/auto-advanced chain and future tasks pick it up
+     * (attended ↔ overnight ↔ full_auto). Also sets the default for the next
+     * Start build.
+     */
+    public function switchProfile(string $profile): void
+    {
+        if (! in_array($profile, ['attended', 'overnight', 'full_auto'], true)) {
+            return;
+        }
+
+        $this->buildProfile = $profile;
+
+        $execution = $this->project->executions()->latest('id')->first();
+        if ($execution) {
+            $execution->update(['profile' => $profile]);
+            app(EventRecorder::class)->record(
+                $this->project,
+                'profile.switched',
+                ['profile' => $profile],
+                $execution,
+                'you'
+            );
+        }
     }
 
     public function resumeParked(): void

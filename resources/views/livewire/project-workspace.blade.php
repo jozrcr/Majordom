@@ -93,9 +93,10 @@
                     <div class="max-w-[640px] rounded-lg border border-border-strong bg-surface-raised p-4 space-y-3">
                         <p class="font-mono text-micro uppercase tracking-[.14em] text-mute">PLAN READY</p>
                         <p class="text-body-sm text-text">First task: <span class="font-mono">{{ $this->plannedTask['key'] }}</span> — {{ $this->plannedTask['title'] }}</p>
-                        <div class="flex items-center gap-4 font-mono text-meta text-mute">
+                        <div class="flex flex-wrap items-center gap-4 font-mono text-meta text-mute">
                             <label class="flex cursor-pointer items-center gap-1.5"><input type="radio" wire:model="buildProfile" value="attended" class="accent-[#e2a33b]"> attended</label>
                             <label class="flex cursor-pointer items-center gap-1.5"><input type="radio" wire:model="buildProfile" value="overnight" class="accent-[#e2a33b]"> overnight <span class="text-faint">(auto-review, spend-capped)</span></label>
+                            <label class="flex cursor-pointer items-center gap-1.5"><input type="radio" wire:model="buildProfile" value="full_auto" class="accent-[#e2a33b]"> full auto <span class="text-faint">(auto-merges milestones)</span></label>
                         </div>
                         <div class="flex items-center gap-3">
                             <button wire:click="startBuild" wire:loading.attr="disabled" class="rounded-lg bg-accent px-3 py-1.5 text-body-sm font-semibold text-accent-ink disabled:opacity-55">
