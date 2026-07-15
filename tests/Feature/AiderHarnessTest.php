@@ -141,7 +141,7 @@ it('fails when aider exits with non-zero', function () {
         ->and($result->summary)->toBe('aider exited with code 1.');
 });
 
-it('fails when diff is empty', function () {
+it('treats an empty diff after a clean run as a completed no-op (Reviewer judges)', function () {
     Process::fake([
         "'git' 'rev-parse' 'HEAD'" => Process::result(output: "abc123\n"),
         "'git' 'diff' 'abc123' 'HEAD'" => Process::result(output: ""),
@@ -162,8 +162,9 @@ it('fails when diff is empty', function () {
 
     $result = $harness->runTask($request);
 
-    expect($result->status)->toBe(HarnessStatus::Failed)
-        ->and($result->summary)->toBe('No changes were produced.');
+    expect($result->status)->toBe(HarnessStatus::Completed)
+        ->and($result->summary)->toBe('No changes were needed for this task.')
+        ->and($result->filesChanged)->toBe([]);
 });
 
 it('fails when path is not a git repository', function () {

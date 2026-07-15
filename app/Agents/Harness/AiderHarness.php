@@ -125,14 +125,18 @@ class AiderHarness implements Harness
             $filesChanged = array_values(array_unique(array_merge($namesCommitted, $namesUncommitted)));
             sort($filesChanged);
 
-            // 9b. Check empty diff
+            // 9b. Empty diff after a CLEAN aider run (exit 0) is NOT a failure:
+            // the model often correctly decides a task needs no file changes
+            // (e.g. a prior task already covers it). Let it flow to review as a
+            // completed no-op — the Reviewer judges whether "no changes" is
+            // acceptable for this task, rather than the harness blanket-failing.
             if ($diff === '') {
                 return new HarnessResult(
-                    status: HarnessStatus::Failed,
+                    status: HarnessStatus::Completed,
                     diff: '',
                     filesChanged: [],
                     testsPassed: null,
-                    summary: 'No changes were produced.',
+                    summary: 'No changes were needed for this task.',
                     openQuestions: [],
                     rawLog: $rawLog
                 );
