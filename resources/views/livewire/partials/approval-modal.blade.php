@@ -31,9 +31,9 @@
                 <span class="font-mono text-micro uppercase tracking-[.14em] text-mute">Review gate</span>
                 <p class="text-body-sm text-text">{{ $approval->title }}</p>
                 <div class="ml-auto font-mono text-meta">
-                    @if($approval->payload['testsPassed'] === true)
+                    @if(($approval->payload['testsPassed'] ?? null) === true)
                         <span class="text-ok">tests ✓</span>
-                    @elseif($approval->payload['testsPassed'] === false)
+                    @elseif(($approval->payload['testsPassed'] ?? null) === false)
                         <span class="text-failed-text">tests ✗</span>
                     @else
                         <span class="text-mute">no tests</span>

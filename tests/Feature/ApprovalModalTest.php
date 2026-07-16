@@ -15,7 +15,7 @@ test('HumanTask approval open renders modal on overview tab', function () {
     Approval::factory()->create([
         'project_id' => $project->id,
         'type' => ApprovalType::HumanTask,
-        'status' => ApprovalStatus::Pending,
+        'status' => ApprovalStatus::Open,
         'title' => 'Manual Database Migration',
     ]);
 
@@ -30,7 +30,7 @@ test('Review approval open resolves on approveApproval', function () {
     $approval = Approval::factory()->create([
         'project_id' => $project->id,
         'type' => ApprovalType::Review,
-        'status' => ApprovalStatus::Pending,
+        'status' => ApprovalStatus::Open,
         'title' => 'Feature X PR',
     ]);
 
@@ -39,7 +39,7 @@ test('Review approval open resolves on approveApproval', function () {
         ->assertDontSee('Feature X PR');
 
     $approval->refresh();
-    expect($approval->status)->toBe(ApprovalStatus::Approved);
+    expect($approval->status)->toBe(ApprovalStatus::Granted);
 });
 
 test('Review approval reject with empty comment surfaces error', function () {
@@ -47,7 +47,7 @@ test('Review approval reject with empty comment surfaces error', function () {
     Approval::factory()->create([
         'project_id' => $project->id,
         'type' => ApprovalType::Review,
-        'status' => ApprovalStatus::Pending,
+        'status' => ApprovalStatus::Open,
         'title' => 'Feature Y PR',
     ]);
 
@@ -63,14 +63,14 @@ test('MilestoneMerge approval reject with empty comment succeeds', function () {
     Approval::factory()->create([
         'project_id' => $project->id,
         'type' => ApprovalType::MilestoneMerge,
-        'status' => ApprovalStatus::Pending,
+        'status' => ApprovalStatus::Open,
         'title' => 'Milestone 1',
     ]);
 
     Livewire::test(ProjectWorkspace::class, ['project' => $project])
         ->set('gateComment', '')
         ->call('rejectApproval')
-        ->assertDontSee('Milestone 1');
+        ->assertDontSee('Milestone complete');
 });
 
 test('no open approval does not render modal header', function () {

@@ -515,6 +515,7 @@ class ProjectWorkspace extends Component
             $this->gateComment
         );
         $this->gateComment = null;
+        unset($this->openApproval);
     }
 
     public function rejectApproval(): void
@@ -536,6 +537,7 @@ class ProjectWorkspace extends Component
             $this->gateComment
         );
         $this->gateComment = null;
+        unset($this->openApproval);
     }
 
     public function selectEvent(int $eventId): void
