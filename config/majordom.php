@@ -37,6 +37,9 @@ return [
     'profiles' => [
         'attended' => ['review' => 'block'],
         'overnight' => ['review' => 'auto'],
+        // full_auto (M12): like overnight for per-task gates, but also
+        // auto-merges milestones + advances across them (Phase 2 wiring).
+        'full_auto' => ['review' => 'auto'],
     ],
 
     'harness' => [

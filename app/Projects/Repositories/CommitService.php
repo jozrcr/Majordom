@@ -6,8 +6,10 @@ use App\Core\Events\EventRecorder;
 use App\Core\Workflow\ImplementFeatureWorkflow;
 use App\Enums\TaskStatus;
 use App\Models\CommitSuggestion;
+use App\Models\Milestone;
 use App\Models\Task;
 use App\Projects\Memory\MemoryStore;
+use App\Support\Setting;
 use Illuminate\Support\Facades\Process;
 use RuntimeException;
 
@@ -24,11 +26,36 @@ class CommitService
         private readonly EventRecorder $events,
     ) {}
 
-    /** Squash-promote the WIP branch into the user's checkout and commit. */
+    /** Accept a commit suggestion (M12 milestone checkpoint, or legacy promote). */
     public function apply(CommitSuggestion $suggestion): void
     {
         $this->assertSuggested($suggestion);
         $task = $suggestion->task;
+
+        // M12: for a milestone task the work is ALREADY committed to
+        // majordom/<key> during build — this "commit" is the confirm_commits
+        // checkpoint. Accept it (mark the task done, detach the shared worktree)
+        // and let the loop advance. Promotion to main happens at the milestone
+        // boundary, never per-task.
+        if ($task && $task->milestone_id) {
+            $suggestion->update(['status' => 'committed']);
+            $task->update(['status' => TaskStatus::Approved]);
+            $this->worktrees->remove($task);
+
+            $this->events->record($suggestion->project, 'checkpoint.approved', [
+                'task_key' => $task->task_key,
+                'branch' => $suggestion->branch,
+            ], $suggestion->execution, 'you');
+
+            try {
+                app(\App\Core\Workflow\TaskChain::class)->advance($task->fresh());
+            } catch (\Throwable $e) {
+                report($e);
+            }
+
+            return;
+        }
+
         $repo = $suggestion->project->repo_path;
 
         // Untracked files can't be clobbered by a squash-merge (git aborts
@@ -111,6 +138,65 @@ class CommitService
         $this->events->record($suggestion->project, 'commit.rejected', [
             'task_key' => $suggestion->task?->task_key, 'comment' => $comment,
         ], $suggestion->execution, 'you');
+    }
+
+    /** Merge a milestone branch into main (gated promotion). */
+    public function mergeMilestone(Milestone $m): void
+    {
+        $repo = $m->project->repo_path;
+        $branch = 'majordom/'.$m->milestone_key;
+
+        $status = Process::path($repo)->run(['git', 'status', '--porcelain']);
+        $dirty = collect(explode("\n", trim($status->output())))
+            ->filter(fn ($line) => $line !== '' && ! str_starts_with($line, '??'));
+        if ($dirty->isNotEmpty()) {
+            throw new RuntimeException('Your working tree has uncommitted changes — commit or stash them first.');
+        }
+
+        $verify = Process::path($repo)->run(['git', 'rev-parse', '--verify', $branch]);
+        if (! $verify->successful()) {
+            throw new RuntimeException("No milestone branch {$branch} to merge.");
+        }
+
+        $merge = Process::path($repo)
+            ->env($this->committerEnv($repo))
+            ->run(['git', 'merge', '--no-ff', $branch, '-m', "Merge milestone {$m->milestone_key}: {$m->title}"]);
+
+        if (! $merge->successful()) {
+            Process::path($repo)->run(['git', 'merge', '--abort']);
+            throw new RuntimeException('Milestone merge failed: '.trim($merge->errorOutput()));
+        }
+
+        $this->events->record($m->project, 'milestone.merged', [
+            'milestone_key' => $m->milestone_key,
+        ], null, 'you');
+
+        $this->worktrees->removeMilestoneWorktree($m->project, $m);
+
+        if (Setting::get('git.push_after_merge', false)) {
+            $remoteCheck = Process::path($repo)->run(['git', 'remote']);
+            if (trim($remoteCheck->output()) === '') {
+                $this->events->record($m->project, 'milestone.push_skipped', [
+                    'milestone_key' => $m->milestone_key,
+                    'reason' => 'no remote',
+                ], null, 'you');
+            } else {
+                $push = Process::path($repo)
+                    ->env($this->committerEnv($repo))
+                    ->run(['git', 'push']);
+
+                if ($push->successful()) {
+                    $this->events->record($m->project, 'milestone.pushed', [
+                        'milestone_key' => $m->milestone_key,
+                    ], null, 'you');
+                } else {
+                    $this->events->record($m->project, 'milestone.push_failed', [
+                        'milestone_key' => $m->milestone_key,
+                        'error' => trim($push->errorOutput()),
+                    ], null, 'you');
+                }
+            }
+        }
     }
 
     private function assertSuggested(CommitSuggestion $suggestion): void

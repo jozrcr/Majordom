@@ -28,6 +28,7 @@
                 @error("answer-{$question->id}") <p class="text-caption text-failed-text">{{ $message }}</p> @enderror
                 <div class="flex items-center gap-3">
                     <button wire:click="answerQuestion({{ $question->id }})" wire:loading.attr="disabled" class="rounded-lg px-3 py-1.5 text-body-sm font-semibold disabled:opacity-55">Answer</button>
+                    <button wire:click="discardQuestion({{ $question->id }})" wire:confirm="Discard this question? It stops blocking; the loop proceeds without it." wire:loading.attr="disabled" class="rounded-lg px-2 py-1.5 text-body-sm font-medium text-mute hover:text-hi disabled:opacity-55">Discard</button>
                     <span class="font-mono text-meta text-faint">sends to Architect</span>
                 </div>
             </div>

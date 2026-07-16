@@ -42,7 +42,19 @@ MD
         }
 
         try {
-            $path = app(WorktreeManager::class)->create($task);
+            // M12: tasks in a milestone share ONE worktree on majordom/<key>,
+            // building on each other; each task's aider commits land there and
+            // the whole milestone is merged to main as the gated promotion.
+            // Legacy tasks (no milestone) keep a per-task worktree.
+            $wtm = app(WorktreeManager::class);
+            if ($task->milestone) {
+                $path = $wtm->ensureMilestoneWorktree($project, $task->milestone);
+                $task->worktree_path = $path;
+                $task->branch = $wtm->branchForMilestone($task->milestone);
+                $task->save();
+            } else {
+                $path = $wtm->create($task);
+            }
         } catch (\Throwable $e) {
             return NodeResult::failed('Failed to create worktree: '.$e->getMessage());
         }

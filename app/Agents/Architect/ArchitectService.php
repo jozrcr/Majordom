@@ -11,8 +11,10 @@ use App\Enums\ProjectStatus;
 use App\Models\ConsensusMessage;
 use App\Models\Project;
 use App\Models\Question;
+use App\Models\Task;
 use App\Projects\Memory\MemoryStore;
 use App\Support\RoleResolver;
+use Illuminate\Support\Str;
 
 /**
  * The Architect's consensus orchestration (SPEC §3 phase 1–2, M2 slice).
@@ -234,6 +236,277 @@ class ArchitectService
 
         app(\App\Projects\Roadmap\RoadmapSync::class)->for($project)->sync();
     }
+
+    /**
+     * Decompose a roadmap task into a concrete `task.md` brief (SPEC §3 phase 3).
+     *
+     * The plan (approvePlan) only writes the FIRST task's brief; every later
+     * task exists as a roadmap row with just a title. This turns that title
+     * into a buildable brief on demand — the engine that lets a milestone's
+     * tasks chain (M12). Writes nothing and returns early if a non-empty brief
+     * already exists, so it is safe to call before each build.
+     */
+    public function decomposeTask(Project $project, Task $task): void
+    {
+        $briefPath = "tasks/{$task->task_key}/task.md";
+        if ($this->memory->exists($project, $briefPath)
+            && trim((string) $this->memory->read($project, $briefPath)) !== '') {
+            return; // already has a brief (first task, or a prior decompose)
+        }
+
+        $binding = app(RoleResolver::class)->resolve('architect', $project);
+        $extraSystem = $binding->meta['system_prompt_extra'] ?? null;
+
+        $system = self::DECOMPOSE_PROMPT;
+        if ($extraSystem !== null && trim($extraSystem) !== '') {
+            $system .= "\n\n".trim($extraSystem);
+        }
+
+        $response = $this->providers->forBinding($binding)->chat(new ProviderRequest(
+            model: $binding->model,
+            messages: [
+                ['role' => 'system', 'content' => $system],
+                ['role' => 'user', 'content' => $this->decomposeContext($project, $task)],
+            ],
+            maxTokens: (int) config('majordom.architect.plan_max_tokens', 8000),
+            temperature: $binding->temperature,
+            jsonMode: false, // a task.md brief is markdown, not JSON
+            topP: isset($binding->meta['top_p']) ? (float) $binding->meta['top_p'] : null,
+            frequencyPenalty: isset($binding->meta['frequency_penalty']) ? (float) $binding->meta['frequency_penalty'] : null,
+            presencePenalty: isset($binding->meta['presence_penalty']) ? (float) $binding->meta['presence_penalty'] : null,
+            stop: isset($binding->meta['stop']) ? $binding->meta['stop'] : null,
+            timeout: isset($binding->meta['timeout']) ? (int) $binding->meta['timeout'] : null,
+        ));
+
+        app(UsageLedger::class)->record(
+            $project,
+            'architect',
+            $binding->model,
+            $response->promptTokens,
+            $response->completionTokens
+        );
+
+        $brief = trim($response->content);
+        if ($brief === '') {
+            // Never write an empty brief the Builder can't act on — surface it.
+            app(EventRecorder::class)->record(
+                $project,
+                'task.decompose_failed',
+                ['task_key' => $task->task_key],
+                null,
+                'architect'
+            );
+
+            return;
+        }
+
+        $this->memory->write($project, $briefPath, $brief);
+
+        app(EventRecorder::class)->record(
+            $project,
+            'task.decomposed',
+            ['task_key' => $task->task_key],
+            null,
+            'architect'
+        );
+    }
+
+    /**
+     * "Add context" (post-plan steering): fold an owner note/constraint into
+     * durable project memory (decisions.md) so every FUTURE task brief inherits
+     * it — see decomposeContext(). No LLM call, no re-planning; a task already
+     * mid-build won't retroactively get it.
+     */
+    public function addContext(Project $project, string $note): void
+    {
+        $note = trim($note);
+        if ($note === '') {
+            return;
+        }
+
+        $existing = $this->memory->read($project, 'decisions.md') ?? "# Decisions & added context\n";
+        $this->memory->write(
+            $project,
+            'decisions.md',
+            rtrim($existing)."\n\n## Added ".now()->toDateString()."\n{$note}\n",
+        );
+
+        $project->consensusMessages()->create([
+            'role' => MessageRole::System,
+            'content' => "✓ Context added — future task briefs will honor it:\n\n> ".$note,
+        ]);
+
+        app(EventRecorder::class)->record($project, 'context.added', [], null, 'you');
+    }
+
+    /**
+     * "Redefine milestones / specs" (the lightweight amend): the Architect
+     * revises roadmap.md (+ architecture.md) from the owner's instruction and
+     * re-syncs. Keys stay stable so built work is preserved (RoadmapSync upserts
+     * by key). One provider turn.
+     */
+    public function redefinePlan(Project $project, string $instruction): void
+    {
+        $instruction = trim($instruction);
+        if ($instruction === '') {
+            return;
+        }
+
+        $binding = app(RoleResolver::class)->resolve('architect', $project);
+        $current = $this->memory->read($project, 'roadmap.md') ?? '(none yet)';
+        $architecture = $this->memory->read($project, 'architecture.md') ?? '(none yet)';
+
+        $response = $this->providers->forBinding($binding)->chat(new ProviderRequest(
+            model: $binding->model,
+            messages: [
+                ['role' => 'system', 'content' => self::REDEFINE_PROMPT],
+                ['role' => 'user', 'content' => "## Current roadmap.md\n{$current}\n\n## Current architecture.md\n{$architecture}\n\n## Owner change request\n{$instruction}"],
+            ],
+            maxTokens: (int) config('majordom.architect.plan_max_tokens', 8000),
+            temperature: $binding->temperature,
+            jsonMode: true,
+        ));
+
+        app(UsageLedger::class)->record($project, 'architect', $binding->model, $response->promptTokens, $response->completionTokens);
+
+        $data = json_decode(trim($response->content), true);
+        if (! is_array($data) || empty($data['roadmap_md'])) {
+            $project->consensusMessages()->create([
+                'role' => MessageRole::System,
+                'content' => 'The roadmap revision came back malformed — nothing changed. Try rephrasing the request.',
+            ]);
+
+            return;
+        }
+
+        $this->memory->write($project, 'roadmap.md', (string) $data['roadmap_md']);
+        if (! empty($data['architecture_md'])) {
+            $this->memory->write($project, 'architecture.md', (string) $data['architecture_md']);
+        }
+
+        app(\App\Projects\Roadmap\RoadmapSync::class)->for($project)->sync();
+
+        $project->consensusMessages()->create([
+            'role' => MessageRole::System,
+            'content' => "✓ Plan updated — ".(string) ($data['summary'] ?? 'the roadmap was revised.'),
+            'meta' => ['planWritten' => true],
+        ]);
+
+        app(EventRecorder::class)->record($project, 'plan.redefined', [], null, 'architect');
+    }
+
+    private const REDEFINE_PROMPT = <<<'PROMPT'
+You are the Architect revising an EXISTING project roadmap per the owner's
+change request. Output ONLY a JSON object:
+{
+  "roadmap_md": "the FULL updated roadmap markdown",
+  "architecture_md": "the updated architecture markdown, or omit if unchanged",
+  "summary": "1-2 sentences: what changed"
+}
+
+The roadmap format is milestones `## M<N> — <title>` each followed by one
+summary line, then tasks as checkboxes `- [ ] T-00N — <title>`.
+
+HARD RULES — you are AMENDING, not rewriting from scratch:
+- Preserve every existing milestone key (M1, M2 …) and task key (T-001 …). Do
+  NOT renumber, and do NOT delete a task that may already be built — reword or
+  reorder if needed, but keep its key.
+- Preserve `[x]`/`[~]` checkbox marks on tasks that already have them (done /
+  in-progress work must not regress to unchecked).
+- Add new milestones/tasks with the NEXT available keys.
+- Make the smallest change that satisfies the request. Keep everything else identical.
+PROMPT;
+
+    /**
+     * Assemble the decompose context: the milestone goal, this task's line, the
+     * project architecture, and a short trail of already-built sibling tasks so
+     * the new brief fits what came before (no duplicate work, consistent style).
+     */
+    private function decomposeContext(Project $project, Task $task): string
+    {
+        $milestone = $task->milestone;
+        $roadmap = $this->memory->read($project, 'roadmap.md') ?? '(no roadmap.md)';
+        $architecture = $this->memory->read($project, 'architecture.md') ?? '(no architecture.md yet)';
+        $style = $this->memory->read($project, 'coding_style.md');
+        // Owner-added context/constraints (the "Add context" action) must reach
+        // the Builder — this is where it does, folded into every future brief.
+        $decisions = $this->memory->read($project, 'decisions.md');
+
+        $milestoneLine = $milestone
+            ? "{$milestone->milestone_key} — {$milestone->title}".($milestone->summary ? "\nGoal: {$milestone->summary}" : '')
+            : '(no milestone)';
+
+        // Prior tasks in the same milestone that already have a brief/handoff —
+        // give the builder continuity without dumping whole diffs.
+        $prior = '';
+        if ($milestone) {
+            $siblings = $milestone->tasks()
+                ->where('position', '<', $task->position ?? PHP_INT_MAX)
+                ->orderBy('position')
+                ->get();
+            foreach ($siblings as $s) {
+                $handoff = $this->memory->read($project, "tasks/{$s->task_key}/handoff.md");
+                $line = "- {$s->task_key}: {$s->title}";
+                if ($handoff) {
+                    $line .= "\n  handoff: ".Str::limit(trim(strip_tags($handoff)), 400);
+                }
+                $prior .= $line."\n";
+            }
+        }
+        $prior = $prior !== '' ? $prior : '(none yet — this is the milestone\'s first task)';
+
+        $styleBlock = $style ? "\n\n## Project coding style\n{$style}" : '';
+        $decisionsBlock = ($decisions && trim($decisions) !== '')
+            ? "\n\n## Owner decisions & added context (MUST honor)\n{$decisions}"
+            : '';
+
+        return <<<CONTEXT
+Write the build brief for this task:
+
+## Task
+{$task->task_key} — {$task->title}
+
+## Its milestone
+{$milestoneLine}
+
+## Already completed in this milestone
+{$prior}
+
+## Project architecture
+{$architecture}
+
+## Full roadmap (for context only — decompose ONLY the task above)
+{$roadmap}{$styleBlock}{$decisionsBlock}
+CONTEXT;
+    }
+
+    private const DECOMPOSE_PROMPT = <<<'PROMPT'
+You are the Architect. Decompose ONE roadmap task into a precise build brief for
+a local coding model driven by an automated harness. The builder has only your
+brief and the repository — be concrete and self-contained.
+
+Respond with GitHub-flavored markdown ONLY (no preamble, no code fences around
+the whole thing), in exactly this shape:
+
+# <task title>
+
+## Goal
+2-4 sentences: what this task must achieve and why, in the context of the milestone.
+
+## Acceptance criteria
+- Bullet list of concrete, checkable outcomes. Prefer observable behavior and
+  specific file/function names. Include the exact test command when relevant.
+
+## Files likely involved
+- Relative paths the builder will create or edit (best-effort; the builder may adjust).
+
+## Notes
+- Any constraints, gotchas, or dependencies on prior tasks. Keep it tight.
+
+Rules: scope strictly to THIS task — do not implement later roadmap items. Assume
+prior tasks in the milestone are already done. Do not invent requirements the
+roadmap/architecture don't support. No questions — produce the brief.
+PROMPT;
 
     /** @return array<int, array{role: string, content: string}> */
     private function buildMessages(Project $project, ?string $extraSystemPrompt = null): array

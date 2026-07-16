@@ -4,6 +4,7 @@ namespace App\Livewire;
 
 use App\Agents\Architect\ArchitectService;
 use App\Core\Events\EventRecorder;
+use App\Enums\ApprovalType;
 use App\Enums\QuestionStatus;
 use App\Jobs\RunArchitectTurn;
 use App\Models\Project;
@@ -67,6 +68,60 @@ class ProjectWorkspace extends Component
         $this->draft = '';
     }
 
+    /**
+     * Post-plan steering (M14): once a plan exists, free chat is replaced by
+     * defined-action modes so every interaction has a clear intent. `chatMode`
+     * is null (buttons shown), 'add_context', or 'redefine'.
+     */
+    public ?string $chatMode = null;
+
+    public function getPlanExistsProperty(): bool
+    {
+        return $this->project->consensusMessages()
+            ->where('role', \App\Enums\MessageRole::System)
+            ->get()
+            ->contains(fn ($m) => ($m->meta['planWritten'] ?? false) === true);
+    }
+
+    public function setChatMode(string $mode): void
+    {
+        if (! in_array($mode, ['add_context', 'redefine'], true)) {
+            return;
+        }
+        $this->chatMode = $mode;
+        $this->draft = '';
+    }
+
+    public function cancelChatMode(): void
+    {
+        $this->chatMode = null;
+        $this->draft = '';
+    }
+
+    public function submitChatMode(): void
+    {
+        $this->validate(['draft' => 'required|string|max:8000']);
+        $mode = $this->chatMode;
+        $text = $this->draft;
+        $this->chatMode = null;
+        $this->draft = '';
+
+        if ($mode === 'add_context') {
+            // Fast + deterministic (no LLM) — folds into project memory.
+            app(ArchitectService::class)->addContext($this->project, $text);
+
+            return;
+        }
+
+        if ($mode === 'redefine') {
+            Cache::put("architect-turn:{$this->project->id}", 'planning', now()->addMinutes(15));
+            $this->project->update(['status' => \App\Enums\ProjectStatus::Working, 'last_activity_at' => now()]);
+            \App\Jobs\RunPlanRedefine::dispatch($this->project->id, $text)
+                ->onConnection('harness')
+                ->onQueue('harness');
+        }
+    }
+
     public function answerQuestion(int $questionId): void
     {
         $question = $this->project->questions()->findOrFail($questionId);
@@ -86,6 +141,48 @@ class ProjectWorkspace extends Component
         app(ArchitectService::class)->answer($question, $text);
 
         // Reviewer-escalated questions resume the execution, not the chat.
+        if ($question->execution_id) {
+            $execution = $question->execution;
+            if ($execution && $execution->questions()->open()->count() === 0) {
+                app(\App\Core\Workflow\WorkflowEngine::class)->resumeAfterClarification($execution);
+            }
+
+            return;
+        }
+
+        if ($this->project->openQuestions()->count() === 0) {
+            Cache::put("architect-turn:{$this->project->id}", 'thinking', now()->addMinutes(15));
+            RunArchitectTurn::dispatch($this->project->id, null)
+                ->onConnection('harness')
+                ->onQueue('harness');
+        }
+    }
+
+    /**
+     * Dismiss a question the owner can't or won't answer (e.g. the model asked
+     * something malformed or answered itself unhelpfully) so it stops blocking.
+     * A discarded question is ignored — for a reviewer escalation the loop
+     * re-arms without that clarification; for consensus the Architect re-prompts.
+     */
+    public function discardQuestion(int $questionId): void
+    {
+        $question = $this->project->questions()->findOrFail($questionId);
+
+        if ($question->status !== QuestionStatus::Open) {
+            return;
+        }
+
+        $question->update(['status' => QuestionStatus::Discarded]);
+
+        app(EventRecorder::class)->record(
+            $this->project,
+            'question.discarded',
+            ['question_id' => $questionId],
+            $question->execution,
+            'you'
+        );
+
+        // Reviewer-escalated questions resume the execution once none are open.
         if ($question->execution_id) {
             $execution = $question->execution;
             if ($execution && $execution->questions()->open()->count() === 0) {
@@ -316,8 +413,35 @@ class ProjectWorkspace extends Component
             $this->project,
             $this->plannedTask['key'],
             $this->plannedTask['title'],
-            in_array($this->buildProfile, ['attended', 'overnight'], true) ? $this->buildProfile : 'attended',
+            in_array($this->buildProfile, ['attended', 'overnight', 'full_auto'], true) ? $this->buildProfile : 'attended',
         );
+    }
+
+    /**
+     * Switch the autonomy profile mid-flight (M13). Applies to the latest
+     * execution so the running/auto-advanced chain and future tasks pick it up
+     * (attended ↔ overnight ↔ full_auto). Also sets the default for the next
+     * Start build.
+     */
+    public function switchProfile(string $profile): void
+    {
+        if (! in_array($profile, ['attended', 'overnight', 'full_auto'], true)) {
+            return;
+        }
+
+        $this->buildProfile = $profile;
+
+        $execution = $this->project->executions()->latest('id')->first();
+        if ($execution) {
+            $execution->update(['profile' => $profile]);
+            app(EventRecorder::class)->record(
+                $this->project,
+                'profile.switched',
+                ['profile' => $profile],
+                $execution,
+                'you'
+            );
+        }
     }
 
     public function resumeParked(): void
@@ -358,7 +482,8 @@ class ProjectWorkspace extends Component
             return;
         }
 
-        if (trim($this->gateComment ?? '') === '') {
+        if ($approval->type !== ApprovalType::MilestoneMerge
+            && trim($this->gateComment ?? '') === '') {
             $this->addError('gateComment', 'Say why — the comment becomes the revision brief.');
             return;
         }

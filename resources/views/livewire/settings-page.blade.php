@@ -277,6 +277,15 @@
                             @error('workflow.overnight_spend_cap_usd') <span class="text-xs text-status-failed">{{ $message }}</span> @enderror
                         </div>
                     </div>
+                    <div class="grid grid-cols-[170px_1fr] gap-4 items-start">
+                        <div class="flex items-center gap-2 pt-1">
+                            <input type="checkbox" wire:model.live="workflow.push_after_merge" class="rounded border-border bg-surface text-accent focus:ring-accent h-4 w-4" />
+                            <label class="text-xs font-medium text-t3">Push to remote after milestone merge</label>
+                        </div>
+                        <div class="text-xs text-mute pt-1">
+                            Off by default. When on, a merged milestone is pushed to the configured git remote. No remote = no-op.
+                        </div>
+                    </div>
                     <div class="flex items-center gap-3">
                         <button wire:click="saveWorkflowSettings" class="rounded bg-accent px-4 py-2 text-sm font-medium text-accent-ink hover:opacity-90 transition-opacity">Save</button>
                         @if($justSaved === 'workflow-settings')

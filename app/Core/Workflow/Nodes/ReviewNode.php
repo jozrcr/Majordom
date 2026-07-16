@@ -38,7 +38,24 @@ class ReviewNode extends NodeJob
 
         $diff = $buildNode->output['diff'] ?? '';
         if ($diff === '') {
-            return NodeResult::failed('No diff to review.');
+            // No-op build: the Builder correctly changed nothing (e.g. a prior
+            // task already covers this one). There is literally nothing to
+            // review, so accept it and advance rather than parking the run.
+            $task->update(['status' => TaskStatus::Approved]);
+
+            app(EventRecorder::class)->record(
+                $execution->project,
+                'review.noop',
+                ['task_key' => $task->task_key],
+                $execution,
+                'reviewer'
+            );
+
+            return NodeResult::done([
+                'verdict' => ['approved' => true, 'summary' => 'No changes were needed — nothing to review.', 'comments' => []],
+                'autoApproved' => true,
+                'noop' => true,
+            ]);
         }
 
         $testsPassed = $this->testsPassed($execution);

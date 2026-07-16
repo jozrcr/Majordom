@@ -78,6 +78,32 @@ test('DelegateNode writes role.md, creates worktree, and sets task to Building',
     expect($memory->read($project, "tasks/{$task->task_key}/role.md"))->toContain('You are the Builder');
 });
 
+test('DelegateNode uses the shared milestone worktree for a milestone task', function () {
+    setupMemoryRoot();
+    $repoDir = sys_get_temp_dir().'/majordom-noderepo-'.uniqid();
+    mkdir($repoDir.'/.git', 0755, true);
+    [$execution, $task, $node, $project] = createExecutionWithTask([], ['repo_path' => $repoDir]);
+
+    $milestone = \App\Models\Milestone::factory()->create(['project_id' => $project->id, 'milestone_key' => 'M1']);
+    $task->update(['milestone_id' => $milestone->id]);
+
+    app(MemoryStore::class)->write($project, "tasks/{$task->task_key}/task.md", "Build something.");
+
+    Process::fake([
+        "'git' 'rev-parse' '--verify' 'HEAD'" => Process::result(output: "abc123\n"),
+        "'git' 'worktree' 'add' '-b' 'majordom/M1'*" => Process::result(output: 'ok'),
+    ]);
+
+    (new DelegateNode($node->id))->handle();
+
+    $task->refresh();
+    expect($task->branch)->toBe('majordom/M1');
+    expect($task->worktree_path)->toEndWith('/M1');
+    // The branch created is the milestone's, not a per-task one.
+    Process::assertRan(fn ($p) => is_array($p->command)
+        && in_array('-b', $p->command, true) && in_array('majordom/M1', $p->command, true));
+});
+
 test('DelegateNode fails when task.md is missing', function () {
     setupMemoryRoot();
     [$execution, $task, $node, $project] = createExecutionWithTask();

@@ -7,6 +7,7 @@ enum ApprovalType: string
     case Review = 'review';
     case Commit = 'commit';
     case HumanTask = 'human_task';
+    case MilestoneMerge = 'milestone_merge';
 
     public function label(): string
     {
@@ -14,6 +15,7 @@ enum ApprovalType: string
             self::Review => 'review',
             self::Commit => 'commit',
             self::HumanTask => 'human_task',
+            self::MilestoneMerge => 'milestone merge',
         };
     }
 }

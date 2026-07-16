@@ -93,9 +93,10 @@
                     <div class="max-w-[640px] rounded-lg border border-border-strong bg-surface-raised p-4 space-y-3">
                         <p class="font-mono text-micro uppercase tracking-[.14em] text-mute">PLAN READY</p>
                         <p class="text-body-sm text-text">First task: <span class="font-mono">{{ $this->plannedTask['key'] }}</span> — {{ $this->plannedTask['title'] }}</p>
-                        <div class="flex items-center gap-4 font-mono text-meta text-mute">
+                        <div class="flex flex-wrap items-center gap-4 font-mono text-meta text-mute">
                             <label class="flex cursor-pointer items-center gap-1.5"><input type="radio" wire:model="buildProfile" value="attended" class="accent-[#e2a33b]"> attended</label>
                             <label class="flex cursor-pointer items-center gap-1.5"><input type="radio" wire:model="buildProfile" value="overnight" class="accent-[#e2a33b]"> overnight <span class="text-faint">(auto-review, spend-capped)</span></label>
+                            <label class="flex cursor-pointer items-center gap-1.5"><input type="radio" wire:model="buildProfile" value="full_auto" class="accent-[#e2a33b]"> full auto <span class="text-faint">(auto-merges milestones)</span></label>
                         </div>
                         <div class="flex items-center gap-3">
                             <button wire:click="startBuild" wire:loading.attr="disabled" class="rounded-lg bg-accent px-3 py-1.5 text-body-sm font-semibold text-accent-ink disabled:opacity-55">
@@ -190,7 +191,14 @@
                             @if(!empty($this->openApproval->payload['verdict']['comments']))
                                 <ul class="text-caption text-t3 list-disc pl-4 space-y-1">
                                     @foreach($this->openApproval->payload['verdict']['comments'] as $comment)
-                                        <li>{{ $comment }}</li>
+                                        {{-- Reviewer comments may be plain strings or {file, comment} objects. --}}
+                                        <li>
+                                            @if(is_array($comment))
+                                                @if(!empty($comment['file']))<span class="font-mono text-mute">{{ $comment['file'] }}:</span> @endif{{ $comment['comment'] ?? $comment['text'] ?? '' }}
+                                            @else
+                                                {{ $comment }}
+                                            @endif
+                                        </li>
                                     @endforeach
                                 </ul>
                             @endif
@@ -223,6 +231,23 @@
                                 <button wire:click="rejectApproval" wire:loading.attr="disabled" class="rounded-lg border px-3 py-1.5 text-body-sm font-semibold text-failed-text disabled:opacity-55 hover:bg-failed-tint">
                                     <span wire:loading.remove wire:target="rejectApproval">Reject</span>
                                     <span wire:loading wire:target="rejectApproval">Rejecting…</span>
+                                </button>
+                            </div>
+                        </div>
+                    @elseif($this->openApproval->type === \App\Enums\ApprovalType::MilestoneMerge)
+                        <div class="max-w-[640px] rounded-lg border border-ok/40 bg-surface-card p-4 space-y-3">
+                            <p class="font-mono text-micro uppercase tracking-[.14em] text-ok">Milestone complete</p>
+                            <p class="text-body-sm text-text">{{ $this->openApproval->title }}</p>
+                            <p class="font-mono text-meta text-mute">Merging promotes this milestone's branch into your main branch. The next milestone starts automatically.</p>
+                            <input type="text" wire:model="gateComment" placeholder="Optional note…" class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-body text-hi placeholder:text-faint">
+                            <div class="flex items-center gap-3">
+                                <button wire:click="approveApproval" wire:loading.attr="disabled" class="rounded-lg bg-accent px-3 py-1.5 text-body-sm font-semibold text-accent-ink disabled:opacity-55">
+                                    <span wire:loading.remove wire:target="approveApproval">Merge into main &amp; start next</span>
+                                    <span wire:loading wire:target="approveApproval">Merging…</span>
+                                </button>
+                                <button wire:click="rejectApproval" wire:loading.attr="disabled" class="rounded-lg border border-border px-3 py-1.5 text-body-sm font-semibold text-mute disabled:opacity-55 hover:text-hi">
+                                    <span wire:loading.remove wire:target="rejectApproval">Not yet</span>
+                                    <span wire:loading wire:target="rejectApproval">…</span>
                                 </button>
                             </div>
                         </div>
@@ -284,14 +309,41 @@
             </div>
 
             <div class="border-t border-border py-4">
-                <form wire:submit="send" class="flex gap-2">
-                    <textarea wire:model="draft" rows="2" placeholder="Describe what to build…" class="flex-1 rounded-lg border border-border-strong bg-surface px-3 py-2 text-body text-hi placeholder:text-faint" @disabled($this->thinking)></textarea>
-                    <button type="submit" wire:loading.attr="disabled" class="rounded-lg border border-border-hover px-3 py-1.5 text-body-sm font-semibold text-[#c7d2df] hover:bg-surface-active disabled:opacity-55" @disabled($this->thinking)>
-                        <span wire:loading.remove wire:target="send">Send</span>
-                        <span wire:loading wire:target="send">Sending…</span>
-                    </button>
-                </form>
-                @error('draft') <p class="text-caption text-failed-text mt-1">{{ $message }}</p> @enderror
+                @if(! $this->planExists)
+                    {{-- Consensus phase: free chat with the Architect. --}}
+                    <form wire:submit="send" class="flex gap-2">
+                        <textarea wire:model="draft" rows="2" placeholder="Describe what to build…" class="flex-1 rounded-lg border border-border-strong bg-surface px-3 py-2 text-body text-hi placeholder:text-faint" @disabled($this->thinking)></textarea>
+                        <button type="submit" wire:loading.attr="disabled" class="rounded-lg border border-border-hover px-3 py-1.5 text-body-sm font-semibold text-[#c7d2df] hover:bg-surface-active disabled:opacity-55" @disabled($this->thinking)>
+                            <span wire:loading.remove wire:target="send">Send</span>
+                            <span wire:loading wire:target="send">Sending…</span>
+                        </button>
+                    </form>
+                    @error('draft') <p class="text-caption text-failed-text mt-1">{{ $message }}</p> @enderror
+                @elseif($chatMode === null)
+                    {{-- Post-plan: free chat is off; steer via defined actions. --}}
+                    <div class="flex flex-wrap items-center gap-2">
+                        <span class="font-mono text-meta text-mute mr-1">steer the project:</span>
+                        <button wire:click="setChatMode('add_context')" @disabled($this->thinking) class="rounded-lg border border-border px-3 py-1.5 text-body-sm font-medium text-hi hover:bg-surface-active disabled:opacity-55">Add context</button>
+                        <button wire:click="setChatMode('redefine')" @disabled($this->thinking) class="rounded-lg border border-border px-3 py-1.5 text-body-sm font-medium text-hi hover:bg-surface-active disabled:opacity-55">Redefine milestones / specs</button>
+                    </div>
+                @else
+                    {{-- A mode is active: labeled composer. --}}
+                    <form wire:submit="submitChatMode" class="space-y-2">
+                        <p class="font-mono text-meta text-accent">
+                            {{ $chatMode === 'add_context'
+                                ? 'Adding context — a durable constraint every future task will follow.'
+                                : 'Redefining the roadmap — the Architect amends milestones/tasks (keys stay stable).' }}
+                        </p>
+                        <textarea wire:model="draft" rows="2" placeholder="{{ $chatMode === 'add_context' ? 'e.g. Must also work on Wayland…' : 'e.g. Split milestone 3 into UI and daemon…' }}" class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-body text-hi placeholder:text-faint" @disabled($this->thinking)></textarea>
+                        <div class="flex items-center gap-2">
+                            <button type="submit" wire:loading.attr="disabled" class="rounded-lg bg-accent px-3 py-1.5 text-body-sm font-semibold text-accent-ink disabled:opacity-55" @disabled($this->thinking)>
+                                {{ $chatMode === 'add_context' ? 'Add' : 'Redefine' }}
+                            </button>
+                            <button type="button" wire:click="cancelChatMode" class="rounded-lg border border-border px-3 py-1.5 text-body-sm font-medium text-mute hover:text-hi">Cancel</button>
+                        </div>
+                        @error('draft') <p class="text-caption text-failed-text">{{ $message }}</p> @enderror
+                    </form>
+                @endif
             </div>
         @elseif($tab === 'overview')
             @include('livewire.partials.project-overview')

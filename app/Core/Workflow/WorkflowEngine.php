@@ -4,11 +4,13 @@ namespace App\Core\Workflow;
 
 use App\Core\Events\EventRecorder;
 use App\Enums\ApprovalStatus;
+use App\Enums\ApprovalType;
 use App\Enums\ExecutionStatus;
 use App\Enums\NodeStatus;
 use App\Enums\ProjectStatus;
 use App\Models\Approval;
 use App\Models\Execution;
+use App\Models\Milestone;
 use App\Models\Node;
 
 /**
@@ -78,6 +80,24 @@ class WorkflowEngine
                 'system'
             );
 
+            // M12 autonomy loop: in the auto-commit flow (a `finalize` node, no
+            // per-task commit checkpoint), advance to the next task in the
+            // milestone now. When the chain has a `commit_suggestion` gate
+            // (confirm_commits), the advance waits for the human's approval
+            // (CommitService::apply) instead. Fire-and-forget — never let a
+            // chain hiccup break execution completion.
+            $hasCheckpoint = $execution->nodes()->where('type', 'commit_suggestion')->exists();
+            if (! $hasCheckpoint) {
+                $task = $execution->tasks()->first();
+                if ($task) {
+                    try {
+                        app(\App\Core\Workflow\TaskChain::class)->advance($task->fresh());
+                    } catch (\Throwable $e) {
+                        report($e);
+                    }
+                }
+            }
+
             return;
         }
 
@@ -104,6 +124,14 @@ class WorkflowEngine
         }
 
         $granted ? $approval->grant() : $approval->reject();
+
+        // The milestone gate (M12) is not tied to a workflow node — on grant it
+        // merges the milestone to main and rolls into the next milestone.
+        if ($approval->type === ApprovalType::MilestoneMerge) {
+            $this->resolveMilestoneGate($approval, $granted, $comment);
+
+            return;
+        }
 
         $execution = $approval->execution;
         $node = Node::find($approval->payload['node_id'] ?? 0);
@@ -137,6 +165,37 @@ class WorkflowEngine
         $node->update(['output' => ($node->output ?? []) + $decision, 'finished_at' => now()]);
         $execution->park('Rejected by the owner'.($comment ? ": {$comment}" : '.'));
         $execution->project->update(['status' => ProjectStatus::Parked, 'last_activity_at' => now()]);
+    }
+
+    /**
+     * Resolve the milestone gate (M12): on grant, merge the milestone to main
+     * and start the next milestone's first task. On decline, do nothing — the
+     * milestone's work stays on its branch for the owner to revisit.
+     */
+    private function resolveMilestoneGate(Approval $approval, bool $granted, ?string $comment): void
+    {
+        $project = $approval->project;
+
+        app(EventRecorder::class)->record(
+            $project,
+            $granted ? 'approval.granted' : 'approval.rejected',
+            ['title' => $approval->title, 'comment' => $comment],
+            $approval->execution,
+            'you'
+        );
+
+        if (! $granted) {
+            return;
+        }
+
+        $milestone = Milestone::find($approval->payload['milestone_id'] ?? 0);
+        if ($milestone === null) {
+            return;
+        }
+        $profile = $approval->payload['profile'] ?? 'attended';
+
+        app(\App\Projects\Repositories\CommitService::class)->mergeMilestone($milestone);
+        app(\App\Core\Workflow\TaskChain::class)->startNextMilestone($project, $milestone, $profile);
     }
 
     /**
