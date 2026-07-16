@@ -44,23 +44,25 @@ class ImplementFeatureWorkflow
     }
 
     /**
-     * The chain for a project: a custom workflow wins; otherwise the default,
-     * with `finalize` → `commit_suggestion` when the owner wants a per-task
-     * diff-review checkpoint before the loop advances.
+     * The chain for a project: a custom workflow wins for structure, but the
+     * per-project `confirm_commits` toggle is ALWAYS authoritative for the
+     * tail checkpoint — `finalize` (hands-off) vs `commit_suggestion`
+     * (per-task diff review). Stored chains are normalized in both
+     * directions; otherwise a chain seeded before the default changed
+     * freezes the old checkpoint and quietly overrides the toggle
+     * (a stale seeded chain made "full-auto" runs prompt on every commit).
      *
      * @return array<int, mixed>
      */
     public static function chainFor(Project $project): array
     {
-        if ($project->workflow?->chain) {
-            return $project->workflow->chain;
-        }
+        $chain = $project->workflow?->chain ?: self::CHAIN;
+        $checkpoint = $project->confirm_commits ? 'commit_suggestion' : 'finalize';
 
-        if ($project->confirm_commits) {
-            return array_map(fn ($s) => $s === 'finalize' ? 'commit_suggestion' : $s, self::CHAIN);
-        }
-
-        return self::CHAIN;
+        return array_map(
+            fn ($s) => in_array($s, ['finalize', 'commit_suggestion'], true) ? $checkpoint : $s,
+            $chain
+        );
     }
 
     /**

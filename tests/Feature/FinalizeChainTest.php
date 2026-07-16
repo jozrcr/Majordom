@@ -33,6 +33,47 @@ test('confirm_commits swaps finalize for a commit_suggestion checkpoint', functi
     expect($chain)->toContain('commit_suggestion')->not->toContain('finalize');
 });
 
+test('a stored workflow chain never overrides confirm_commits=false (stale seeded chain regression)', function () {
+    // Pre-M12 seeded row froze `commit_suggestion`; the toggle must win.
+    $workflow = \App\Models\Workflow::create([
+        'name' => 'Implement Feature',
+        'chain' => ['delegate', 'build', 'test', 'review', 'commit_suggestion'],
+    ]);
+    $project = Project::factory()->create(['confirm_commits' => false, 'workflow_id' => $workflow->id]);
+
+    $chain = ImplementFeatureWorkflow::chainFor($project);
+
+    expect($chain)->toBe(['delegate', 'build', 'test', 'review', 'finalize']);
+});
+
+test('confirm_commits=true swaps the checkpoint into a stored finalize chain too', function () {
+    $workflow = \App\Models\Workflow::create([
+        'name' => 'Implement Feature',
+        'chain' => ['delegate', 'build', 'test', 'review', 'finalize'],
+    ]);
+    $project = Project::factory()->create(['confirm_commits' => true, 'workflow_id' => $workflow->id]);
+
+    $chain = ImplementFeatureWorkflow::chainFor($project);
+
+    expect($chain)->toBe(['delegate', 'build', 'test', 'review', 'commit_suggestion']);
+});
+
+test('the stale-seeded-chain migration rewrites the old default but not custom chains', function () {
+    $stale = \App\Models\Workflow::create([
+        'name' => 'Implement Feature',
+        'chain' => ['delegate', 'build', 'test', 'review', 'commit_suggestion'],
+    ]);
+    $custom = \App\Models\Workflow::create([
+        'name' => 'My Custom Flow',
+        'chain' => ['delegate', 'build', 'commit_suggestion'],
+    ]);
+
+    (include database_path('migrations/2026_07_17_000002_fix_stale_seeded_workflow_chain.php'))->up();
+
+    expect($stale->fresh()->chain)->toBe(['delegate', 'build', 'test', 'review', 'finalize'])
+        ->and($custom->fresh()->chain)->toBe(['delegate', 'build', 'commit_suggestion']);
+});
+
 test('FinalizeNode marks the task Approved', function () {
     $project = Project::factory()->create();
     $execution = Execution::factory()->create(['project_id' => $project->id]);
