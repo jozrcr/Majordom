@@ -13,6 +13,7 @@ use App\Models\Project;
 use App\Models\Question;
 use App\Models\Task;
 use App\Projects\Memory\MemoryStore;
+use App\Projects\Repositories\RepoIndex;
 use App\Support\RoleResolver;
 use Illuminate\Support\Str;
 
@@ -28,6 +29,7 @@ class ArchitectService
     public function __construct(
         private readonly ProviderRegistry $providers,
         private readonly MemoryStore $memory,
+        private readonly RepoIndex $repoIndex,
     ) {}
 
     /**
@@ -460,6 +462,18 @@ PROMPT;
             ? "\n\n## Owner decisions & added context (MUST honor)\n{$decisions}"
             : '';
 
+        // Grounding (e2e #2): real tracked paths so "Files likely involved"
+        // names files that exist, and an explicit test-command contract so
+        // acceptance criteria never invent a test runner the repo lacks.
+        $tree = $this->repoIndex->fileList($project->repo_path);
+        $treeBlock = $tree
+            ? "\n\n## Repository files (tracked — ground your paths in these)\n{$tree}"
+            : '';
+        $testCommand = $project->test_command;
+        $testBlock = ($testCommand && trim($testCommand) !== '')
+            ? "\n\n## Test command\n`{$testCommand}` — acceptance criteria may require it to pass."
+            : "\n\n## Test command\nNONE — this project has NO automated test runner. Do NOT write acceptance criteria that require running tests; every criterion must be checkable by inspecting files or observing behavior.";
+
         return <<<CONTEXT
 Write the build brief for this task:
 
@@ -476,7 +490,7 @@ Write the build brief for this task:
 {$architecture}
 
 ## Full roadmap (for context only — decompose ONLY the task above)
-{$roadmap}{$styleBlock}{$decisionsBlock}
+{$roadmap}{$treeBlock}{$testBlock}{$styleBlock}{$decisionsBlock}
 CONTEXT;
     }
 
@@ -494,8 +508,10 @@ the whole thing), in exactly this shape:
 2-4 sentences: what this task must achieve and why, in the context of the milestone.
 
 ## Acceptance criteria
-- Bullet list of concrete, checkable outcomes. Prefer observable behavior and
-  specific file/function names. Include the exact test command when relevant.
+- Bullet list of concrete, falsifiable outcomes. Prefer observable behavior and
+  specific file/function names. Only reference the Test command given in the
+  context — if it says NONE, no criterion may require running tests, and you
+  must NEVER invent a test command.
 
 ## Files likely involved
 - Relative paths the builder will create or edit (best-effort; the builder may adjust).

@@ -7,6 +7,7 @@ use App\Agents\Providers\ProviderRequest;
 use App\Core\Usage\UsageLedger;
 use App\Models\Task;
 use App\Projects\Memory\MemoryStore;
+use App\Projects\Repositories\RepoIndex;
 use App\Support\RoleBinding;
 use App\Support\RoleResolver;
 
@@ -22,6 +23,7 @@ class ReviewerService
     public function __construct(
         private readonly ProviderRegistry $providers,
         private readonly MemoryStore $memory,
+        private readonly RepoIndex $repoIndex,
     ) {}
 
     public function review(Task $task, string $diff, ?bool $testsPassed, ?RoleBinding $binding = null): ReviewVerdict
@@ -36,15 +38,23 @@ class ReviewerService
         $testsLine = match ($testsPassed) {
             true => 'Automated tests PASSED.',
             false => 'Automated tests FAILED — approving is almost certainly wrong.',
-            null => 'No automated tests were run.',
+            null => ($project->test_command && trim($project->test_command) !== '')
+                ? 'No automated tests were run.'
+                : 'This project has NO automated test runner — do not request test runs or reject for missing test output; judge the diff on its own.',
         };
 
         $truncated = mb_strlen($diff) > self::MAX_DIFF_CHARS;
         $diffShown = mb_substr($diff, 0, self::MAX_DIFF_CHARS);
 
+        // Grounding (e2e #2): the reviewer sees the real tracked file list so
+        // "missing file" objections reference reality, not guesses.
+        $tree = $this->repoIndex->fileList($project->repo_path);
+        $treeBlock = $tree ? "## Repository files (tracked)\n{$tree}\n\n" : '';
+
         $userContent = "## Task brief\n{$brief}\n\n"
             .($style ? "## Coding style\n{$style}\n\n" : '')
             .($handoff ? "## Builder's handoff\n{$handoff}\n\n" : '')
+            .$treeBlock
             ."## Test result\n{$testsLine}\n\n"
             ."## Diff".($truncated ? ' (truncated at 30k chars)' : '')."\n```diff\n{$diffShown}\n```";
 

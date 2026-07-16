@@ -122,7 +122,7 @@ test('ArchitectService turn records an architect row', function () {
     };
 
     app()->instance(\App\Agents\Providers\Provider::class, $mockProvider);
-    $service = new ArchitectService(app(\App\Agents\Providers\ProviderRegistry::class), app(\App\Projects\Memory\MemoryStore::class));
+    $service = new ArchitectService(app(\App\Agents\Providers\ProviderRegistry::class), app(\App\Projects\Memory\MemoryStore::class), app(\App\Projects\Repositories\RepoIndex::class));
     $service->converse($project, 'Hello');
 
     expect(UsageRecord::where('role', 'architect')->count())->toBe(1)

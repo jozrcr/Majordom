@@ -121,7 +121,7 @@ it('records consensus.message on architect turn', function () {
     ])]);
     
     app()->instance(\App\Agents\Providers\Provider::class, $provider);
-    $service = new ArchitectService(app(\App\Agents\Providers\ProviderRegistry::class), MemoryStore::fromConfig());
+    $service = new ArchitectService(app(\App\Agents\Providers\ProviderRegistry::class), MemoryStore::fromConfig(), app(\App\Projects\Repositories\RepoIndex::class));
     $service->converse($this->project, 'Let\'s build it.');
     
     $event = Event::where('name', 'consensus.message')->first();

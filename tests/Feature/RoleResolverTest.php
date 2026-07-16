@@ -97,7 +97,8 @@ test('ArchitectService uses a DB role', function () {
 
     $service = new \App\Agents\Architect\ArchitectService(
         app(\App\Agents\Providers\ProviderRegistry::class),
-        app(\App\Projects\Memory\MemoryStore::class)
+        app(\App\Projects\Memory\MemoryStore::class),
+        app(\App\Projects\Repositories\RepoIndex::class)
     );
 
     $service->converse($project, 'Hello');
