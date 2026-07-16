@@ -8,11 +8,12 @@ use App\Models\Question;
 use App\Enums\ExecutionStatus;
 use App\Enums\NodeStatus;
 use App\Enums\QuestionStatus;
+use Livewire\Livewire;
 
 test('no execution shows idle headline', function () {
     $project = Project::factory()->create();
 
-    livewire(ProjectWorkspace::class, ['project' => $project])
+    Livewire::test(ProjectWorkspace::class, ['project' => $project])
         ->assertSee('Idle — no run in progress')
         ->assertDontSee('Working:')
         ->assertDontSee('Waiting for you:');
@@ -28,7 +29,7 @@ test('running execution shows node chips in order with correct statuses', functi
     Node::factory()->create(['execution_id' => $exec->id, 'type' => 'build', 'status' => NodeStatus::Running]);
     Node::factory()->create(['execution_id' => $exec->id, 'type' => 'test', 'status' => NodeStatus::Pending]);
 
-    livewire(ProjectWorkspace::class, ['project' => $project])
+    Livewire::test(ProjectWorkspace::class, ['project' => $project])
         ->assertSee('decompose')
         ->assertSee('build')
         ->assertSee('test')
@@ -47,7 +48,7 @@ test('open question headline wins over working', function () {
         'status' => QuestionStatus::Open,
     ]);
 
-    livewire(ProjectWorkspace::class, ['project' => $project])
+    Livewire::test(ProjectWorkspace::class, ['project' => $project])
         ->assertSee('Waiting for you: answer the Architect\'s question')
         ->assertDontSee('Working:');
 });
@@ -60,6 +61,6 @@ test('failed node shows failed headline', function () {
     ]);
     Node::factory()->create(['execution_id' => $exec->id, 'type' => 'build', 'status' => NodeStatus::Failed]);
 
-    livewire(ProjectWorkspace::class, ['project' => $project])
+    Livewire::test(ProjectWorkspace::class, ['project' => $project])
         ->assertSee('Failed at build');
 });
