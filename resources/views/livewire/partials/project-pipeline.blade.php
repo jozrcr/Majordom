@@ -44,7 +44,7 @@
                 @endphp
                 <button
                     type="button"
-                    wire:click="inspectNode({{ $node['id'] }}"
+                    wire:click="inspectNode({{ $node['id'] }})"
                     class="{{ $chipClass }} {{ $statusClass }} {{ $node['id'] === $inspectedNodeId ? 'ring-2 ring-accent ring-offset-1 ring-offset-surface-card' : '' }}"
                 >
                     <span>{{ $prefix }}</span>

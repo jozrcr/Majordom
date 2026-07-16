@@ -1,3 +1,4 @@
+@php $inspectedNode = $this->inspectedNode; @endphp
 @if($inspectedNode)
 <div class="border-b border-border bg-surface-card px-4 py-3 space-y-3">
     <div class="flex items-center justify-between">
