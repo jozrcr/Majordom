@@ -7,6 +7,7 @@ use App\Core\Events\EventRecorder;
 use App\Enums\ApprovalType;
 use App\Enums\QuestionStatus;
 use App\Jobs\RunArchitectTurn;
+use App\Models\Node;
 use App\Models\Project;
 use App\Projects\Exchanges\ExchangeTrace;
 use Illuminate\Support\Facades\Cache;
@@ -27,6 +28,7 @@ class ProjectWorkspace extends Component
     public ?int $selectedEventId = null;
     public ?int $workflowId = null;
     public ?int $selectedExecutionId = null;
+    public ?int $inspectedNodeId = null;
 
     public function mount(Project $project): void
     {
@@ -323,6 +325,7 @@ class ProjectWorkspace extends Component
         }
 
         $nodes = $exec->nodes->map(fn($n) => [
+            'id' => $n->id,
             'key' => $n->id,
             'label' => $n->type,
             'status' => $n->status->value,
@@ -706,6 +709,27 @@ class ProjectWorkspace extends Component
             'usage' => ExchangeTrace::usageFor($execution),
             'rows' => ExchangeTrace::for($execution),
         ];
+    }
+
+    public function inspectNode(int $nodeId): void
+    {
+        $this->inspectedNodeId = $this->inspectedNodeId === $nodeId ? null : $nodeId;
+    }
+
+    public function getInspectedNodeProperty(): ?Node
+    {
+        if ($this->inspectedNodeId === null) {
+            return null;
+        }
+        $node = Node::find($this->inspectedNodeId);
+        if (!$node) {
+            return null;
+        }
+        // Guard against cross-project IDs
+        if (!$this->project->executions()->pluck('id')->contains($node->execution_id)) {
+            return null;
+        }
+        return $node;
     }
 
     #[On('timeline-bump')]

@@ -42,10 +42,14 @@
                         $prefix = '⏸';
                     }
                 @endphp
-                <div class="{{ $chipClass }} {{ $statusClass }}">
+                <button
+                    type="button"
+                    wire:click="inspectNode({{ $node['id'] }}"
+                    class="{{ $chipClass }} {{ $statusClass }} {{ $node['id'] === $inspectedNodeId ? 'ring-2 ring-accent ring-offset-1 ring-offset-surface-card' : '' }}"
+                >
                     <span>{{ $prefix }}</span>
                     <span>{{ $node['label'] }}</span>
-                </div>
+                </button>
             @endforeach
         </div>
     @endif

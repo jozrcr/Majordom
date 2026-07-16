@@ -37,6 +37,7 @@
             </div>
 
             @include('livewire.partials.project-pipeline')
+            @include('livewire.partials.node-inspector')
 
             <div class="flex-1 space-y-4 overflow-y-auto py-5">
                 @if(empty($sessions))
