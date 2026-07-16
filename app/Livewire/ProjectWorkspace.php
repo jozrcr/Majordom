@@ -315,6 +315,45 @@ class ProjectWorkspace extends Component
         return $this->project->executions()->latest('id')->first();
     }
 
+    public function getPipelineProperty(): array
+    {
+        $exec = $this->latestExecution;
+        if (!$exec) {
+            return ['nodes' => [], 'blocker' => 'Idle — no run in progress'];
+        }
+
+        $nodes = $exec->nodes->map(fn($n) => [
+            'key' => $n->id,
+            'label' => $n->type,
+            'status' => $n->status->value,
+        ])->values()->toArray();
+
+        if ($this->project->openQuestions()->exists()) {
+            return ['nodes' => $nodes, 'blocker' => 'Waiting for you: answer the Architect\'s question'];
+        }
+
+        if ($this->openApproval) {
+            return ['nodes' => $nodes, 'blocker' => 'Waiting for you: approval requested (' . $this->openApproval->type->value . ')'];
+        }
+
+        if ($exec->status === \App\Enums\ExecutionStatus::Parked) {
+            $reason = $exec->meta['parked_reason'] ?? 'unknown';
+            return ['nodes' => $nodes, 'blocker' => "Parked: {$reason}"];
+        }
+
+        $failedNode = $exec->nodes->first(fn($n) => $n->status === \App\Enums\NodeStatus::Failed);
+        if ($failedNode) {
+            return ['nodes' => $nodes, 'blocker' => "Failed at {$failedNode->type}"];
+        }
+
+        $runningNode = $exec->nodes->first(fn($n) => $n->status === \App\Enums\NodeStatus::Running);
+        if ($runningNode) {
+            return ['nodes' => $nodes, 'blocker' => "Working: {$runningNode->type}"];
+        }
+
+        return ['nodes' => $nodes, 'blocker' => 'Idle — waiting for next step'];
+    }
+
     public function getPlannedTaskProperty(): ?array
     {
         // A pending plan approval supersedes an older written plan: offering

@@ -36,6 +36,8 @@
                 @endif
             </div>
 
+            @include('livewire.partials.project-pipeline')
+
             <div class="flex-1 space-y-4 overflow-y-auto py-5">
                 @if(empty($sessions))
                     <div class="py-24 text-center space-y-3">
