@@ -206,6 +206,7 @@ class ProjectWorkspace extends Component
     }
 
     public ?string $commitComment = null;
+    public ?string $commitWarning = null;
     public string $buildProfile = 'attended';
 
     public function applyCommit(): void
@@ -216,7 +217,7 @@ class ProjectWorkspace extends Component
         try {
             app(\App\Projects\Repositories\CommitService::class)->apply($suggestion);
         } catch (\RuntimeException $e) {
-            $this->addError('commitComment', $e->getMessage());
+            $this->commitWarning = $e->getMessage();
         }
     }
 
@@ -231,20 +232,6 @@ class ProjectWorkspace extends Component
         }
 
         app(\App\Projects\Repositories\CommitService::class)->rework($suggestion, $this->commitComment);
-        $this->commitComment = null;
-    }
-
-    public function rejectCommit(): void
-    {
-        $suggestion = $this->commitSuggestion;
-        if (! $suggestion) return;
-
-        if (trim((string) $this->commitComment) === '') {
-            $this->addError('commitComment', 'Say why — rejections need a reason.');
-            return;
-        }
-
-        app(\App\Projects\Repositories\CommitService::class)->reject($suggestion, $this->commitComment);
         $this->commitComment = null;
     }
 

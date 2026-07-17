@@ -92,7 +92,7 @@
                         <p class="font-mono text-micro uppercase tracking-[.14em] text-accent">Plan approval</p>
                         <p class="text-body-sm text-text">Consensus reached. Approve to let the Architect write the project memory — architecture.md, roadmap.md and the first task brief. Not confident yet? Keep talking below; the scope stays open.</p>
                         <div class="flex items-center gap-3">
-                            <button wire:click="approvePlan" wire:loading.attr="disabled" class="rounded-lg px-3 py-1.5 text-body-sm font-semibold disabled:opacity-55">
+                            <button wire:click="approvePlan" wire:confirm="Approve this plan and start the build? Majordom will begin executing immediately." wire:loading.attr="disabled" class="rounded-lg px-3 py-1.5 text-body-sm font-semibold disabled:opacity-55">
                                 <span wire:loading.remove wire:target="approvePlan">Approve plan</span>
                                 <span wire:loading wire:target="approvePlan">Approving…</span>
                             </button>
@@ -155,47 +155,62 @@
                 @endif
 
                 @if($this->commitSuggestion)
-                    <div class="max-w-[640px] rounded-lg border border-border bg-surface-card p-4 space-y-3">
-                        <p class="font-mono text-micro uppercase tracking-[.14em] text-ok">COMMIT READY</p>
-                        <p class="font-mono text-meta text-mute">branch {{ $this->commitSuggestion->branch }} · you commit — Majordom never does</p>
-                        <textarea readonly rows="6" class="w-full rounded-md border border-border-soft bg-surface p-3 font-mono text-[12px] text-body">{{ $this->commitSuggestion->message }}</textarea>
-                        <div x-data="{ open: false }">
-                            <button type="button" @click="open = !open" class="cursor-pointer font-mono text-meta text-mute hover:text-t3">view diff</button>
-                            <div x-show="open" x-cloak>
-                            <div class="mt-2 max-h-[420px] overflow-auto rounded-md border border-border-soft bg-surface font-mono text-[12px] leading-[1.75]">
-                                @php
-                                    $commitDiffLines = explode("\n", $this->commitSuggestion->diff ?? '');
-                                @endphp
-                                @foreach($commitDiffLines as $line)
+                    <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+                        <div class="max-w-[720px] w-full max-h-[85vh] overflow-auto rounded-lg border border-border bg-surface-raised p-5 space-y-3">
+                            <p class="font-mono text-micro uppercase tracking-[.14em] text-ok">COMMIT READY</p>
+                            <p class="font-mono text-meta text-mute">branch {{ $this->commitSuggestion->branch }} · you commit — Majordom never does</p>
+                            <textarea readonly rows="6" class="w-full rounded-md border border-border-soft bg-surface p-3 font-mono text-[12px] text-body">{{ $this->commitSuggestion->message }}</textarea>
+                            <div x-data="{ open: false }">
+                                <button type="button" @click="open = !open" class="cursor-pointer font-mono text-meta text-mute hover:text-t3">view diff</button>
+                                <div x-show="open" x-cloak>
+                                <div class="mt-2 max-h-[420px] overflow-auto rounded-md border border-border-soft bg-surface font-mono text-[12px] leading-[1.75]">
                                     @php
-                                        $cls = 'text-t3';
-                                        if (str_starts_with($line, '+++') || str_starts_with($line, '---')) { $cls = 'text-t3'; }
-                                        elseif (str_starts_with($line, '+')) { $cls = 'bg-diff-add-bg text-diff-add-text'; }
-                                        elseif (str_starts_with($line, '-')) { $cls = 'bg-diff-del-bg text-diff-del-text'; }
-                                        elseif (str_starts_with($line, '@@')) { $cls = 'bg-diff-hunk-bg text-diff-hunk-text'; }
-                                        elseif (str_starts_with($line, 'diff --git')) { $cls = 'text-t2 font-semibold'; }
+                                        $commitDiffLines = explode("\n", $this->commitSuggestion->diff ?? '');
                                     @endphp
-                                    <div class="whitespace-pre px-4 {{ $cls }}">{{ $line }}</div>
-                                @endforeach
+                                    @foreach($commitDiffLines as $line)
+                                        @php
+                                            $cls = 'text-t3';
+                                            if (str_starts_with($line, '+++') || str_starts_with($line, '---')) { $cls = 'text-t3'; }
+                                            elseif (str_starts_with($line, '+')) { $cls = 'bg-diff-add-bg text-diff-add-text'; }
+                                            elseif (str_starts_with($line, '-')) { $cls = 'bg-diff-del-bg text-diff-del-text'; }
+                                            elseif (str_starts_with($line, '@@')) { $cls = 'bg-diff-hunk-bg text-diff-hunk-text'; }
+                                            elseif (str_starts_with($line, 'diff --git')) { $cls = 'text-t2 font-semibold'; }
+                                        @endphp
+                                        <div class="whitespace-pre px-4 {{ $cls }}">{{ $line }}</div>
+                                    @endforeach
+                                </div>
+                                </div>
                             </div>
+                            <input type="text" wire:model="commitComment" placeholder="Comment (required for rework)…"
+                                   class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-body-sm text-hi placeholder:text-faint">
+                            @error('commitComment') <p class="text-caption text-failed-text">{{ $message }}</p> @enderror
+                            <div class="flex items-center gap-2">
+                                <button wire:click="applyCommit" wire:confirm="Squash-merge {{ $this->commitSuggestion->branch }} into your current branch and commit?" wire:loading.attr="disabled"
+                                        class="rounded-lg bg-accent px-3 py-1.5 text-body-sm font-semibold text-accent-ink disabled:opacity-55">
+                                    <span wire:loading.remove wire:target="applyCommit">Merge into {{ $this->commitSuggestion->branch }}</span>
+                                    <span wire:loading wire:target="applyCommit">Merging…</span>
+                                </button>
+                                <button wire:click="reworkCommit" wire:loading.attr="disabled"
+                                        class="rounded-lg border border-border-hover px-3 py-1.5 text-body-sm font-semibold text-[#c7d2df] hover:bg-surface-active disabled:opacity-55">
+                                    <span wire:loading.remove wire:target="reworkCommit">Rework</span>
+                                    <span wire:loading wire:target="reworkCommit">Restarting…</span>
+                                </button>
                             </div>
                         </div>
-                        <input type="text" wire:model="commitComment" placeholder="Comment (required for rework / reject)…"
-                               class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-body-sm text-hi placeholder:text-faint">
-                        @error('commitComment') <p class="text-caption text-failed-text">{{ $message }}</p> @enderror
-                        <div class="flex items-center gap-2">
-                            <button wire:click="applyCommit" wire:confirm="Squash-merge {{ $this->commitSuggestion->branch }} into your current branch and commit?" wire:loading.attr="disabled"
-                                    class="rounded-lg bg-accent px-3 py-1.5 text-body-sm font-semibold text-accent-ink disabled:opacity-55">
-                                <span wire:loading.remove wire:target="applyCommit">Commit</span>
-                                <span wire:loading wire:target="applyCommit">Committing…</span>
-                            </button>
-                            <button wire:click="reworkCommit" wire:loading.attr="disabled"
-                                    class="rounded-lg border border-border-hover px-3 py-1.5 text-body-sm font-semibold text-[#c7d2df] hover:bg-surface-active disabled:opacity-55">
-                                <span wire:loading.remove wire:target="reworkCommit">Rework</span>
-                                <span wire:loading wire:target="reworkCommit">Restarting…</span>
-                            </button>
-                            <button wire:click="rejectCommit" wire:loading.attr="disabled"
-                                    class="rounded-lg border border-failed-border px-3 py-1.5 text-body-sm font-semibold text-failed-text hover:bg-failed-tint disabled:opacity-55">Reject</button>
+                    </div>
+                @endif
+
+                @if($commitWarning !== null)
+                    <div class="fixed inset-0 z-[60] flex items-center justify-center bg-black/60">
+                        <div class="max-w-[480px] w-full rounded-lg border border-failed-border bg-surface-raised p-5 space-y-3">
+                            <div class="flex items-center gap-2">
+                                <span class="text-failed-text text-lg">⚠</span>
+                                <p class="font-mono text-micro uppercase tracking-[.14em] text-failed-text">CAN'T MERGE</p>
+                            </div>
+                            <p class="text-body-sm text-text">{{ $commitWarning }}</p>
+                            <div class="flex justify-end">
+                                <button wire:click="$set('commitWarning', null)" class="rounded-lg border border-border px-3 py-1.5 text-body-sm font-semibold text-mute hover:text-hi hover:bg-surface-active">OK</button>
+                            </div>
                         </div>
                     </div>
                 @endif
