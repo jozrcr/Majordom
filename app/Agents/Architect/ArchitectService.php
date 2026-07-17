@@ -33,6 +33,23 @@ class ArchitectService
     private const READ_MAX_BYTES = 4000;
     private const GATHER_MAX_TOTAL = 16000;
 
+    /** T-67: greenfield scaffold instruction. */
+    private const BOOTSTRAP_PROMPT = <<<'PROMPT'
+The plan is approved and the repository is currently EMPTY. Produce the initial
+project scaffold the first task will build on — nothing more.
+
+Respond ONLY with a JSON object (no markdown fences, no prose outside the JSON):
+{
+  "files": [{"path": "relative/path", "contents": "full file contents"}],
+  "commit_message": "chore: scaffold project structure"
+}
+
+Include only foundation: directory layout, dependency/package manifests, a README,
+test runner/config, and an entry point — grounded in the agreed architecture. Do
+NOT implement any feature or task logic; leave that to the Builder. Keep files
+minimal but runnable. Use repo-relative paths (no leading slash, no "..").
+PROMPT;
+
     public function __construct(
         private readonly ProviderRegistry $providers,
         private readonly MemoryStore $memory,
@@ -295,6 +312,79 @@ class ArchitectService
         );
 
         app(\App\Projects\Roadmap\RoadmapSync::class)->for($project)->sync();
+
+        // T-67: a greenfield repo gets an Architect-authored scaffold so the
+        // first Builder task starts on real ground instead of an empty directory.
+        $this->bootstrapRepo($project);
+    }
+
+    /**
+     * Scaffold a greenfield repository (M14a/T-67). No-ops (returns false, no
+     * model call) on a repo that already has tracked files. The Architect
+     * produces the initial structure — layout, manifests, README, test config —
+     * committed directly as foundation (not a feature task; feature-level
+     * Architect execution goes through the Reviewer, T-71). Returns true if it
+     * scaffolded.
+     */
+    public function bootstrapRepo(Project $project): bool
+    {
+        if ($this->repoIndex->fileList($project->repo_path) !== null) {
+            return false; // not greenfield
+        }
+
+        $binding = app(RoleResolver::class)->resolve('architect', $project);
+        $extraSystem = $binding->meta['system_prompt_extra'] ?? null;
+
+        $response = $this->providers->forBinding($binding)->chat(new ProviderRequest(
+            model: $binding->model,
+            messages: array_merge($this->buildMessages($project, $extraSystem), [[
+                'role' => 'user',
+                'content' => self::BOOTSTRAP_PROMPT,
+            ]]),
+            maxTokens: (int) config('majordom.architect.plan_max_tokens', 8000),
+            temperature: $binding->temperature,
+            jsonMode: true,
+        ));
+
+        app(UsageLedger::class)->record($project, 'architect', $binding->model, $response->promptTokens, $response->completionTokens);
+
+        $data = json_decode(trim($response->content), true);
+        $files = [];
+        foreach (is_array($data['files'] ?? null) ? $data['files'] : [] as $f) {
+            if (is_array($f) && is_string($f['path'] ?? null) && trim($f['path']) !== '' && array_key_exists('contents', $f)) {
+                $files[] = ['path' => trim($f['path']), 'contents' => (string) $f['contents']];
+            }
+        }
+
+        if ($files === []) {
+            app(EventRecorder::class)->record($project, 'repo.bootstrap_failed', ['reason' => 'no files'], null, 'architect');
+
+            return false;
+        }
+
+        $message = is_string($data['commit_message'] ?? null) && trim($data['commit_message']) !== ''
+            ? $data['commit_message']
+            : 'chore: scaffold project structure';
+
+        $ok = app(\App\Projects\Repositories\CommitService::class)->commitScaffold($project->repo_path, $files, $message);
+
+        app(EventRecorder::class)->record(
+            $project,
+            $ok ? 'repo.bootstrapped' : 'repo.bootstrap_failed',
+            ['files' => count($files)],
+            null,
+            'architect'
+        );
+
+        if ($ok) {
+            $project->consensusMessages()->create([
+                'role' => MessageRole::System,
+                'content' => 'Scaffolded the empty repository with '.count($files).' starter file(s) so the Builder has real ground for the first task.',
+                'meta' => ['bootstrap' => true],
+            ]);
+        }
+
+        return $ok;
     }
 
     /**

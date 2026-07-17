@@ -207,6 +207,56 @@ class CommitService
     }
 
     /**
+     * Write a set of files into the repo working tree and commit them as the
+     * initial scaffold (M14a/T-67 Architect bootstrap of a greenfield repo).
+     * `git init`s the repo if needed. Paths are confined to the repo (no `..`,
+     * no absolute). Returns true on a successful commit.
+     *
+     * @param array<int, array{path: string, contents: string}> $files
+     */
+    public function commitScaffold(string $repoPath, array $files, string $message): bool
+    {
+        $repoPath = rtrim($repoPath, '/');
+        if ($repoPath === '' || ! is_dir($repoPath)) {
+            return false;
+        }
+
+        if (! is_dir($repoPath.'/.git')) {
+            $init = Process::path($repoPath)->run(['git', 'init', '-q']);
+            if (! $init->successful()) {
+                return false;
+            }
+        }
+
+        $wrote = 0;
+        foreach ($files as $file) {
+            $rel = ltrim((string) ($file['path'] ?? ''), '/');
+            if ($rel === '' || str_contains($rel, '..')) {
+                continue; // reject traversal / absolute paths
+            }
+            $target = $repoPath.'/'.$rel;
+            $dir = dirname($target);
+            if (! is_dir($dir) && ! mkdir($dir, 0777, true) && ! is_dir($dir)) {
+                continue;
+            }
+            if (@file_put_contents($target, (string) ($file['contents'] ?? '')) !== false) {
+                $wrote++;
+            }
+        }
+
+        if ($wrote === 0) {
+            return false;
+        }
+
+        Process::path($repoPath)->run(['git', 'add', '-A']);
+        $commit = Process::path($repoPath)
+            ->env($this->committerEnv($repoPath))
+            ->run(['git', 'commit', '-m', $message]);
+
+        return $commit->successful();
+    }
+
+    /**
      * Committer identity, passed explicitly so the commit never depends on the
      * app process's ambient $HOME (snap/systemd can hide ~/.gitconfig, which is
      * why git reports "unknown author"). Prefer the configured Majordom
