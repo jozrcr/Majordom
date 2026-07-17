@@ -543,6 +543,10 @@ PROMPT;
         ]);
 
         app(EventRecorder::class)->record($project, 'plan.redefined', [], null, 'architect');
+
+        // T-62: the revised plan must not resume the old, possibly-poisoned
+        // cycle — reset the execution loop to a clean, restartable state.
+        app(\App\Core\Workflow\WorkflowEngine::class)->resetForRedefine($project);
     }
 
     private const REDEFINE_PROMPT = <<<'PROMPT'

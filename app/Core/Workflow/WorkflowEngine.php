@@ -319,6 +319,52 @@ class WorkflowEngine
         );
     }
 
+    /**
+     * Reset the execution loop after a milestone/spec redefine (M14a/T-62).
+     * A revised roadmap must not resume the old, possibly-poisoned cycle: close
+     * any non-terminal execution (unfinished nodes fail) and re-arm every
+     * mid-flight task to Pending so "Start build" rebuilds from the new briefs.
+     * Done/Approved tasks (the immutable past) are left untouched.
+     */
+    public function resetForRedefine(\App\Models\Project $project): void
+    {
+        $exec = $project->executions()->latest('id')->first();
+
+        if ($exec && in_array($exec->status, [ExecutionStatus::Running, ExecutionStatus::NeedsYou, ExecutionStatus::Parked], true)) {
+            $exec->nodes()
+                ->whereIn('status', [NodeStatus::Pending, NodeStatus::WaitingHuman, NodeStatus::Running])
+                ->update(['status' => NodeStatus::Failed, 'finished_at' => now()]);
+
+            $meta = $exec->meta ?? [];
+            unset($meta['parked_reason'], $meta['parked_reason_class']);
+            $exec->update([
+                'status' => ExecutionStatus::Completed,
+                'current_node' => null,
+                'meta' => array_merge($meta, ['superseded_by_redefine' => true]),
+            ]);
+        }
+
+        $project->tasks()
+            ->whereIn('status', [
+                \App\Enums\TaskStatus::Building,
+                \App\Enums\TaskStatus::Testing,
+                \App\Enums\TaskStatus::Reviewing,
+                \App\Enums\TaskStatus::NeedsYou,
+                \App\Enums\TaskStatus::Failed,
+            ])
+            ->update(['status' => \App\Enums\TaskStatus::Pending]);
+
+        $project->update(['status' => ProjectStatus::Idle, 'last_activity_at' => now()]);
+
+        app(EventRecorder::class)->record(
+            $project,
+            'plan.redefine_reset',
+            ['execution_id' => $exec?->id],
+            $exec,
+            'system'
+        );
+    }
+
     public function knows(string $type): bool
     {
         return isset($this->nodeMap[$type]);
