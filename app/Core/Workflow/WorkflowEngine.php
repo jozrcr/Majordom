@@ -7,6 +7,7 @@ use App\Enums\ApprovalStatus;
 use App\Enums\ApprovalType;
 use App\Enums\ExecutionStatus;
 use App\Enums\NodeStatus;
+use App\Enums\ParkedReason;
 use App\Enums\ProjectStatus;
 use App\Models\Approval;
 use App\Models\Execution;
@@ -103,7 +104,9 @@ class WorkflowEngine
 
         $job = $this->nodeMap[$next->type] ?? null;
         if ($job === null) {
-            $execution->park("No job registered for node type '{$next->type}'.");
+            $reason = "No job registered for node type '{$next->type}'.";
+            $execution->park($reason, ParkedReason::HarnessFailure);
+            app(EscalationRouter::class)->route($execution, ParkedReason::HarnessFailure, $reason, $next->type);
 
             return;
         }
@@ -271,6 +274,7 @@ class WorkflowEngine
 
         $meta = $execution->meta ?? [];
         unset($meta['parked_reason']);
+        unset($meta['parked_reason_class']);
         $execution->update(['status' => ExecutionStatus::Running, 'meta' => $meta]);
         $execution->project->update(['status' => \App\Enums\ProjectStatus::Working, 'last_activity_at' => now()]);
 

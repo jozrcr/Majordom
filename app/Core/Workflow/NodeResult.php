@@ -3,6 +3,7 @@
 namespace App\Core\Workflow;
 
 use App\Enums\ApprovalType;
+use App\Enums\ParkedReason;
 
 /**
  * What a node run produced. Three shapes: done (advance the chain),
@@ -20,6 +21,7 @@ final readonly class NodeResult
         public string $failureReason = '',
         /** @var string[] node types to reset to pending, in-chain, incl. self */
         public array $retryResets = [],
+        public ?ParkedReason $parkedReason = null,
     ) {}
 
     public static function done(array $output = []): self
@@ -32,9 +34,9 @@ final readonly class NodeResult
         return new self('waiting', $output, $type, $title, $payload);
     }
 
-    public static function failed(string $reason, array $output = []): self
+    public static function failed(string $reason, array $output = [], ?ParkedReason $parkedReason = null): self
     {
-        return new self('failed', $output, failureReason: $reason);
+        return new self('failed', $output, failureReason: $reason, parkedReason: $parkedReason);
     }
 
     /**

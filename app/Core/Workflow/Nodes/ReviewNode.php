@@ -8,6 +8,7 @@ use App\Core\Workflow\NodeJob;
 use App\Core\Workflow\NodeResult;
 use App\Enums\ApprovalType;
 use App\Enums\NodeStatus;
+use App\Enums\ParkedReason;
 use App\Enums\TaskStatus;
 use App\Models\Execution;
 use App\Models\Node;
@@ -98,6 +99,7 @@ class ReviewNode extends NodeJob
                         return NodeResult::failed(
                             "Reviewer still requesting changes after {$revision} revisions — parked for the owner (task.v{$revision}.md).",
                             ['verdict' => $verdict->toArray()],
+                            ParkedReason::ReworkLimit,
                         );
                     }
 
@@ -131,6 +133,7 @@ class ReviewNode extends NodeJob
                 return NodeResult::failed(
                     "Reviewer still requesting changes after {$revision} revisions — parked for the owner (task.v{$revision}.md).",
                     ['verdict' => $verdict->toArray()],
+                    ParkedReason::ReworkLimit,
                 );
             }
 
