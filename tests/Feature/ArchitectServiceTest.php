@@ -202,8 +202,46 @@ it('flips project status with the question gate', function () {
     $service->answer($this->project->openQuestions()->first(), 'Yes');
     expect($this->project->fresh()->status)->toBe(\App\Enums\ProjectStatus::Working);
 
+    // Never-stall (M14a): a reply-only follow-up used to drop to a silent Idle
+    // dead end. It now surfaces as NeedsYou so the owner can nudge/continue.
+    // (Refresh mirrors production: converse runs in a fresh RunArchitectTurn job,
+    // so the status set by answer() is seen — not a stale in-memory instance.)
+    $this->project->refresh();
     $service->converse($this->project);
-    expect($this->project->fresh()->status)->toBe(\App\Enums\ProjectStatus::Idle);
+    expect($this->project->fresh()->status)->toBe(\App\Enums\ProjectStatus::NeedsYou);
+});
+
+it('surfaces a reply-only turn as a recoverable stall, not a silent Idle', function () {
+    [$service] = architect([
+        json_encode(['reply' => 'Let me think about the structure…', 'questions' => [], 'consensus_reached' => false]),
+    ]);
+
+    $result = $service->converse($this->project, 'Get started');
+
+    expect($result['stalled'])->toBeTrue()
+        ->and($result['consensusPending'])->toBeFalse()
+        ->and($this->project->fresh()->status)->toBe(\App\Enums\ProjectStatus::NeedsYou)
+        ->and($this->project->events()->where('name', 'consensus.stalled')->count())->toBe(1);
+});
+
+it('does not flag a stall when the turn raises a question or reaches consensus', function () {
+    [$service] = architect([
+        json_encode(['reply' => 'Q.', 'questions' => [['text' => 'Which DB?']], 'consensus_reached' => false]),
+    ]);
+
+    expect($service->converse($this->project, 'go')['stalled'])->toBeFalse()
+        ->and($this->project->events()->where('name', 'consensus.stalled')->count())->toBe(0);
+});
+
+it('notes a greenfield (empty) repository in the consensus system prompt', function () {
+    [$service, $provider] = architect([
+        json_encode(['reply' => 'ok', 'questions' => [], 'consensus_reached' => false]),
+    ]);
+
+    // Factory repo_path is not a real git repo → RepoIndex yields null → greenfield note.
+    $service->converse($this->project, 'hi');
+
+    expect($provider->requests[0]->messages[0]['content'])->toContain('greenfield');
 });
 
 it('refuses to write an empty first task brief', function () {

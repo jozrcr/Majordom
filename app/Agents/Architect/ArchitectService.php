@@ -109,20 +109,34 @@ class ArchitectService
         // questions — including ones raised this very turn. Even then the
         // plan is NOT drafted here: that is the human's call (SPEC §3 phase 2
         // plan-approval gate; always blocking until autonomy profiles land).
-        $consensusPending = $envelope->consensusReached
-            && $project->openQuestions()->count() === 0;
+        $openCount = $project->openQuestions()->count();
+        $consensusPending = $envelope->consensusReached && $openCount === 0;
 
-        // Status light: open questions OR a plan awaiting approval = the
-        // human is awaited. Direct writes for now; M4 moves these behind
-        // event listeners.
+        // Never-stall invariant (M14a, e2e#3): a turn that raises no question
+        // and does not reach consensus used to drop the project to a silent
+        // Idle with an unaddressed reply — the "stalls after Q&A" dead end.
+        // Every consensus turn actually ends with the owner as the next actor
+        // (answer a question · approve the plan · steer/nudge a stall), so the
+        // status is always NeedsYou; a stall additionally emits an event so the
+        // workspace can offer a one-click nudge to recover.
+        $stalled = $openCount === 0 && ! $consensusPending;
+
+        if ($stalled) {
+            app(EventRecorder::class)->record(
+                $project,
+                'consensus.stalled',
+                ['messageId' => $message->id],
+                null,
+                'architect'
+            );
+        }
+
         $project->update([
-            'status' => ($project->openQuestions()->count() > 0 || $consensusPending)
-                ? ProjectStatus::NeedsYou
-                : ProjectStatus::Idle,
+            'status' => ProjectStatus::NeedsYou,
             'last_activity_at' => now(),
         ]);
 
-        return ['message' => $message, 'consensusPending' => $consensusPending];
+        return ['message' => $message, 'consensusPending' => $consensusPending, 'stalled' => $stalled];
     }
 
     /**
@@ -551,6 +565,15 @@ PROMPT;
             ? 'There are currently no unanswered questions.'
             : "Unanswered questions you have already raised (do NOT re-raise them):\n- ".implode("\n- ", $open);
 
+        // Grounding (e2e#3): let the Architect reason about the REAL repository
+        // during consensus, not just its path — so it grounds questions in what
+        // exists instead of stalling for lack of context, and recognizes a
+        // greenfield repo that must be scaffolded before any Builder task.
+        $tree = $this->repoIndex->fileList($project->repo_path);
+        $repoBlock = $tree
+            ? "Repository files (tracked — ground your questions and scope in these real paths; do not invent files):\n{$tree}"
+            : "Repository state: this repository is EMPTY (no tracked files yet) — the project is greenfield. The first work will be scaffolding the project structure; factor that into the scope you agree on.";
+
         $prompt = <<<PROMPT
 You are the Architect of the software project "{$project->name}" (repository: {$project->repo_path}).
 Your single goal in this conversation is to reach consensus with the human owner on WHAT to build — before any plan is made.
@@ -558,6 +581,8 @@ Your single goal in this conversation is to reach consensus with the human owner
 Non-negotiable mandate: surface EVERY open question before proposing anything. Ask, never assume. Questions must be discrete, answerable items — not prose musings.
 
 {$openBlock}
+
+{$repoBlock}
 
 You must respond ONLY with a JSON object of this exact shape (no markdown fences, no text outside the JSON):
 {
