@@ -431,6 +431,34 @@ class ProjectWorkspace extends Component
         return null;
     }
 
+    /**
+     * Overview summary: the agreed goal/why from project memory. Prefers
+     * architecture.md, falls back to plan_draft.md. NEVER roadmap.md — the
+     * Overview must not duplicate the Roadmap task list (T-58).
+     */
+    public function getProjectSummaryTextProperty(): ?string
+    {
+        $store = app(\App\Projects\Memory\MemoryStore::class);
+        foreach (['architecture.md', 'plan_draft.md'] as $doc) {
+            $text = $store->read($this->project, $doc);
+            if ($text !== null && trim($text) !== '') {
+                return $text;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Agreed specs: answered questions (question → answer) from consensus.
+     */
+    public function getAgreedSpecsProperty(): \Illuminate\Support\Collection
+    {
+        return $this->project->questions()
+            ->where('status', \App\Enums\QuestionStatus::Answered)
+            ->orderBy('answered_at')
+            ->get();
+    }
+
     public function getOpenApprovalProperty(): ?\App\Models\Approval
     {
         return $this->project->openApprovals()->first();
