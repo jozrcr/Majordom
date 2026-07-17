@@ -797,19 +797,43 @@ class ProjectWorkspace extends Component
             }
             $timelineGroups[$key]->push($event);
         }
+
+        $latestExecId = $this->latestExecution?->id;
         $orderedTimelineGroups = [];
         foreach ($groupOrder as $key) {
+            $events = $timelineGroups[$key];
+            $label = 'consensus';
+            $is_current = false;
+
+            if ($key !== 'consensus') {
+                $is_current = ($key == $latestExecId);
+                $exec = \App\Models\Execution::find($key);
+                if ($exec && $exec->task) {
+                    $mKey = $exec->task->milestone?->milestone_key ?? 'M?';
+                    $tKey = $exec->task->task_key;
+                    $label = "{$mKey} · {$tKey}";
+                }
+                if ($label === 'consensus') {
+                    $label = "execution #{$key}";
+                }
+            }
+
             $orderedTimelineGroups[] = [
                 'key' => $key,
-                'events' => $timelineGroups[$key],
+                'events' => $events,
+                'label' => $label,
+                'is_current' => $is_current,
             ];
         }
+
+        $executionSessionMap = $this->executionSessionMap($sessions);
 
         return view('livewire.project-workspace', [
             'sessions' => $sessions,
             'questionsByMessage' => $questionsByMessage,
             'openCount' => $openCount,
             'timelineGroups' => $orderedTimelineGroups,
+            'executionSessionMap' => $executionSessionMap,
             'workflows' => \App\Models\Workflow::orderBy('is_builtin', 'desc')->orderBy('name')->get(),
         ])->title("Majordom — {$this->project->name}");
     }
