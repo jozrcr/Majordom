@@ -807,11 +807,11 @@ class ProjectWorkspace extends Component
 
             if ($key !== 'consensus') {
                 $is_current = ($key == $latestExecId);
-                $exec = \App\Models\Execution::find($key);
-                if ($exec && $exec->task) {
-                    $mKey = $exec->task->milestone?->milestone_key ?? 'M?';
-                    $tKey = $exec->task->task_key;
-                    $label = "{$mKey} · {$tKey}";
+                $exec = \App\Models\Execution::with('tasks.milestone')->find($key);
+                $task = $exec?->tasks->first();
+                if ($task) {
+                    $mKey = $task->milestone?->milestone_key ?? 'M?';
+                    $label = "{$mKey} · {$task->task_key}";
                 }
                 if ($label === 'consensus') {
                     $label = "execution #{$key}";

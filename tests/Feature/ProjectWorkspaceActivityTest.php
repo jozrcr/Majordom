@@ -13,8 +13,8 @@ uses(\Illuminate\Foundation\Testing\RefreshDatabase::class);
 test('activity panel shows milestone task label when linked', function () {
     $project = Project::factory()->create();
     $milestone = Milestone::factory()->create(['project_id' => $project->id, 'milestone_key' => 'M2']);
-    $task = Task::factory()->create(['project_id' => $project->id, 'milestone_id' => $milestone->id, 'task_key' => 'T-014']);
-    $execution = Execution::factory()->create(['project_id' => $project->id, 'task_id' => $task->id]);
+    $execution = Execution::factory()->create(['project_id' => $project->id]);
+    $task = Task::factory()->create(['project_id' => $project->id, 'milestone_id' => $milestone->id, 'task_key' => 'T-014', 'execution_id' => $execution->id]);
     Event::factory()->create(['project_id' => $project->id, 'execution_id' => $execution->id, 'name' => 'node.started']);
 
     Livewire::test(ProjectWorkspace::class, ['project' => $project])
@@ -23,7 +23,7 @@ test('activity panel shows milestone task label when linked', function () {
 
 test('activity panel falls back to execution id when no task linked', function () {
     $project = Project::factory()->create();
-    $execution = Execution::factory()->create(['project_id' => $project->id, 'task_id' => null]);
+    $execution = Execution::factory()->create(['project_id' => $project->id]);
     Event::factory()->create(['project_id' => $project->id, 'execution_id' => $execution->id, 'name' => 'node.started']);
 
     Livewire::test(ProjectWorkspace::class, ['project' => $project])
@@ -40,10 +40,10 @@ test('past execution sections are collapsed and current is open', function () {
 
     $component = Livewire::test(ProjectWorkspace::class, ['project' => $project]);
     
-    // Past section should have x-data with open: false
-    $component->assertSee("x-data=\"{ open: false }\"");
+    // Past section should have x-data with open: false (raw HTML, unescaped match)
+    $component->assertSee('x-data="{ open: false }"', false);
     // Current section should have x-data with open: true
-    $component->assertSee("x-data=\"{ open: true }\"");
+    $component->assertSee('x-data="{ open: true }"', false);
 });
 
 test('answered questions are grouped into a single row', function () {
