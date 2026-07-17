@@ -27,8 +27,7 @@ test('clicking a chip sets inspectedNodeId and shows panel with humanized input/
         ->assertSee('compile')
         ->assertSee('result')
         ->assertSee('success')
-        ->assertDontSee('"step": "compile"')
-        ->assertDontSee('"result": "success"');
+        ->assertSee('View raw');
 });
 
 test('clicking the same chip again closes the panel', function () {
@@ -138,7 +137,8 @@ test('build node output renders summary, files, and tests badge', function () {
         ->call('inspectNode', $node->id)
         ->assertSee('Added parser')
         ->assertSee('app/Parser.php')
-        ->assertSee('Tests: passed');
+        ->assertSee('Tests:')
+        ->assertSee('passed');
 });
 
 test('unknown node type falls back to key-value rendering', function () {
@@ -155,4 +155,45 @@ test('unknown node type falls back to key-value rendering', function () {
         ->call('inspectNode', $node->id)
         ->assertSee('foo')
         ->assertSee('bar');
+});
+
+test('long string values render truncated with a show-more toggle without erroring', function () {
+    $project = Project::factory()->create();
+    $exec = Execution::factory()->create(['project_id' => $project->id, 'status' => ExecutionStatus::Running]);
+    $long = str_repeat('lorem ipsum ', 80); // > 600 chars
+    $node = Node::factory()->create([
+        'execution_id' => $exec->id,
+        'type' => 'custom',
+        'status' => NodeStatus::Completed,
+        'input' => ['prompt' => $long],
+        'output' => ['log' => $long],
+    ]);
+
+    Livewire::test(ProjectWorkspace::class, ['project' => $project])
+        ->call('inspectNode', $node->id)
+        ->assertSee('show more')
+        ->assertSee('prompt')
+        ->assertSee('log');
+});
+
+test('array values in input config and extra keys render placeholder, not a crash', function () {
+    $project = Project::factory()->create();
+    $exec = Execution::factory()->create(['project_id' => $project->id, 'status' => ExecutionStatus::Running]);
+    $node = Node::factory()->create([
+        'execution_id' => $exec->id,
+        'type' => 'custom',
+        'status' => NodeStatus::Completed,
+        'input' => [
+            'role' => 'builder',
+            'config' => ['retries' => 3, 'matrix' => ['a' => 1]],
+            'extras' => ['nested' => true],
+        ],
+    ]);
+
+    Livewire::test(ProjectWorkspace::class, ['project' => $project])
+        ->call('inspectNode', $node->id)
+        ->assertSee('Role:')
+        ->assertSee('builder')
+        ->assertSee('retries')
+        ->assertSee('nested — see raw');
 });

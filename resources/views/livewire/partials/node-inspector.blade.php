@@ -55,7 +55,7 @@
                         <span class="text-mute">Config:</span>
                         <ul class="list-disc pl-4 mt-1 space-y-0.5 text-t3">
                             @foreach($inspectedNode->input['config'] as $ck => $cv)
-                                <li><span class="font-mono text-mute">{{ $ck }}:</span> {{ is_bool($cv) ? ($cv ? 'yes' : 'no') : $cv }}</li>
+                                <li><span class="font-mono text-mute">{{ $ck }}:</span> @if(is_array($cv))<span class="text-mute text-xs">(nested — see raw)</span>@else{{ is_bool($cv) ? ($cv ? 'yes' : 'no') : $cv }}@endif</li>
                             @endforeach
                         </ul>
                     </div>
@@ -65,10 +65,12 @@
                         <div class="flex gap-2 text-body-sm">
                             <span class="text-mute">{{ $k }}:</span>
                             <span x-data="{ open: false }" class="text-t3">
-                                @if(is_string($v) && mb_strlen($v) > 600)
+                                @if(is_array($v))
+                                    <span class="text-mute text-xs">(nested — see raw)</span>
+                                @elseif(is_string($v) && mb_strlen($v) > 600)
                                     <span x-show="!open">{{ mb_substr($v, 0, 600) }}…</span>
                                     <span x-show="open">{{ $v }}</span>
-                                    <button type="button" x-on:click="open = !open" class="text-accent underline text-xs ml-1">{{ open ? 'show less' : 'show more' }}</button>
+                                    <button type="button" x-on:click="open = !open" x-text="open ? 'show less' : 'show more'" class="text-accent underline text-xs ml-1">show more</button>
                                 @else
                                     {{ is_bool($v) ? ($v ? 'yes' : 'no') : $v }}
                                 @endif
@@ -197,7 +199,7 @@
                                 @elseif(is_string($v) && mb_strlen($v) > 600)
                                     <span x-show="!open">{{ mb_substr($v, 0, 600) }}…</span>
                                     <span x-show="open">{{ $v }}</span>
-                                    <button type="button" x-on:click="open = !open" class="text-accent underline text-xs ml-1">{{ open ? 'show less' : 'show more' }}</button>
+                                    <button type="button" x-on:click="open = !open" x-text="open ? 'show less' : 'show more'" class="text-accent underline text-xs ml-1">show more</button>
                                 @else
                                     {{ is_bool($v) ? ($v ? 'yes' : 'no') : $v }}
                                 @endif
