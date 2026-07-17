@@ -29,10 +29,10 @@
                     $prefix = '';
 
                     if ($status === 'completed') {
-                        $statusClass = 'bg-ok border-ok text-ok';
+                        $statusClass = 'bg-surface-active border-ok/40 text-ok';
                         $prefix = '✓';
                     } elseif ($status === 'running') {
-                        $statusClass = 'bg-status-working border-status-working text-status-working animate-pulse';
+                        $statusClass = 'bg-working-tint border-status-working text-status-working animate-pulse';
                         $prefix = '●';
                     } elseif ($status === 'failed') {
                         $statusClass = 'bg-failed-tint border-failed-border text-failed-text';

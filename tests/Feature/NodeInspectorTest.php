@@ -8,7 +8,7 @@ use App\Enums\ExecutionStatus;
 use App\Enums\NodeStatus;
 use Livewire\Livewire;
 
-test('clicking a chip sets inspectedNodeId and shows panel with input/output', function () {
+test('clicking a chip sets inspectedNodeId and shows panel with humanized input/output', function () {
     $project = Project::factory()->create();
     $exec = Execution::factory()->create(['project_id' => $project->id, 'status' => ExecutionStatus::Running]);
     $node = Node::factory()->create([
@@ -23,8 +23,12 @@ test('clicking a chip sets inspectedNodeId and shows panel with input/output', f
         ->call('inspectNode', $node->id)
         ->assertSet('inspectedNodeId', $node->id)
         ->assertSee('build')
-        ->assertSee('"step": "compile"')
-        ->assertSee('"result": "success"');
+        ->assertSee('step')
+        ->assertSee('compile')
+        ->assertSee('result')
+        ->assertSee('success')
+        ->assertDontSee('"step": "compile"')
+        ->assertDontSee('"result": "success"');
 });
 
 test('clicking the same chip again closes the panel', function () {
@@ -88,4 +92,67 @@ test('node with null input/output renders panel without sections and no errors',
         ->assertSee('decompose')
         ->assertDontSee('Input')
         ->assertDontSee('Output');
+});
+
+test('review node output renders verdict summary and comments', function () {
+    $project = Project::factory()->create();
+    $exec = Execution::factory()->create(['project_id' => $project->id, 'status' => ExecutionStatus::Running]);
+    $node = Node::factory()->create([
+        'execution_id' => $exec->id,
+        'type' => 'review',
+        'status' => NodeStatus::Completed,
+        'output' => [
+            'verdict' => [
+                'approved' => false,
+                'summary' => 'Needs work on the parser',
+                'comments' => [['file' => 'app/Parser.php', 'comment' => 'Handle empty input']],
+            ],
+        ],
+    ]);
+
+    Livewire::test(ProjectWorkspace::class, ['project' => $project])
+        ->call('inspectNode', $node->id)
+        ->assertSee('Needs work on the parser')
+        ->assertSee('app/Parser.php')
+        ->assertSee('Handle empty input')
+        ->assertDontSee('{"file"');
+});
+
+test('build node output renders summary, files, and tests badge', function () {
+    $project = Project::factory()->create();
+    $exec = Execution::factory()->create(['project_id' => $project->id, 'status' => ExecutionStatus::Running]);
+    $node = Node::factory()->create([
+        'execution_id' => $exec->id,
+        'type' => 'build',
+        'status' => NodeStatus::Completed,
+        'output' => [
+            'summary' => 'Added parser',
+            'filesChanged' => ['app/Parser.php'],
+            'testsPassed' => true,
+            'diff' => "+ new line",
+            'rawLog' => 'log text',
+        ],
+    ]);
+
+    Livewire::test(ProjectWorkspace::class, ['project' => $project])
+        ->call('inspectNode', $node->id)
+        ->assertSee('Added parser')
+        ->assertSee('app/Parser.php')
+        ->assertSee('Tests: passed');
+});
+
+test('unknown node type falls back to key-value rendering', function () {
+    $project = Project::factory()->create();
+    $exec = Execution::factory()->create(['project_id' => $project->id, 'status' => ExecutionStatus::Running]);
+    $node = Node::factory()->create([
+        'execution_id' => $exec->id,
+        'type' => 'custom',
+        'status' => NodeStatus::Completed,
+        'output' => ['foo' => 'bar'],
+    ]);
+
+    Livewire::test(ProjectWorkspace::class, ['project' => $project])
+        ->call('inspectNode', $node->id)
+        ->assertSee('foo')
+        ->assertSee('bar');
 });

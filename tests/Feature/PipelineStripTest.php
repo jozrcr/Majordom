@@ -64,3 +64,17 @@ test('failed node shows failed headline', function () {
     Livewire::test(ProjectWorkspace::class, ['project' => $project])
         ->assertSee('Failed at build');
 });
+
+test('completed and running chips render their label text', function () {
+    $project = Project::factory()->create();
+    $exec = Execution::factory()->create([
+        'project_id' => $project->id,
+        'status' => ExecutionStatus::Running,
+    ]);
+    Node::factory()->create(['execution_id' => $exec->id, 'type' => 'build', 'status' => NodeStatus::Completed]);
+    Node::factory()->create(['execution_id' => $exec->id, 'type' => 'test', 'status' => NodeStatus::Running]);
+
+    Livewire::test(ProjectWorkspace::class, ['project' => $project])
+        ->assertSee('build')
+        ->assertSee('test');
+});
