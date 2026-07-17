@@ -279,6 +279,15 @@ Reverb for live updates.
   - **Stats** — usage totals per role (tokens + `cost_usd`) from `UsageRecord`, a
     grand total, and execution counts by status. A richer per-project cost
     dashboard (dataviz) is a later enhancement.
+  - **Settings** (T-55) — project-scoped controls: rename (slug immutable — it
+    keys memory/worktrees), archive/unarchive, autonomy profile (canonical
+    `switchProfile` surface), `confirm_commits` per-task diff checkpoint,
+    `push_after_merge` (mirrors the **global** `Setting::get('git.push_after_merge')`
+    — labeled "(global)"; per-project column deliberately NOT added, owner call
+    pending), and a disabled `night_mode` placeholder for M14/T-62.
+  - A slim **common header** (name · repo path · status badge, null-safe) renders
+    above the tab bar on EVERY tab; chat-only extras (Architect chip, workflow
+    select) stay inside the chat tab.
 - **"Needs You" inbox** — global across all projects; the queue of open
   Approvals/Questions/Test-invites. **This is exactly what Telegram/Discord
   mirror** — one queue, three windows (app, phone, desktop). Backbone of the

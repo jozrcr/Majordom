@@ -11,7 +11,7 @@
     <div class="flex flex-col gap-1.5">
         <label class="text-sm text-t3">Rename</label>
         <div class="flex gap-2">
-            <input type="text" wire:model.defer="settingsName" class="flex-1 rounded border border-border bg-surface px-3 py-1.5 text-body text-hi placeholder:text-faint">
+            <input type="text" wire:model="settingsName" class="flex-1 rounded border border-border bg-surface px-3 py-1.5 text-body text-hi placeholder:text-faint">
             <button wire:click="renameProject" class="rounded border border-border-hover px-3 py-1.5 text-body-sm font-medium text-hi hover:bg-surface-active">Save</button>
         </div>
         @error('settingsName') <p class="text-caption text-failed-text">{{ $message }}</p> @enderror

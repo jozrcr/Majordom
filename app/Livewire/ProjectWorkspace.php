@@ -269,7 +269,7 @@ class ProjectWorkspace extends Component
     public function togglePushAfterMerge(): void
     {
         $current = Setting::get('git.push_after_merge', false);
-        Setting::set('git.push_after_merge', ! $current);
+        Setting::put('git.push_after_merge', ! $current);
     }
 
     /**

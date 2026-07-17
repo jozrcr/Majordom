@@ -9,9 +9,11 @@
                 <h1 class="truncate text-title font-semibold text-hi">{{ $project->name }}</h1>
                 <p class="truncate font-mono text-meta text-mute" title="{{ $project->repo_path }}">{{ $project->repo_path }}</p>
             </div>
-            <span class="ml-4 shrink-0 rounded-[5px] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[.1em] text-accent bg-accent-tint">
-                {{ $project->status->label() }}
-            </span>
+            @if($project->status)
+                <span class="ml-4 shrink-0 rounded-[5px] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[.1em] text-accent bg-accent-tint">
+                    {{ $project->status->label() }}
+                </span>
+            @endif
         </div>
 
         <div class="flex items-center gap-4 border-b border-border px-1">
