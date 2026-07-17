@@ -4,20 +4,27 @@
          path; this catches anything the socket misses. --}}
     <div wire:poll.3s class="hidden"></div>
     <div class="flex h-full min-w-0 flex-1 flex-col justify-start">
+        <div class="flex items-center justify-between border-b border-border px-4 py-3">
+            <div class="min-w-0">
+                <h1 class="truncate text-title font-semibold text-hi">{{ $project->name }}</h1>
+                <p class="truncate font-mono text-meta text-mute" title="{{ $project->repo_path }}">{{ $project->repo_path }}</p>
+            </div>
+            <span class="ml-4 shrink-0 rounded-[5px] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[.1em] text-accent bg-accent-tint">
+                {{ $project->status->label() }}
+            </span>
+        </div>
+
         <div class="flex items-center gap-4 border-b border-border px-1">
             <button wire:click="$set('tab', 'chat')" class="px-3 py-2 text-sm font-medium transition-colors {{ $tab === 'chat' ? 'text-accent border-b-2 border-accent' : 'text-mute hover:text-t3' }}">Chat</button>
             <button wire:click="$set('tab', 'overview')" class="px-3 py-2 text-sm font-medium transition-colors {{ $tab === 'overview' ? 'text-accent border-b-2 border-accent' : 'text-mute hover:text-t3' }}">Overview</button>
             <button wire:click="$set('tab', 'stats')" class="px-3 py-2 text-sm font-medium transition-colors {{ $tab === 'stats' ? 'text-accent border-b-2 border-accent' : 'text-mute hover:text-t3' }}">Stats</button>
             <button wire:click="$set('tab', 'roadmap')" class="px-3 py-2 text-sm font-medium transition-colors {{ $tab === 'roadmap' ? 'text-accent border-b-2 border-accent' : 'text-mute hover:text-t3' }}">Roadmap</button>
             <button wire:click="$set('tab', 'exchanges')" class="px-3 py-2 text-sm font-medium transition-colors {{ $tab === 'exchanges' ? 'text-accent border-b-2 border-accent' : 'text-mute hover:text-t3' }}">Exchanges</button>
+            <button wire:click="$set('tab', 'settings')" class="px-3 py-2 text-sm font-medium transition-colors {{ $tab === 'settings' ? 'text-accent border-b-2 border-accent' : 'text-mute hover:text-t3' }}">Settings</button>
         </div>
 
         @if($tab === 'chat')
             <div class="py-4 flex items-center gap-3 border-b border-border pr-4">
-                <div class="min-w-0">
-                    <h1 class="truncate text-title font-semibold text-hi">{{ $project->name }}</h1>
-                    <p class="truncate font-mono text-meta text-mute" title="{{ $project->repo_path }}">{{ $project->repo_path }}</p>
-                </div>
                 <div class="min-w-0 flex flex-col">
                     <span class="w-fit rounded-[5px] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[.1em]">Architect</span>
                     <span class="pl-1 font-mono text-meta text-mute">{{ config('majordom.architect.model') }}</span>
@@ -244,6 +251,8 @@
             @include('livewire.partials.project-roadmap')
         @elseif($tab === 'exchanges')
             @include('livewire.partials.project-exchanges')
+        @elseif($tab === 'settings')
+            @include('livewire.partials.project-settings')
         @endif
     </div>
 

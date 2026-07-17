@@ -10,6 +10,7 @@ use App\Jobs\RunArchitectTurn;
 use App\Models\Node;
 use App\Models\Project;
 use App\Projects\Exchanges\ExchangeTrace;
+use App\Support\Setting;
 use Illuminate\Support\Facades\Cache;
 use Livewire\Attributes\On;
 use Livewire\Attributes\Url;
@@ -29,11 +30,13 @@ class ProjectWorkspace extends Component
     public ?int $workflowId = null;
     public ?int $selectedExecutionId = null;
     public ?int $inspectedNodeId = null;
+    public string $settingsName = '';
 
     public function mount(Project $project): void
     {
         $this->project = $project;
         $this->workflowId = $project->workflow_id;
+        $this->settingsName = $project->name;
         $this->normalizeTab();
     }
 
@@ -44,7 +47,7 @@ class ProjectWorkspace extends Component
 
     private function normalizeTab(): void
     {
-        if (!in_array($this->tab, ['chat', 'overview', 'stats', 'roadmap', 'exchanges'], true)) {
+        if (!in_array($this->tab, ['chat', 'overview', 'stats', 'roadmap', 'exchanges', 'settings'], true)) {
             $this->tab = 'chat';
         }
     }
@@ -249,6 +252,24 @@ class ProjectWorkspace extends Component
     {
         $this->project->update(['archived_at' => $this->project->archived_at ? null : now()]);
         $this->redirectRoute('home', navigate: false);
+    }
+
+    public function renameProject(): void
+    {
+        $this->validate(['settingsName' => 'required|string|max:120']);
+        $this->project->update(['name' => $this->settingsName]);
+        session()->flash('settings_ok', 'Renamed');
+    }
+
+    public function toggleConfirmCommits(): void
+    {
+        $this->project->update(['confirm_commits' => ! $this->project->confirm_commits]);
+    }
+
+    public function togglePushAfterMerge(): void
+    {
+        $current = Setting::get('git.push_after_merge', false);
+        Setting::set('git.push_after_merge', ! $current);
     }
 
     /**
