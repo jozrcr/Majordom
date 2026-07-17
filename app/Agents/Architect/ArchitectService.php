@@ -26,6 +26,13 @@ use Illuminate\Support\Str;
  */
 class ArchitectService
 {
+    /** Max repo-inspection round-trips the Architect may self-drive per turn (M14a/T-66). */
+    private const MAX_INSPECT_ROUNDS = 2;
+
+    /** Per-file read cap, and total budget across one inspection round (bytes). */
+    private const READ_MAX_BYTES = 4000;
+    private const GATHER_MAX_TOTAL = 16000;
+
     public function __construct(
         private readonly ProviderRegistry $providers,
         private readonly MemoryStore $memory,
@@ -52,28 +59,65 @@ class ArchitectService
         $binding = app(RoleResolver::class)->resolve('architect', $project);
 
         $extraSystem = $binding->meta['system_prompt_extra'] ?? null;
-        $response = $this->providers->forBinding($binding)->chat(new ProviderRequest(
-            model: $binding->model,
-            messages: $this->buildMessages($project, $extraSystem),
-            maxTokens: $binding->maxTokens,
-            temperature: $binding->temperature,
-            jsonMode: true,
-            topP: isset($binding->meta['top_p']) ? (float) $binding->meta['top_p'] : null,
-            frequencyPenalty: isset($binding->meta['frequency_penalty']) ? (float) $binding->meta['frequency_penalty'] : null,
-            presencePenalty: isset($binding->meta['presence_penalty']) ? (float) $binding->meta['presence_penalty'] : null,
-            stop: isset($binding->meta['stop']) ? $binding->meta['stop'] : null,
-            timeout: isset($binding->meta['timeout']) ? (int) $binding->meta['timeout'] : null,
-        ));
 
-        app(UsageLedger::class)->record(
-            $project,
-            'architect',
-            $binding->model,
-            $response->promptTokens,
-            $response->completionTokens
-        );
+        // Bounded self-inspection (M14a/T-66): the Architect may request repo
+        // context (tracked files, a "dir/" listing, or "tree") and continue on
+        // its own — up to MAX_INSPECT_ROUNDS — before it must ask a question or
+        // conclude. Beyond the cap it falls through to the normal handling (a
+        // still-empty turn surfaces as a T-65 stall the owner can nudge).
+        $rounds = 0;
+        while (true) {
+            $response = $this->providers->forBinding($binding)->chat(new ProviderRequest(
+                model: $binding->model,
+                messages: $this->buildMessages($project, $extraSystem),
+                maxTokens: $binding->maxTokens,
+                temperature: $binding->temperature,
+                jsonMode: true,
+                topP: isset($binding->meta['top_p']) ? (float) $binding->meta['top_p'] : null,
+                frequencyPenalty: isset($binding->meta['frequency_penalty']) ? (float) $binding->meta['frequency_penalty'] : null,
+                presencePenalty: isset($binding->meta['presence_penalty']) ? (float) $binding->meta['presence_penalty'] : null,
+                stop: isset($binding->meta['stop']) ? $binding->meta['stop'] : null,
+                timeout: isset($binding->meta['timeout']) ? (int) $binding->meta['timeout'] : null,
+            ));
 
-        $envelope = ArchitectEnvelope::fromContent($response->content);
+            app(UsageLedger::class)->record(
+                $project,
+                'architect',
+                $binding->model,
+                $response->promptTokens,
+                $response->completionTokens
+            );
+
+            $envelope = ArchitectEnvelope::fromContent($response->content);
+
+            // Only a PURE inspection request loops (no question, no consensus) —
+            // a turn that asks or concludes is honored immediately even if it
+            // also listed reads, so a real question always reaches the owner.
+            $wantsInspection = $envelope->reads !== []
+                && $envelope->questions === []
+                && ! $envelope->consensusReached;
+
+            if ($wantsInspection && $rounds < self::MAX_INSPECT_ROUNDS) {
+                $context = $this->gatherRepoContext($project, $envelope->reads);
+                $project->consensusMessages()->create([
+                    'role' => MessageRole::System,
+                    'content' => '[repo inspection: '.implode(', ', $envelope->reads)."]\n\n".$context,
+                    'meta' => ['inspection' => true, 'paths' => array_values($envelope->reads)],
+                ]);
+                app(EventRecorder::class)->record(
+                    $project,
+                    'consensus.inspected',
+                    ['paths' => array_values($envelope->reads)],
+                    null,
+                    'architect'
+                );
+                $rounds++;
+
+                continue;
+            }
+
+            break;
+        }
 
         $message = $project->consensusMessages()->create([
             'role' => MessageRole::Architect,
@@ -438,6 +482,60 @@ PROMPT;
      * project architecture, and a short trail of already-built sibling tasks so
      * the new brief fits what came before (no duplicate work, consistent style).
      */
+    /**
+     * Fetch the repo context the Architect requested (M14a/T-66). Entries are
+     * tracked file paths, a directory ("dir/") for its listing, or "tree" for
+     * the full tracked tree. Enforces tracked-only reads (membership against the
+     * git file list) so gitignored secrets like .env can never be pulled into
+     * the model, on top of RepoIndex::readFile's in-repo confinement. Capped.
+     *
+     * @param string[] $reads
+     */
+    private function gatherRepoContext(Project $project, array $reads): string
+    {
+        $treeAll = $this->repoIndex->fileList($project->repo_path, 2000);
+        $tracked = $treeAll !== null
+            ? array_values(array_filter(array_map('trim', explode("\n", $treeAll))))
+            : [];
+        // Drop the "+N more" footer line from the membership set if present.
+        $trackedSet = array_flip(array_filter($tracked, fn ($f) => ! str_starts_with($f, '…')));
+
+        $blocks = [];
+        $budget = self::GATHER_MAX_TOTAL;
+
+        foreach ($reads as $req) {
+            if (! is_string($req) || $budget <= 0) {
+                continue;
+            }
+            $req = trim($req);
+            if ($req === '') {
+                continue;
+            }
+
+            if (in_array($req, ['tree', '**', '.', './'], true)) {
+                $block = "### Repository tree (tracked)\n".($treeAll ?? '(empty — no tracked files)');
+            } elseif (str_ends_with($req, '/')) {
+                $prefix = ltrim($req, '/');
+                $under = array_values(array_filter(array_keys($trackedSet), fn ($f) => str_starts_with($f, $prefix)));
+                $block = "### {$req} (tracked files)\n".($under === [] ? '(no tracked files here)' : implode("\n", array_slice($under, 0, 200)));
+            } else {
+                $rel = ltrim($req, '/');
+                if (! isset($trackedSet[$rel])) {
+                    $block = "### {$req}\n(not a tracked file — cannot read; consult the tree)";
+                } else {
+                    $contents = $this->repoIndex->readFile($project->repo_path, $rel, self::READ_MAX_BYTES);
+                    $block = "### {$req}\n".($contents ?? '(unreadable)');
+                }
+            }
+
+            $block = mb_substr($block, 0, $budget);
+            $budget -= mb_strlen($block);
+            $blocks[] = $block;
+        }
+
+        return $blocks === [] ? '(nothing to show)' : implode("\n\n", $blocks);
+    }
+
     private function decomposeContext(Project $project, Task $task): string
     {
         $milestone = $task->milestone;
@@ -588,7 +686,8 @@ You must respond ONLY with a JSON object of this exact shape (no markdown fences
 {
   "reply": "markdown text shown to the owner — your reasoning, acknowledgements, current understanding",
   "questions": [{"text": "one specific question", "options": ["optional", "answer", "choices"]}],
-  "consensus_reached": false
+  "consensus_reached": false,
+  "reads": ["optional/repo/path.php", "some/dir/", "tree"]
 }
 
 Rules:
@@ -597,6 +696,7 @@ Rules:
 3. When consensus_reached is true, "reply" must restate the agreed scope in a few sentences.
 4. Keep "reply" concise; the owner reads it in a chat pane.
 5. The owner may answer a question in their own words instead of picking an option — including deferring to you ("your call"). Treat a deferral as a real answer: make a sensible decision, state it explicitly in "reply", and do not re-ask.
+6. If you need to see the ACTUAL contents of files to decide, put them in "reads" (repo-relative paths). You may request several at once, a directory (path ending in "/") for its listing, or "tree" for the whole file tree. On an inspection turn leave "questions" empty and "consensus_reached" false — you'll be given the contents and can continue. You have a limited number of inspection rounds per turn, so gather what you need, then ask or conclude. Prefer the project's own summary docs (architecture.md, roadmap.md, decisions.md) when they exist; only read source when you genuinely need specifics. Never ask the owner to paste files you can read yourself; only tracked files are readable (no secrets).
 PROMPT;
 
         if ($extraSystemPrompt !== null && trim($extraSystemPrompt) !== '') {

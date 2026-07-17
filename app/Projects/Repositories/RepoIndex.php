@@ -39,4 +39,41 @@ class RepoIndex
             ? $listing."\n… (+".($total - $maxFiles).' more tracked files)'
             : $listing;
     }
+
+    /**
+     * Read a single file's contents, confined to the repository directory
+     * (M14a/T-66 Architect self-inspection). realpath resolution blocks `..`
+     * traversal and symlinks pointing outside the repo. Tracked-only
+     * enforcement is the caller's job (membership against fileList) so
+     * gitignored secrets like .env never reach a model; this method only
+     * guarantees the path stays inside the repo and is capped.
+     */
+    public function readFile(?string $repoPath, string $rel, int $maxBytes = 4000): ?string
+    {
+        if ($repoPath === null || trim($repoPath) === '' || ! is_dir($repoPath)) {
+            return null;
+        }
+
+        $root = realpath($repoPath);
+        $target = realpath($repoPath.DIRECTORY_SEPARATOR.ltrim($rel, '/'));
+        if ($root === false || $target === false) {
+            return null;
+        }
+        // Must resolve to a real file INSIDE the repo root.
+        if ($target !== $root && ! str_starts_with($target, $root.DIRECTORY_SEPARATOR)) {
+            return null;
+        }
+        if (! is_file($target)) {
+            return null;
+        }
+
+        $contents = @file_get_contents($target, false, null, 0, $maxBytes + 1);
+        if ($contents === false) {
+            return null;
+        }
+
+        return mb_strlen($contents) > $maxBytes
+            ? mb_substr($contents, 0, $maxBytes)."\n… (truncated)"
+            : $contents;
+    }
 }

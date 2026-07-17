@@ -15,6 +15,12 @@ final readonly class ArchitectEnvelope
         /** @var array<int, array{text: string, options: ?array}> */
         public array $questions,
         public bool $consensusReached,
+        /**
+         * Repo context the Architect wants to inspect before deciding
+         * (M14a/T-66): tracked file paths, a directory ("dir/"), or "tree".
+         * @var string[]
+         */
+        public array $reads = [],
     ) {}
 
     public static function fromContent(string $content): self
@@ -45,10 +51,18 @@ final readonly class ArchitectEnvelope
             }
         }
 
+        $reads = [];
+        foreach (is_array($data['reads'] ?? null) ? $data['reads'] : [] as $r) {
+            if (is_string($r) && trim($r) !== '') {
+                $reads[] = trim($r);
+            }
+        }
+
         return new self(
             reply: is_string($data['reply']) ? $data['reply'] : json_encode($data['reply']),
             questions: $questions,
             consensusReached: ($data['consensus_reached'] ?? false) === true,
+            reads: $reads,
         );
     }
 }
