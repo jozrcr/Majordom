@@ -51,12 +51,18 @@ afterEach(function () {
     }
 });
 
-it('scaffolds a greenfield repo and commits it', function () {
+// Review verdict fixtures (Builder Selection: the frontier Builder's scaffold
+// goes through the Reviewer before commit — M14b T-67 reconciliation).
+const REVIEW_OK = '{"verdict":"approved","comments":[],"summary":"sound scaffold"}';
+const REVIEW_CHANGES = '{"verdict":"changes_requested","comments":[{"comment":"composer.json is malformed"}],"summary":"fix the manifest"}';
+
+it('scaffolds a greenfield repo, reviews it, then commits', function () {
     [$service, $provider] = bootstrapService([
         json_encode(['files' => [
             ['path' => 'README.md', 'contents' => "# Project\n"],
             ['path' => 'src/main.py', 'contents' => "print('hi')\n"],
         ], 'commit_message' => 'chore: scaffold']),
+        REVIEW_OK,
     ]);
 
     $ok = $service->bootstrapRepo($this->project);
@@ -64,9 +70,44 @@ it('scaffolds a greenfield repo and commits it', function () {
     expect($ok)->toBeTrue()
         ->and(is_file($this->repoDir.'/README.md'))->toBeTrue()
         ->and(is_file($this->repoDir.'/src/main.py'))->toBeTrue()
-        ->and($provider->calls)->toBe(1)
+        ->and($provider->calls)->toBe(2) // frontier Builder generates + Reviewer validates
         ->and($this->project->events()->where('name', 'repo.bootstrapped')->count())->toBe(1)
+        ->and($this->project->events()->where('name', 'build.builder_selected')->get()
+            ->contains(fn ($e) => ($e->payload['phase'] ?? null) === 'bootstrap'))->toBeTrue()
         ->and(app(RepoIndex::class)->fileList($this->repoDir))->toContain('README.md'); // committed
+});
+
+it('retries once when the scaffold is rejected, then commits the fixed one', function () {
+    [$service, $provider] = bootstrapService([
+        json_encode(['files' => [['path' => 'composer.json', 'contents' => 'BROKEN']], 'commit_message' => 'x']),
+        REVIEW_CHANGES,
+        json_encode(['files' => [['path' => 'composer.json', 'contents' => "{}\n"], ['path' => 'README.md', 'contents' => "# ok\n"]], 'commit_message' => 'chore: scaffold']),
+        REVIEW_OK,
+    ]);
+
+    $ok = $service->bootstrapRepo($this->project);
+
+    expect($ok)->toBeTrue()
+        ->and($provider->calls)->toBe(4) // gen, review(changes), gen, review(ok)
+        ->and(is_file($this->repoDir.'/README.md'))->toBeTrue()
+        ->and($this->project->events()->where('name', 'repo.bootstrapped')->count())->toBe(1);
+});
+
+it('surfaces (does not commit) a scaffold still rejected after the retry', function () {
+    [$service, $provider] = bootstrapService([
+        json_encode(['files' => [['path' => 'composer.json', 'contents' => 'BROKEN']], 'commit_message' => 'x']),
+        REVIEW_CHANGES,
+        json_encode(['files' => [['path' => 'composer.json', 'contents' => 'STILL BROKEN']], 'commit_message' => 'x']),
+        REVIEW_CHANGES,
+    ]);
+
+    $ok = $service->bootstrapRepo($this->project);
+
+    expect($ok)->toBeFalse()
+        ->and(app(RepoIndex::class)->fileList($this->repoDir))->toBeNull() // nothing committed — still greenfield
+        ->and($this->project->events()->where('name', 'repo.bootstrap_review_rejected')->count())->toBe(1)
+        ->and($this->project->consensusMessages()->get()
+            ->contains(fn ($m) => ($m->meta['bootstrap_rejected'] ?? false) === true))->toBeTrue();
 });
 
 it('no-ops on a non-greenfield repo without calling the model', function () {
@@ -85,6 +126,7 @@ it('rejects scaffold paths that escape the repo', function () {
             ['path' => 'ok.txt', 'contents' => 'ok'],
             ['path' => '../evil.txt', 'contents' => 'nope'],
         ]]),
+        REVIEW_OK,
     ]);
 
     $service->bootstrapRepo($this->project);
@@ -93,10 +135,11 @@ it('rejects scaffold paths that escape the repo', function () {
         ->and(is_file(dirname($this->repoDir).'/evil.txt'))->toBeFalse();
 });
 
-it('approvePlan scaffolds when the repo is greenfield', function () {
+it('approvePlan scaffolds (through review) when the repo is greenfield', function () {
     [$service] = bootstrapService([
         json_encode(['architecture_md' => '# Arch', 'roadmap_md' => '# Roadmap', 'first_task_id' => 'T-001', 'first_task_md' => '# Task', 'summary' => 's']),
         json_encode(['files' => [['path' => 'README.md', 'contents' => "# x\n"]], 'commit_message' => 'chore: scaffold']),
+        REVIEW_OK,
     ]);
 
     $service->approvePlan($this->project);

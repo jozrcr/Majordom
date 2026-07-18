@@ -71,6 +71,13 @@ notify* vs *auto-proceed & collect*.
      operates in the user's checkout, so the user's working copy stays
      untouched even mid-overnight-run. Emits nothing model-heavy in parallel.
 5. **Build** *(AI: Builder via harness)* — per Task, sequentially in v1
+   - **Greenfield bootstrap (M14a/T-67, reconciled M14b):** on an empty repo the
+     Architect selects the **frontier Builder** to scaffold (layout, manifests,
+     README, test config) via a dedicated flow (direct file generation — no repo
+     yet for an aider worktree). Role separation holds: the scaffold goes through
+     the **Reviewer** before commit (one corrective retry, else surfaced — never
+     commits a rejected scaffold). No human gate (owner-locked). Then decompose
+     runs on real ground. `ArchitectService::bootstrapRepo`.
    - **Builder Selection (M14b):** the Architect *selects* a Builder per task
      rather than executing itself. A Task carries `implementation_strategy`
      (`local` default → local Qwen; `frontier` → a frontier model bound as

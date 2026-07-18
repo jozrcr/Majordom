@@ -322,12 +322,19 @@ PROMPT;
     }
 
     /**
-     * Scaffold a greenfield repository (M14a/T-67). No-ops (returns false, no
-     * model call) on a repo that already has tracked files. The Architect
-     * produces the initial structure — layout, manifests, README, test config —
-     * committed directly as foundation (not a feature task; feature-level
-     * Architect execution goes through the Reviewer, T-71). Returns true if it
-     * scaffolded.
+     * Scaffold a greenfield repository (M14a/T-67, reconciled onto Builder
+     * Selection in M14b). No-ops (returns false, no model call) on a repo that
+     * already has tracked files.
+     *
+     * Under Builder Selection the Architect SELECTS the frontier Builder for the
+     * scaffold; role separation still holds — the scaffold goes through the
+     * **Reviewer** before it is committed (no self-approval). There is no HUMAN
+     * gate (owner-locked: scaffolding an empty repo is obviously the right move),
+     * but a rejected scaffold is retried once with the feedback and, if still
+     * rejected, surfaced rather than committed. Scaffolding uses a dedicated
+     * flow (direct file generation, owner-blessed) rather than the aider chain,
+     * since there is no repo for aider to operate a worktree on yet. Returns
+     * true only if a reviewed scaffold was committed.
      */
     public function bootstrapRepo(Project $project): bool
     {
@@ -335,21 +342,94 @@ PROMPT;
             return false; // not greenfield
         }
 
-        $binding = app(RoleResolver::class)->resolve('architect', $project);
+        // Builder Selection: greenfield scaffolding is a FRONTIER BUILDER action.
+        app(EventRecorder::class)->record(
+            $project,
+            'build.builder_selected',
+            ['strategy' => 'frontier', 'role' => 'frontier_builder', 'phase' => 'bootstrap'],
+            null,
+            'frontier_builder'
+        );
+
+        $scaffold = $this->generateScaffold($project, null);
+        if ($scaffold === null) {
+            app(EventRecorder::class)->record($project, 'repo.bootstrap_failed', ['reason' => 'no files'], null, 'frontier_builder');
+
+            return false;
+        }
+
+        // Reviewer gate (no human gate): one corrective retry, then surface.
+        $verdict = $this->reviewScaffold($project, $scaffold['files']);
+        if (! $verdict->approved) {
+            $retry = $this->generateScaffold($project, $this->scaffoldFeedback($verdict));
+            if ($retry !== null) {
+                $scaffold = $retry;
+                $verdict = $this->reviewScaffold($project, $scaffold['files']);
+            }
+        }
+
+        if (! $verdict->approved) {
+            app(EventRecorder::class)->record($project, 'repo.bootstrap_review_rejected', ['summary' => $verdict->summary], null, 'reviewer');
+            $project->consensusMessages()->create([
+                'role' => MessageRole::System,
+                'content' => "The project scaffold didn't pass review, so nothing was committed:\n\n> ".$verdict->summary
+                    ."\n\nRefine the scope (Redefine milestones) and approve the plan again to retry the scaffold.",
+                'meta' => ['bootstrap_rejected' => true],
+            ]);
+
+            return false;
+        }
+
+        $ok = app(\App\Projects\Repositories\CommitService::class)
+            ->commitScaffold($project->repo_path, $scaffold['files'], $scaffold['message']);
+
+        app(EventRecorder::class)->record(
+            $project,
+            $ok ? 'repo.bootstrapped' : 'repo.bootstrap_failed',
+            ['files' => count($scaffold['files']), 'reviewed' => true],
+            null,
+            'frontier_builder'
+        );
+
+        if ($ok) {
+            $project->consensusMessages()->create([
+                'role' => MessageRole::System,
+                'content' => 'The frontier Builder scaffolded the empty repository with '.count($scaffold['files'])
+                    .' starter file(s), reviewed and committed, so the Builder has real ground for the first task.',
+                'meta' => ['bootstrap' => true],
+            ]);
+        }
+
+        return $ok;
+    }
+
+    /**
+     * Generate a project scaffold from the frontier Builder binding (M14b). When
+     * $feedback is set, this is the corrective retry after a review rejection.
+     * Returns ['files' => [['path','contents'], …], 'message' => …] or null when
+     * the model produced no usable files.
+     *
+     * @return array{files: array<int, array{path: string, contents: string}>, message: string}|null
+     */
+    private function generateScaffold(Project $project, ?string $feedback): ?array
+    {
+        $binding = app(RoleResolver::class)->resolve('frontier_builder', $project);
         $extraSystem = $binding->meta['system_prompt_extra'] ?? null;
+
+        $prompt = self::BOOTSTRAP_PROMPT;
+        if ($feedback !== null && trim($feedback) !== '') {
+            $prompt .= "\n\nYour previous scaffold was REJECTED in review. Regenerate the FULL scaffold addressing this:\n".trim($feedback);
+        }
 
         $response = $this->providers->forBinding($binding)->chat(new ProviderRequest(
             model: $binding->model,
-            messages: array_merge($this->buildMessages($project, $extraSystem), [[
-                'role' => 'user',
-                'content' => self::BOOTSTRAP_PROMPT,
-            ]]),
+            messages: array_merge($this->buildMessages($project, $extraSystem), [['role' => 'user', 'content' => $prompt]]),
             maxTokens: (int) config('majordom.architect.plan_max_tokens', 8000),
             temperature: $binding->temperature,
             jsonMode: true,
         ));
 
-        app(UsageLedger::class)->record($project, 'architect', $binding->model, $response->promptTokens, $response->completionTokens);
+        app(UsageLedger::class)->record($project, 'frontier_builder', $binding->model, $response->promptTokens, $response->completionTokens);
 
         $data = json_decode(trim($response->content), true);
         $files = [];
@@ -360,35 +440,69 @@ PROMPT;
         }
 
         if ($files === []) {
-            app(EventRecorder::class)->record($project, 'repo.bootstrap_failed', ['reason' => 'no files'], null, 'architect');
-
-            return false;
+            return null;
         }
 
         $message = is_string($data['commit_message'] ?? null) && trim($data['commit_message']) !== ''
             ? $data['commit_message']
             : 'chore: scaffold project structure';
 
-        $ok = app(\App\Projects\Repositories\CommitService::class)->commitScaffold($project->repo_path, $files, $message);
+        return ['files' => $files, 'message' => $message];
+    }
 
-        app(EventRecorder::class)->record(
-            $project,
-            $ok ? 'repo.bootstrapped' : 'repo.bootstrap_failed',
-            ['files' => count($files)],
-            null,
-            'architect'
-        );
+    /**
+     * Run the Reviewer over a proposed (uncommitted) scaffold. Uses an ephemeral
+     * Task (not persisted — the scaffold isn't a roadmap task) and a synthetic
+     * added-files diff so the standard ReviewerService can judge it.
+     */
+    private function reviewScaffold(Project $project, array $files): \App\Agents\Reviewer\ReviewVerdict
+    {
+        $this->memory->write($project, 'tasks/__bootstrap__/task.md', self::BOOTSTRAP_REVIEW_BRIEF);
 
-        if ($ok) {
-            $project->consensusMessages()->create([
-                'role' => MessageRole::System,
-                'content' => 'Scaffolded the empty repository with '.count($files).' starter file(s) so the Builder has real ground for the first task.',
-                'meta' => ['bootstrap' => true],
-            ]);
+        $task = new Task(['task_key' => '__bootstrap__', 'title' => 'Project scaffold']);
+        $task->project_id = $project->id;
+        $task->setRelation('project', $project);
+
+        return app(\App\Agents\Reviewer\ReviewerService::class)->review($task, $this->scaffoldDiff($files), null);
+    }
+
+    /** Render proposed scaffold files as a synthetic unified diff of additions. */
+    private function scaffoldDiff(array $files): string
+    {
+        $blocks = [];
+        foreach ($files as $f) {
+            $path = $f['path'];
+            $added = implode("\n", array_map(fn ($l) => '+'.$l, explode("\n", (string) $f['contents'])));
+            $blocks[] = "diff --git a/{$path} b/{$path}\nnew file mode 100644\n--- /dev/null\n+++ b/{$path}\n{$added}";
         }
 
-        return $ok;
+        return implode("\n\n", $blocks);
     }
+
+    private function scaffoldFeedback(\App\Agents\Reviewer\ReviewVerdict $verdict): string
+    {
+        $lines = [$verdict->summary];
+        foreach ($verdict->comments as $c) {
+            $lines[] = '- '.($c['file'] ? $c['file'].': ' : '').$c['comment'];
+        }
+
+        return implode("\n", array_filter($lines));
+    }
+
+    private const BOOTSTRAP_REVIEW_BRIEF = <<<'MD'
+# Project scaffold (bootstrap)
+
+This is the INITIAL scaffold of a greenfield repository — foundation only, not a
+feature. Judge whether it is a sound, runnable starting point for the agreed
+architecture: sensible directory layout, dependency/package manifests, a README,
+test runner/config, and an entry point.
+
+Approve when the scaffold is coherent and consistent with the architecture. Do
+NOT reject for missing feature logic, missing tests of behavior, or incomplete
+functionality — those are for later tasks. Reject only for real problems:
+malformed manifests, broken structure, missing essential foundation, or
+contents that contradict the agreed architecture.
+MD;
 
     /**
      * Decompose a roadmap task into a concrete `task.md` brief (SPEC §3 phase 3).
