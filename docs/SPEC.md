@@ -100,6 +100,14 @@ notify* vs *auto-proceed & collect*.
      `TestsPassed` / `TestsFailed`. On fail, route back to Build with the failure
      as the next task revision (bounded retry budget).
 7. **Review** *(AI: Reviewer + Human)*
+   - Reviewer judges the task's **cumulative** diff — `base_commit..worktree`,
+     where `base_commit` is the worktree HEAD captured at the task's first build
+     (DelegateNode) — NOT just the last aider run's incremental change (M14b fix).
+     A Builder that edits minimally on a revision/retry produces a tiny diff;
+     judged alone against the full acceptance criteria it is always wrongly
+     rejected even when earlier revisions already satisfy them (the infinite
+     re-park loop a *smart* frontier Builder exposes). Falls back to the
+     incremental diff when there's no base (legacy task / greenfield).
    - Reviewer reads diff + criteria + style + handoff + test result. Emits
      `ReviewRequested` → `ReviewApproved` / `ReviewChangesRequested`. On changes,
      comments become the next task revision (`task.v2.md`, …) → back to Build

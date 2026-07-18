@@ -21,6 +21,7 @@ class Task extends Model
         'worktree_path',
         'status',
         'revision',
+        'base_commit',
         'clarified_at_revision',
         'milestone_id',
         'position',
