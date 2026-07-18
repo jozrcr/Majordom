@@ -29,6 +29,7 @@ to Services; Services front Models. Events record everything.
 | **Execution** | One run of a Workflow against a Project (an "implement this feature" instance). Holds status, autonomy profile, current node, frontier-spend counter + budget cap. | DB |
 | **Milestone** | A chunk of the roadmap the Architect defined. Belongs to a Project; realized within Executions. | DB (+ `roadmap.md`) |
 | **Task** | The atomic unit the Builder executes. Has a `role.md` + versioned `task.md` briefs, a feature branch (checked out in its own worktree), a status, and an `implementation_strategy` (Builder Selection, M14b — which class of Builder implements it; null = local). | DB (+ files) |
+| **Capability** | Opt-in actor rights per project (M14b, `projects.capability_level`): the Architect's repository access — `none` / `read` (default) / `commands` (gated on a sandbox). Read is enforced in-process (realpath confinement + tracked-only); commands would need OS sandboxing, so it is UI-gated. Set in the Project Settings tab; consumed at `ArchitectService::converse` (reads loop + system prompt). See `App\Enums\CapabilityLevel`. | DB |
 | **Node / Step** | A unit of the workflow (control / AI / dev / runtime / human). Records inputs, outputs, timing. | DB |
 | **Role** | A responsibility (Architect/Builder/Reviewer) bound to a Service. | DB / config |
 | **Service** | A concrete endpoint fulfilling a role/`capability` (frontier API, or a metallama target). | DB / config |

@@ -110,9 +110,12 @@ PROMPT;
             // Only a PURE inspection request loops (no question, no consensus) —
             // a turn that asks or concludes is honored immediately even if it
             // also listed reads, so a real question always reaches the owner.
+            // Reads are an OPT-IN capability (M14b): if the owner hasn't granted
+            // read access, the Architect's `reads` are ignored and it must ask.
             $wantsInspection = $envelope->reads !== []
                 && $envelope->questions === []
-                && ! $envelope->consensusReached;
+                && ! $envelope->consensusReached
+                && $project->capability()->canRead();
 
             if ($wantsInspection && $rounds < self::MAX_INSPECT_ROUNDS) {
                 $context = $this->gatherRepoContext($project, $envelope->reads);
@@ -805,14 +808,23 @@ PROMPT;
         // during consensus, not just its path — so it grounds questions in what
         // exists instead of stalling for lack of context, and recognizes a
         // greenfield repo that must be scaffolded before any Builder task.
+        $canRead = $project->capability()->canRead();
         $tree = $this->repoIndex->fileList($project->repo_path);
-        $repoBlock = $tree
-            ? "Repository files (tracked — ground your questions and scope in these real paths; do not invent files):\n{$tree}\n\n"
+        if (! $tree) {
+            $repoBlock = "Repository state: this repository is EMPTY (no tracked files yet) — the project is greenfield. The first work will be scaffolding the project structure; factor that into the scope you agree on.";
+        } elseif ($canRead) {
+            $repoBlock = "Repository files (tracked — ground your questions and scope in these real paths; do not invent files):\n{$tree}\n\n"
                 ."YOU CAN READ THESE FILES DIRECTLY. This is not a plain chat — the engine fulfills file reads for you. "
                 ."To see any file's CONTENTS, list its path in the \"reads\" array of your JSON reply and you will be handed the "
                 ."contents on your very next turn. You do NOT need permission, and you must NEVER ask the owner to paste a file, "
-                ."NEVER ask \"may I read …?\", and NEVER claim you lack filesystem access — you have it, through \"reads\"."
-            : "Repository state: this repository is EMPTY (no tracked files yet) — the project is greenfield. The first work will be scaffolding the project structure; factor that into the scope you agree on.";
+                ."NEVER ask \"may I read …?\", and NEVER claim you lack filesystem access — you have it, through \"reads\".";
+        } else {
+            // Reads not granted (M14b opt-in rights): be honest — the Architect
+            // must ask the owner to share contents; "reads" will be ignored.
+            $repoBlock = "Repository files (tracked — names only; ground your scope in these real paths, do not invent files):\n{$tree}\n\n"
+                ."You can see the file NAMES above but do NOT have read access to their CONTENTS in this project "
+                ."(the owner has not granted it). When you need to see inside a file, ask the owner to share it — the \"reads\" field will not be fulfilled.";
+        }
 
         $prompt = <<<PROMPT
 You are the Architect of the software project "{$project->name}" (repository: {$project->repo_path}).

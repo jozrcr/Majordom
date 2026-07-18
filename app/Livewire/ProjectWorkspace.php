@@ -253,6 +253,22 @@ class ProjectWorkspace extends Component
         $this->project->update(['confirm_commits' => ! $this->project->confirm_commits]);
     }
 
+    /**
+     * Opt-in actor rights (M14b): set the Architect's repository-access tier.
+     * Guards the gated Commands tier server-side (not just in the UI) so it can
+     * never be granted before a sandbox exists.
+     */
+    public function setCapabilityLevel(string $level): void
+    {
+        $capability = \App\Enums\CapabilityLevel::tryFrom($level);
+        if ($capability === null || ! $capability->selectable()) {
+            return;
+        }
+
+        $this->project->update(['capability_level' => $capability]);
+        session()->flash('settings_ok', 'Repository access updated');
+    }
+
     public function togglePushAfterMerge(): void
     {
         $current = Setting::get('git.push_after_merge', false);

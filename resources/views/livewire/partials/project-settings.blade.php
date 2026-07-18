@@ -50,7 +50,32 @@
         <input type="checkbox" wire:click="togglePushAfterMerge" {{ \App\Support\Setting::get('git.push_after_merge', false) ? 'checked' : '' }} class="rounded border-border bg-surface text-accent focus:ring-accent">
     </div>
 
-    {{-- 6. night_mode --}}
+    {{-- 6. Repository access (opt-in actor rights, M14b) --}}
+    <div class="flex flex-col gap-2">
+        <div class="flex flex-col gap-0.5">
+            <label class="text-sm text-t3">Architect repository access</label>
+            <p class="text-caption text-faint">What the Architect may do on your machine — opt in from read-only upward.</p>
+        </div>
+        <div class="flex flex-col gap-1.5">
+            @foreach(\App\Enums\CapabilityLevel::cases() as $level)
+                @php($active = $project->capability() === $level)
+                <button wire:click="setCapabilityLevel('{{ $level->value }}')"
+                        @disabled(! $level->selectable())
+                        class="flex flex-col items-start gap-0.5 rounded border px-3 py-2 text-left transition-colors
+                            {{ $active ? 'border-accent bg-accent-tint' : 'border-border hover:bg-surface-active' }}
+                            {{ $level->selectable() ? '' : 'opacity-50 cursor-not-allowed' }}">
+                    <span class="text-body-sm font-medium {{ $active ? 'text-accent' : 'text-hi' }}">
+                        {{ $level->label() }}
+                        @if($active) <span class="text-caption font-normal text-faint">· current</span> @endif
+                        @unless($level->selectable()) <span class="text-caption font-normal text-faint">· coming soon</span> @endunless
+                    </span>
+                    <span class="text-caption text-t3">{{ $level->description() }}</span>
+                </button>
+            @endforeach
+        </div>
+    </div>
+
+    {{-- 7. night_mode --}}
     <div class="flex flex-col gap-1.5">
         <div class="flex items-center justify-between">
             <label class="text-sm text-t3">Night mode</label>

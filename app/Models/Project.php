@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\ApprovalStatus;
+use App\Enums\CapabilityLevel;
 use App\Enums\ProjectStatus;
 use App\Enums\QuestionStatus;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -25,6 +26,7 @@ class Project extends Model
         'archived_at',
         'workflow_id',
         'confirm_commits',
+        'capability_level',
     ];
 
     protected function casts(): array
@@ -34,7 +36,18 @@ class Project extends Model
             'last_activity_at' => 'datetime',
             'archived_at' => 'datetime',
             'confirm_commits' => 'boolean',
+            'capability_level' => CapabilityLevel::class,
         ];
+    }
+
+    /**
+     * The Architect's granted repository-access tier (M14b opt-in rights),
+     * defaulting to Read when unset. Use this — never the raw column — so a null
+     * always resolves to the safe default.
+     */
+    public function capability(): CapabilityLevel
+    {
+        return $this->capability_level ?? CapabilityLevel::Read;
     }
 
     public function workflow(): BelongsTo
