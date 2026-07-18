@@ -68,12 +68,17 @@ class OpenAiCompatibleProvider implements Provider
         try {
             $response = Http::baseUrl($this->baseUrl)
                 ->timeout($request->timeout ?? $this->timeout)
+                // Transient connection blips / timeouts (common with slow
+                // reasoning models) must not lose the turn — retry a few times
+                // before surfacing. Only ConnectionException triggers a retry
+                // here (non-2xx is handled below, never auto-retried).
+                ->retry(3, 500, throw: false)
                 ->acceptJson()
                 ->withToken($this->apiKey)
                 ->withHeaders($this->extraHeaders)
                 ->post('/chat/completions', $body);
         } catch (ConnectionException $e) {
-            throw new ProviderUnreachable('Failed to connect to provider.', 0, $e);
+            throw new ProviderUnreachable('Could not reach the provider after retries (connection/timeout).', 0, $e);
         }
 
         if (!$response->successful()) {

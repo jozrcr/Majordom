@@ -115,6 +115,25 @@ test('connection exception throws ProviderUnreachable', function () {
     $provider->chat($request);
 });
 
+test('a transient connection failure is retried, then succeeds (turn is not lost)', function () {
+    // Two connection blips, then success — the owner should not have to retype.
+    $attempts = 0;
+    Http::fake(function () use (&$attempts) {
+        $attempts++;
+        if ($attempts < 3) {
+            throw new ConnectionException('temporary blip');
+        }
+
+        return Http::response(['choices' => [['message' => ['content' => 'recovered'], 'finish_reason' => 'stop']]], 200);
+    });
+
+    $provider = new OpenAiCompatibleProvider('https://api.test.com', 'test-key', 30);
+    $response = $provider->chat(new ProviderRequest('test-model', [['role' => 'user', 'content' => "j'aime"]]));
+
+    expect($response->content)->toBe('recovered')
+        ->and($attempts)->toBe(3);
+})->group('slow');
+
 test('200 with empty choices throws ProviderRequestFailed', function () {
     Http::fake([
         'api.test.com/chat/completions' => Http::response(['choices' => []], 200),
