@@ -95,5 +95,11 @@ it('the workspace action dispatches the retry job', function () {
     Livewire::test(ProjectWorkspace::class, ['project' => $project])
         ->call('retryTask', 'T-014', true);
 
-    Queue::assertPushed(RunTaskRetry::class, fn ($job) => $job->taskKey === 'T-014' && $job->escalateToFrontier === true);
+    // Must land on the harness connection/queue — the owner's worker only
+    // processes `queue:work harness --queue=harness`; the default queue is never
+    // drained, so a mis-routed job silently "does nothing".
+    Queue::assertPushed(RunTaskRetry::class, fn ($job) => $job->taskKey === 'T-014'
+        && $job->escalateToFrontier === true
+        && $job->connection === 'harness'
+        && $job->queue === 'harness');
 });

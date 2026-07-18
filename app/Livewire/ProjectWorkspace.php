@@ -308,7 +308,9 @@ class ProjectWorkspace extends Component
             $taskKey,
             $escalate,
             in_array($this->buildProfile, ['attended', 'overnight', 'full_auto'], true) ? $this->buildProfile : 'attended',
-        );
+        )
+            ->onConnection('harness')
+            ->onQueue('harness');
 
         $this->project->update(['status' => \App\Enums\ProjectStatus::Working, 'last_activity_at' => now()]);
     }
