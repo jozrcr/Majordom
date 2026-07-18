@@ -296,8 +296,29 @@ class ProjectWorkspace extends Component
      * relaunch the build, optionally escalating to the frontier Builder. Backs
      * the escalation menu's Retry / Select-stronger-Builder actions.
      */
+    /** Transient banner shown when an action is blocked by an in-flight run. */
+    public ?string $runNotice = null;
+
+    /**
+     * True while a run is actively executing (one heavy task at a time —
+     * PHILOSOPHY §2). New build/retry actions must wait for it, with feedback.
+     */
+    public function hasActiveRun(): bool
+    {
+        return $this->project->executions()
+            ->where('status', \App\Enums\ExecutionStatus::Running)
+            ->exists();
+    }
+
     public function retryTask(string $taskKey, bool $escalate = false): void
     {
+        if ($this->hasActiveRun()) {
+            $this->runNotice = 'A run is already in progress — wait for it to finish (or pause it) before retrying.';
+
+            return;
+        }
+        $this->runNotice = null;
+
         $task = $this->project->tasks()->where('task_key', $taskKey)->latest('id')->first();
         if ($task === null) {
             return;
@@ -628,6 +649,13 @@ class ProjectWorkspace extends Component
         if ($this->plannedTask === null) {
             return;
         }
+
+        if ($this->hasActiveRun()) {
+            $this->runNotice = 'A run is already in progress — wait for it to finish (or pause it) before starting another.';
+
+            return;
+        }
+        $this->runNotice = null;
 
         app(EventRecorder::class)->record(
             $this->project,

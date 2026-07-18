@@ -45,6 +45,13 @@
                 @endif
             </div>
 
+            @if($runNotice)
+                <div class="mt-3 flex items-center justify-between gap-3 rounded-lg border border-accent/40 bg-accent-tint px-4 py-2.5">
+                    <p class="text-body-sm text-accent">{{ $runNotice }}</p>
+                    <button wire:click="$set('runNotice', null)" class="font-mono text-meta text-mute hover:text-t3">dismiss</button>
+                </div>
+            @endif
+
             @include('livewire.partials.project-pipeline')
             @include('livewire.partials.node-inspector')
 

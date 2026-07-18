@@ -71,6 +71,20 @@ it('escalates the retry to the frontier Builder when asked', function () {
         ->and(Event::where('project_id', $project->id)->where('name', 'task.builder_selected')->count())->toBe(1);
 });
 
+it('blocks a retry while a run is active and shows a notice (no job dispatched)', function () {
+    Queue::fake();
+    $project = Project::factory()->create();
+    Task::factory()->create(['project_id' => $project->id, 'task_key' => 'T-014', 'status' => TaskStatus::Failed]);
+    // An active run in progress.
+    \App\Models\Execution::factory()->create(['project_id' => $project->id, 'status' => \App\Enums\ExecutionStatus::Running]);
+
+    Livewire::test(ProjectWorkspace::class, ['project' => $project])
+        ->call('retryTask', 'T-014', true)
+        ->assertSet('runNotice', fn ($v) => $v !== null && str_contains($v, 'already in progress'));
+
+    Queue::assertNotPushed(RunTaskRetry::class);
+});
+
 it('shows the recovery card for a failed task on the latest execution', function () {
     $project = Project::factory()->create();
     $execution = \App\Models\Execution::factory()->create([
