@@ -325,8 +325,13 @@ class WorkflowEngine
      * any non-terminal execution (unfinished nodes fail) and re-arm every
      * mid-flight task to Pending so "Start build" rebuilds from the new briefs.
      * Done/Approved tasks (the immutable past) are left untouched.
+     *
+     * Returns the revised roadmap's first PENDING task key (by milestone then
+     * task position) — the point the loop should restart from — or null if the
+     * roadmap has nothing left to build. The caller re-arms the "Start build"
+     * trigger and regenerates that task's brief from the new roadmap.
      */
-    public function resetForRedefine(\App\Models\Project $project): void
+    public function resetForRedefine(\App\Models\Project $project): ?string
     {
         $exec = $project->executions()->latest('id')->first();
 
@@ -356,13 +361,27 @@ class WorkflowEngine
 
         $project->update(['status' => ProjectStatus::Idle, 'last_activity_at' => now()]);
 
+        // The revised loop restarts at the first still-pending task, in roadmap
+        // order (milestone position, then task position). Tasks without a
+        // milestone (legacy/single-task) fall back to project task position.
+        $firstPending = \App\Models\Task::query()
+            ->where('tasks.project_id', $project->id)
+            ->where('tasks.status', \App\Enums\TaskStatus::Pending)
+            ->leftJoin('milestones', 'tasks.milestone_id', '=', 'milestones.id')
+            ->orderByRaw('COALESCE(milestones.position, 0)')
+            ->orderBy('tasks.position')
+            ->select('tasks.*')
+            ->first();
+
         app(EventRecorder::class)->record(
             $project,
             'plan.redefine_reset',
-            ['execution_id' => $exec?->id],
+            ['execution_id' => $exec?->id, 'first_task_key' => $firstPending?->task_key],
             $exec,
             'system'
         );
+
+        return $firstPending?->task_key;
     }
 
     public function knows(string $type): bool

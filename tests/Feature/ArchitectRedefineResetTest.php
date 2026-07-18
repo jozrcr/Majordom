@@ -62,6 +62,41 @@ it('is safe when there is no execution', function () {
         ->and($project->fresh()->status)->toBe(ProjectStatus::Idle);
 });
 
+it('re-arms Start build with the revised first pending task and a FRESH brief', function () {
+    // BUG 2 (M12Bis): redefine reset the loop but set no firstTaskId, so no
+    // "Start build" appeared — and DelegateNode never re-decomposes, so even a
+    // restart would rebuild the stale (poisoned) brief. Both halves fixed here.
+    config(['majordom.memory_root' => sys_get_temp_dir().'/mj-redef2-'.uniqid()]);
+    $project = Project::factory()->create();
+    $milestone = \App\Models\Milestone::factory()->create([
+        'project_id' => $project->id, 'milestone_key' => 'M1', 'position' => 1,
+    ]);
+    $task = Task::factory()->create([
+        'project_id' => $project->id, 'milestone_id' => $milestone->id,
+        'task_key' => 'T-001', 'status' => TaskStatus::Failed, 'position' => 1,
+    ]);
+
+    $memory = MemoryStore::fromConfig();
+    $memory->write($project, 'tasks/T-001/task.md', '# OLD poisoned brief');
+
+    app()->instance(Provider::class, new RedefineScriptedProvider([
+        json_encode(['roadmap_md' => "## M1 — Skeleton\nDo it.\n- [ ] T-001 — Do the thing (revised)\n", 'summary' => 'revised']),
+        '# FRESH brief from the revised roadmap', // decompose reply (markdown, jsonMode false)
+    ]));
+    $service = new ArchitectService(app(ProviderRegistry::class), $memory, app(RepoIndex::class));
+
+    $service->redefinePlan($project, 'revise T-001');
+
+    $lastSystem = $project->consensusMessages()
+        ->where('role', \App\Enums\MessageRole::System)->orderByDesc('id')->first();
+
+    expect($lastSystem->meta['planWritten'] ?? false)->toBeTrue()
+        ->and($lastSystem->meta['firstTaskId'] ?? null)->toBe('T-001')       // Start build re-armed
+        ->and($task->fresh()->status)->toBe(TaskStatus::Pending)             // re-armed to Pending
+        ->and(trim((string) $memory->read($project, 'tasks/T-001/task.md'))) // brief regenerated
+            ->toBe('# FRESH brief from the revised roadmap');
+});
+
 it('redefinePlan resets the loop after a valid revision', function () {
     config(['majordom.memory_root' => sys_get_temp_dir().'/mj-redef-'.uniqid()]);
     $project = Project::factory()->create();

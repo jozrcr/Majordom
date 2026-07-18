@@ -84,6 +84,24 @@ test('redefinePlan revises roadmap.md and re-syncs', function () {
     expect(Event::where('name', 'plan.redefined')->exists())->toBeTrue();
 });
 
+test('after a redefine the workspace shows Start build for the revised first task (live path)', function () {
+    // BUG 2 live-path guard: exercise the real redefinePlan, then mount the
+    // actual component — the button must appear (the mechanism test alone
+    // missed that firstTaskId never reached the component before).
+    $project = Project::factory()->create();
+    $m = Milestone::factory()->create(['project_id' => $project->id, 'milestone_key' => 'M1', 'position' => 1]);
+    Task::factory()->create(['project_id' => $project->id, 'milestone_id' => $m->id, 'task_key' => 'T-001', 'status' => TaskStatus::Failed, 'position' => 1, 'execution_id' => null]);
+    app(MemoryStore::class)->write($project, 'roadmap.md', "## M1 — Old\n- [ ] T-001 — a\n");
+    app(MemoryStore::class)->write($project, 'tasks/T-001/task.md', '# OLD brief');
+
+    bindArchitect(json_encode(['roadmap_md' => "## M1 — Old\n- [ ] T-001 — a (revised)\n", 'summary' => 'revised']));
+    app(ArchitectService::class)->redefinePlan($project, 'reshape it');
+
+    Livewire::test(ProjectWorkspace::class, ['project' => $project->fresh()])
+        ->assertSee('Start build')
+        ->assertSee('T-001');
+});
+
 test('post-plan composer shows steering buttons, not free chat', function () {
     $project = Project::factory()->create();
     planned($project);

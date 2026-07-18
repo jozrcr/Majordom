@@ -17,11 +17,14 @@ class InspectScriptedProvider implements Provider
 {
     public int $calls = 0;
 
+    public array $lastMessages = [];
+
     public function __construct(public array $responses) {}
 
     public function chat(ProviderRequest $request): ProviderResponse
     {
         $this->calls++;
+        $this->lastMessages = $request->messages;
         $content = array_shift($this->responses) ?? '{"reply":"…","questions":[],"consensus_reached":false}';
 
         return new ProviderResponse($content, 'stop', 5, 5);
@@ -112,6 +115,26 @@ it('confines readFile to inside the repo', function () {
     expect($repo->readFile($this->repoDir, 'app/Foo.php'))->toContain('class Foo')
         ->and($repo->readFile($this->repoDir, '../../../../etc/passwd'))->toBeNull()
         ->and($repo->readFile($this->repoDir, 'nope/missing.php'))->toBeNull();
+});
+
+it('tells the Architect it can read files directly and must never ask to paste', function () {
+    // BUG 1 (mansarde) regression guard: the model kept asking permission /
+    // asking the owner to paste files instead of emitting "reads". The fix is
+    // prompt adoption — assert the affirmative capability language survives.
+    Process::fake(['*' => Process::result("app/Foo.php\n")]);
+
+    [$service, $provider] = inspectService([
+        json_encode(['reply' => 'ok', 'questions' => [['text' => 'q?']], 'consensus_reached' => false]),
+    ]);
+
+    $service->converse($this->project, 'Start');
+
+    $system = $provider->lastMessages[0]['content'] ?? '';
+
+    expect($provider->lastMessages[0]['role'] ?? null)->toBe('system')
+        ->and($system)->toContain('YOU CAN READ THESE FILES DIRECTLY')
+        ->and($system)->toContain('ask the owner to paste a file')
+        ->and($system)->toContain('"reads"');
 });
 
 it('parses and normalizes reads from the envelope', function () {

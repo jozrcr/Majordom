@@ -536,17 +536,61 @@ PROMPT;
 
         app(\App\Projects\Roadmap\RoadmapSync::class)->for($project)->sync();
 
+        // T-62: the revised plan must not resume the old, possibly-poisoned
+        // cycle — reset the execution loop, then name the task the loop restarts
+        // from (its first still-pending task in roadmap order).
+        $firstTaskKey = app(\App\Core\Workflow\WorkflowEngine::class)->resetForRedefine($project);
+
+        // Real recovery, not a replay: the restart task's brief was written
+        // against the OLD roadmap (the poisoned brief the owner redefined away).
+        // Regenerate it from the revised roadmap so "Start build" launches fresh
+        // — DelegateNode reads task.md directly and never re-decomposes, so an
+        // un-refreshed brief would rebuild the exact thing being escaped.
+        if ($firstTaskKey !== null) {
+            $this->regenerateBriefForRestart($project, $firstTaskKey);
+        }
+
+        // Re-arm the "Start build" trigger: getPlannedTaskProperty needs the
+        // planWritten message to carry firstTaskId (approvePlan sets it; the old
+        // redefine path did not — that was the "redefine didn't restart" bug).
         $project->consensusMessages()->create([
             'role' => MessageRole::System,
-            'content' => "✓ Plan updated — ".(string) ($data['summary'] ?? 'the roadmap was revised.'),
-            'meta' => ['planWritten' => true],
+            'content' => "✓ Plan updated — ".(string) ($data['summary'] ?? 'the roadmap was revised.')
+                .($firstTaskKey !== null
+                    ? "\n\nThe build loop was reset. Use **Start build** to relaunch from {$firstTaskKey} with the revised brief."
+                    : "\n\nNo tasks remain to build."),
+            'meta' => array_filter([
+                'planWritten' => true,
+                'firstTaskId' => $firstTaskKey,
+            ], fn ($v) => $v !== null),
         ]);
 
-        app(EventRecorder::class)->record($project, 'plan.redefined', [], null, 'architect');
+        app(EventRecorder::class)->record($project, 'plan.redefined', ['firstTaskId' => $firstTaskKey], null, 'architect');
+    }
 
-        // T-62: the revised plan must not resume the old, possibly-poisoned
-        // cycle — reset the execution loop to a clean, restartable state.
-        app(\App\Core\Workflow\WorkflowEngine::class)->resetForRedefine($project);
+    /**
+     * Regenerate a task's build brief from the CURRENT (revised) roadmap so a
+     * redefine restart doesn't rebuild the stale brief (M14a/T-62). decomposeTask
+     * skips when a non-empty brief exists, so clear it first; if regeneration
+     * comes back empty, restore the prior brief so the restart is never blocked
+     * on a missing task.md.
+     */
+    private function regenerateBriefForRestart(Project $project, string $taskKey): void
+    {
+        $task = $project->tasks()->where('task_key', $taskKey)->latest('id')->first();
+        if ($task === null) {
+            return;
+        }
+
+        $briefPath = "tasks/{$taskKey}/task.md";
+        $stale = (string) $this->memory->read($project, $briefPath);
+
+        $this->memory->write($project, $briefPath, ''); // force decompose to regenerate
+        $this->decomposeTask($project, $task);
+
+        if (trim((string) $this->memory->read($project, $briefPath)) === '' && trim($stale) !== '') {
+            $this->memory->write($project, $briefPath, $stale); // regen failed — keep something buildable
+        }
     }
 
     private const REDEFINE_PROMPT = <<<'PROMPT'
@@ -763,7 +807,11 @@ PROMPT;
         // greenfield repo that must be scaffolded before any Builder task.
         $tree = $this->repoIndex->fileList($project->repo_path);
         $repoBlock = $tree
-            ? "Repository files (tracked — ground your questions and scope in these real paths; do not invent files):\n{$tree}"
+            ? "Repository files (tracked — ground your questions and scope in these real paths; do not invent files):\n{$tree}\n\n"
+                ."YOU CAN READ THESE FILES DIRECTLY. This is not a plain chat — the engine fulfills file reads for you. "
+                ."To see any file's CONTENTS, list its path in the \"reads\" array of your JSON reply and you will be handed the "
+                ."contents on your very next turn. You do NOT need permission, and you must NEVER ask the owner to paste a file, "
+                ."NEVER ask \"may I read …?\", and NEVER claim you lack filesystem access — you have it, through \"reads\"."
             : "Repository state: this repository is EMPTY (no tracked files yet) — the project is greenfield. The first work will be scaffolding the project structure; factor that into the scope you agree on.";
 
         $prompt = <<<PROMPT
@@ -784,13 +832,22 @@ You must respond ONLY with a JSON object of this exact shape (no markdown fences
   "reads": ["optional/repo/path.php", "some/dir/", "tree"]
 }
 
+To inspect files, your reply looks EXACTLY like this — no permission question, just the read:
+{
+  "reply": "Let me check the current dependency versions before finalizing scope.",
+  "questions": [],
+  "consensus_reached": false,
+  "reads": ["composer.json", "package.json"]
+}
+On the next turn you will receive those file contents as a system note; then continue.
+
 Rules:
 1. New ambiguities go in "questions" — one entry per question, never buried in "reply".
 2. "consensus_reached" may only be true when every question you ever raised has been answered AND this turn raises none. The engine enforces this regardless of what you claim.
 3. When consensus_reached is true, "reply" must restate the agreed scope in a few sentences.
 4. Keep "reply" concise; the owner reads it in a chat pane.
 5. The owner may answer a question in their own words instead of picking an option — including deferring to you ("your call"). Treat a deferral as a real answer: make a sensible decision, state it explicitly in "reply", and do not re-ask.
-6. If you need to see the ACTUAL contents of files to decide, put them in "reads" (repo-relative paths). You may request several at once, a directory (path ending in "/") for its listing, or "tree" for the whole file tree. On an inspection turn leave "questions" empty and "consensus_reached" false — you'll be given the contents and can continue. You have a limited number of inspection rounds per turn, so gather what you need, then ask or conclude. Prefer the project's own summary docs (architecture.md, roadmap.md, decisions.md) when they exist; only read source when you genuinely need specifics. Never ask the owner to paste files you can read yourself; only tracked files are readable (no secrets).
+6. When you need to see the ACTUAL contents of files to decide, READ THEM — put the repo-relative paths in "reads". Do this yourself; it is never a question and never needs approval. You may request several at once, a directory (path ending in "/") for its listing, or "tree" for the whole file tree. On an inspection turn leave "questions" empty and "consensus_reached" false — you'll be given the contents and can continue. You have a limited number of inspection rounds per turn, so gather what you need, then ask or conclude. Prefer the project's own summary docs (architecture.md, roadmap.md, decisions.md) when they exist; only read source when you genuinely need specifics. Only tracked files are readable (no secrets). FORBIDDEN: asking the owner to paste a file, asking permission to read ("may I check …?"), or claiming you have no file access — all three are always wrong; emit "reads" instead. If the owner ever tells you to go check / read the repo, your reply that turn MUST carry the paths in "reads".
 PROMPT;
 
         if ($extraSystemPrompt !== null && trim($extraSystemPrompt) !== '') {
