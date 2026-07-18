@@ -30,6 +30,17 @@ class RoleSeeder extends Seeder
                 'model' => config('majordom.builder.gateway_model'),
                 'meta' => ['managed_model' => config('majordom.builder.model')],
             ],
+            // Builder Selection (M14b): the frontier model bound as a Builder,
+            // selected per task (bootstrap / security / hard refactors). Distinct
+            // from 'architect' (role separation) though it defaults to the same
+            // model — bind it to claude / deepseek / glm here per project needs.
+            [
+                'name' => 'frontier_builder',
+                'provider' => 'openrouter',
+                'model' => config('majordom.frontier_builder.model'),
+                'temperature' => config('majordom.frontier_builder.temperature'),
+                'max_tokens' => config('majordom.frontier_builder.max_tokens'),
+            ],
         ];
 
         foreach ($roles as $data) {
