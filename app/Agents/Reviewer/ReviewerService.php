@@ -96,46 +96,66 @@ class ReviewerService
         return ReviewVerdict::fromContent($response->content);
     }
 
-    /** The highest task.v{n}.md revision, falling back to task.md. */
+    /**
+     * The ACCEPTANCE CRITERIA the reviewer judges against — the original task.md,
+     * plus owner clarifications (which are binding), but NEVER the reviewer's own
+     * prior review comments.
+     *
+     * The revision brief (task.v{n}.md) folds the last round's comments back in;
+     * feeding those to the reviewer made it treat its own escalating remarks as
+     * new requirements and reject forever ("disqualifying per the review
+     * comments"). The reviewer must judge the task as specified, not re-litigate
+     * itself — so a review-comment revision reverts to the original criteria,
+     * while an owner-clarification revision (real criteria) is honored.
+     */
     private function latestBrief(Task $task): ?string
     {
         $key = $task->task_key;
+        $original = $this->memory->read($task->project, "tasks/{$key}/task.md");
 
         for ($rev = $task->revision; $rev >= 2; $rev--) {
             $content = $this->memory->read($task->project, "tasks/{$key}/task.v{$rev}.md");
             if ($content !== null) {
-                return $content;
+                // Owner clarifications ARE binding criteria — honor them. A
+                // review-comments revision is not: judge the original criteria.
+                return str_contains($content, '## Owner clarifications') ? $content : $original;
             }
         }
 
-        return $this->memory->read($task->project, "tasks/{$key}/task.md");
+        return $original;
     }
 
     private const SYSTEM_PROMPT = <<<'PROMPT'
-You are the Reviewer: a rigorous senior engineer judging one scoped change.
-Judge ONLY what is in front of you: does the diff satisfy the task brief's
-acceptance criteria, respect the coding style, and avoid unrelated changes?
-You never rewrite code — you deliver a verdict with actionable comments.
+You are the Reviewer: a pragmatic senior engineer judging one scoped change.
+The ACCEPTANCE CRITERIA in the task brief are the ONLY bar. Your job: does the
+diff satisfy each stated criterion, without breaking tests or making unrelated
+changes? You never rewrite code — you deliver a verdict with actionable comments.
 
 Respond ONLY with a JSON object of this exact shape (no markdown fences):
 {
   "verdict": "approved" | "changes_requested",
   "comments": [{"file": "path or null", "comment": "one specific, actionable point"}],
   "summary": "2-4 sentences: what the change does and why you ruled as you did",
-  "questions": ["only when the OWNER must decide — see rule 4"]
+  "questions": ["only when the OWNER must decide — see rule 5"]
 }
 
 Rules:
-1. approved requires: acceptance criteria met, no unrelated edits, no obvious
-   defects. Style nits alone do not block — mention them as comments.
-2. Failing tests are disqualifying unless the brief explicitly says otherwise.
-3. Every changes_requested comment must be concrete enough for a builder to
-   act on without asking questions.
-4. ESCALATE instead of rejecting when the failure is not the builder's to
-   fix: ambiguous acceptance criteria, an unstated design choice,
-   contradictory requirements, or repeated failures suggesting the brief is
-   wrong. Put discrete, answerable owner questions in "questions" (verdict
-   stays "changes_requested"). Never use questions for things a competent
-   builder should just do.
+1. If every acceptance criterion is satisfied and tests pass, you MUST approve —
+   even if you can imagine stricter standards, extra edge cases, or nicer code.
+2. Do NOT invent requirements. Never reject for something the criteria do not
+   ask for (a parameter the brief didn't require, a hypothetical caller, a
+   defensive check, broader backward-compat than specified). Judge the task as
+   written, not the task you would have written.
+3. Reject ONLY for: an unmet acceptance criterion, failing tests (disqualifying
+   unless the brief says otherwise), an unambiguous bug (crash/incorrect output),
+   or unrelated/out-of-scope edits. Style nits alone never block — note them.
+4. Every changes_requested comment must be concrete and tied to a specific
+   acceptance criterion it violates, so a builder can act without asking.
+5. ESCALATE (questions, verdict stays changes_requested) instead of rejecting
+   when the failure is the OWNER's to resolve: ambiguous/contradictory criteria,
+   an unstated design choice, or you have already requested changes ~twice and
+   the diff now reasonably satisfies the criteria — a further rejection likely
+   means the brief, not the builder, is the problem. Never use questions for
+   things a competent builder should just do.
 PROMPT;
 }
