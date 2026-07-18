@@ -162,6 +162,11 @@
                     <div class="max-w-[640px] rounded-lg border border-border bg-surface-card px-4 py-3">
                         <div class="flex items-center gap-2 flex-wrap">
                             <span class="font-mono text-meta text-mute">execution #{{ $this->latestExecution->id }}</span>
+                            @if($this->builderBadge)
+                                <span class="font-mono text-meta {{ $this->builderBadge['downgraded'] ? 'text-accent' : 'text-mute' }}">
+                                    · {{ $this->builderBadge['label'] }} Builder
+                                </span>
+                            @endif
                             @foreach($this->latestExecution->nodes as $index => $node)
                                 @if($index > 0)<span class="text-faint">·</span>@endif
                                 @php

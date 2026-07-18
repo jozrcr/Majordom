@@ -446,6 +446,31 @@ class ProjectWorkspace extends Component
         return $this->project->executions()->latest('id')->first();
     }
 
+    /**
+     * The Builder badge for the latest execution (M14b): which Builder its task
+     * uses, and whether a frontier build was downgraded to local for budget.
+     *
+     * @return array{label: string, downgraded: bool}|null
+     */
+    public function getBuilderBadgeProperty(): ?array
+    {
+        $exec = $this->latestExecution;
+        if (! $exec) {
+            return null;
+        }
+        $task = $exec->tasks()->first();
+        if (! $task) {
+            return null;
+        }
+
+        $downgraded = $exec->events()->where('name', 'build.builder_downgraded')->exists();
+        $label = $task->strategy() === \App\Enums\ImplementationStrategy::Frontier
+            ? ($downgraded ? 'Frontier → Local' : 'Frontier')
+            : 'Local';
+
+        return ['label' => $label, 'downgraded' => $downgraded];
+    }
+
     public function getPipelineProperty(): array
     {
         $exec = $this->latestExecution;
