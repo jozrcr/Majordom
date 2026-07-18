@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\ImplementationStrategy;
 use App\Enums\TaskStatus;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -25,13 +26,25 @@ class Task extends Model
         'position',
         'declared_status',
         'description',
+        'implementation_strategy',
     ];
 
     protected function casts(): array
     {
         return [
             'status' => TaskStatus::class,
+            'implementation_strategy' => ImplementationStrategy::class,
         ];
+    }
+
+    /**
+     * Builder Selection (M14b): the strategy this task builds under, defaulting
+     * to Local when unset. Use this (never the raw column) for routing so a null
+     * always resolves to the safe, cheap default.
+     */
+    public function strategy(): ImplementationStrategy
+    {
+        return $this->implementation_strategy ?? ImplementationStrategy::Local;
     }
 
     public function project(): BelongsTo

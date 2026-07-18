@@ -79,6 +79,16 @@ class RoleResolver
                 model: (string) config('majordom.builder.gateway_model'),
                 meta: ['managed_model' => config('majordom.builder.model')],
             ),
+            // Builder Selection (M14b): a frontier model bound as a Builder.
+            // Distinct role from 'architect' even though it shares the default
+            // model — role separation means Architect never reviews its own build.
+            'frontier_builder' => new RoleBinding(
+                name: 'frontier_builder',
+                provider: 'openrouter',
+                model: (string) config('majordom.frontier_builder.model'),
+                temperature: config('majordom.frontier_builder.temperature'),
+                maxTokens: config('majordom.frontier_builder.max_tokens'),
+            ),
             default => throw new InvalidArgumentException("Unknown role: {$name}"),
         };
     }

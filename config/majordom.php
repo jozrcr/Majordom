@@ -74,6 +74,18 @@ return [
         'temperature' => (float) env('MAJORDOM_ARCHITECT_TEMPERATURE', 0.3),
     ],
 
+    // Frontier Builder (M14b Builder Selection): a frontier model acting under
+    // the Builder role for tasks the Architect selects for it (bootstrap,
+    // security-sensitive, hard refactors). Defaults to the Architect's model +
+    // OpenRouter endpoint, but is a DISTINCT role — its output still goes
+    // through the Reviewer (role separation). Bind separately in Settings →
+    // Actors later (claude / deepseek / glm).
+    'frontier_builder' => [
+        'model' => env('MAJORDOM_FRONTIER_BUILDER_MODEL') ?: env('MAJORDOM_ARCHITECT_MODEL', 'deepseek/deepseek-v4-flash'),
+        'max_tokens' => (int) env('MAJORDOM_FRONTIER_BUILDER_MAX_TOKENS', 8000),
+        'temperature' => (float) env('MAJORDOM_FRONTIER_BUILDER_TEMPERATURE', 0.2),
+    ],
+
     // Reviewer defaults to the Architect's model until bound separately in
     // Settings → Actors (GLM 5.2 is the standing candidate).
     'reviewer' => [

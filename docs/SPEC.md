@@ -28,7 +28,7 @@ to Services; Services front Models. Events record everything.
 | **Workflow** | A named template: an ordered chain of steps, each `{type, role, config}` — the node type, the actor (a Role name resolved per project), and per-step tunables (e.g. `rescue_role` on review steps). Legacy plain-string chains normalize on read (`ChainStep`). Builtins seeded; custom chains editable in Settings. | DB (chain JSON) |
 | **Execution** | One run of a Workflow against a Project (an "implement this feature" instance). Holds status, autonomy profile, current node, frontier-spend counter + budget cap. | DB |
 | **Milestone** | A chunk of the roadmap the Architect defined. Belongs to a Project; realized within Executions. | DB (+ `roadmap.md`) |
-| **Task** | The atomic unit the Builder executes. Has a `role.md` + versioned `task.md` briefs, a feature branch (checked out in its own worktree), a status. | DB (+ files) |
+| **Task** | The atomic unit the Builder executes. Has a `role.md` + versioned `task.md` briefs, a feature branch (checked out in its own worktree), a status, and an `implementation_strategy` (Builder Selection, M14b — which class of Builder implements it; null = local). | DB (+ files) |
 | **Node / Step** | A unit of the workflow (control / AI / dev / runtime / human). Records inputs, outputs, timing. | DB |
 | **Role** | A responsibility (Architect/Builder/Reviewer) bound to a Service. | DB / config |
 | **Service** | A concrete endpoint fulfilling a role/`capability` (frontier API, or a metallama target). | DB / config |
@@ -70,6 +70,18 @@ notify* vs *auto-proceed & collect*.
      operates in the user's checkout, so the user's working copy stays
      untouched even mid-overnight-run. Emits nothing model-heavy in parallel.
 5. **Build** *(AI: Builder via harness)* — per Task, sequentially in v1
+   - **Builder Selection (M14b):** the Architect *selects* a Builder per task
+     rather than executing itself. A Task carries `implementation_strategy`
+     (`local` default → local Qwen; `frontier` → a frontier model bound as
+     `frontier_builder`). `BuildNode` routes on it — the node is model-agnostic,
+     so this is a pure routing decision; whatever builds still flows execute →
+     test → **review** (role separation: a frontier Builder never reviews its
+     own output). `ImplementationStrategy::builderRole()` maps strategy → role;
+     `BuilderSelector::assign()` is the single write seam (Architect decompose,
+     escalation "select stronger Builder", owner UI) and emits
+     `task.builder_selected`; `BuildNode` emits `build.builder_selected` naming
+     the actual actor. This is the proactive generalization of the reactive
+     *Frontier rescue* below (§7). `hybrid`/`auto` (telemetry-driven) reserved.
    - Harness runs Aider(Qwen) in the task's worktree with `role.md`+`task.md`.
      Emits `TaskDelegated` → `BuilderStarted` → `BuilderProgress*`.
    - Builder may escalate a blocking question → **[gate]** Human intervenes.
