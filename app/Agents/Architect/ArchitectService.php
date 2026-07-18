@@ -686,12 +686,18 @@ MD;
     }
 
     /**
-     * Regenerate a task's build brief from the CURRENT (revised) roadmap so a
-     * redefine restart doesn't rebuild the stale brief (M14a/T-62). decomposeTask
-     * skips when a non-empty brief exists, so clear it first; if regeneration
-     * comes back empty, restore the prior brief so the restart is never blocked
-     * on a missing task.md.
+     * Regenerate a task's build brief from the CURRENT roadmap so a restart
+     * doesn't rebuild the stale (possibly poisoned) brief (M14a/T-62, reused by
+     * the failed-task retry recovery in M14b). decomposeTask skips when a
+     * non-empty brief exists, so clear it first; if regeneration comes back
+     * empty, restore the prior brief so the restart is never blocked on a
+     * missing task.md.
      */
+    public function refreshTaskBrief(Project $project, string $taskKey): void
+    {
+        $this->regenerateBriefForRestart($project, $taskKey);
+    }
+
     private function regenerateBriefForRestart(Project $project, string $taskKey): void
     {
         $task = $project->tasks()->where('task_key', $taskKey)->latest('id')->first();

@@ -254,6 +254,28 @@ class ProjectWorkspace extends Component
     }
 
     /**
+     * Recovery for a parked/failed task (M14b): regenerate a fresh brief and
+     * relaunch the build, optionally escalating to the frontier Builder. Backs
+     * the escalation menu's Retry / Select-stronger-Builder actions.
+     */
+    public function retryTask(string $taskKey, bool $escalate = false): void
+    {
+        $task = $this->project->tasks()->where('task_key', $taskKey)->latest('id')->first();
+        if ($task === null) {
+            return;
+        }
+
+        \App\Jobs\RunTaskRetry::dispatch(
+            $this->project->id,
+            $taskKey,
+            $escalate,
+            in_array($this->buildProfile, ['attended', 'overnight', 'full_auto'], true) ? $this->buildProfile : 'attended',
+        );
+
+        $this->project->update(['status' => \App\Enums\ProjectStatus::Working, 'last_activity_at' => now()]);
+    }
+
+    /**
      * Opt-in actor rights (M14b): set the Architect's repository-access tier.
      * Guards the gated Commands tier server-side (not just in the UI) so it can
      * never be granted before a sandbox exists.
