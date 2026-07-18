@@ -463,7 +463,9 @@ class ProjectWorkspace extends Component
             return null;
         }
 
-        $downgraded = $exec->events()->where('name', 'build.builder_downgraded')->exists();
+        $downgraded = \App\Models\Event::where('execution_id', $exec->id)
+            ->where('name', 'build.builder_downgraded')
+            ->exists();
         $label = $task->strategy() === \App\Enums\ImplementationStrategy::Frontier
             ? ($downgraded ? 'Frontier → Local' : 'Frontier')
             : 'Local';

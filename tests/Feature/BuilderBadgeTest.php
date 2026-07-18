@@ -13,7 +13,7 @@ uses(RefreshDatabase::class);
 
 test('shows local builder badge for default strategy', function () {
     $project = Project::factory()->create();
-    $execution = Execution::create(['project_id' => $project->id, 'status' => 'idle']);
+    $execution = Execution::create(['project_id' => $project->id, 'status' => 'completed']);
     Task::create([
         'project_id' => $project->id,
         'execution_id' => $execution->id,
@@ -28,7 +28,7 @@ test('shows local builder badge for default strategy', function () {
 
 test('shows frontier downgraded badge when event exists', function () {
     $project = Project::factory()->create();
-    $execution = Execution::create(['project_id' => $project->id, 'status' => 'idle']);
+    $execution = Execution::create(['project_id' => $project->id, 'status' => 'completed']);
     Task::create([
         'project_id' => $project->id,
         'execution_id' => $execution->id,
