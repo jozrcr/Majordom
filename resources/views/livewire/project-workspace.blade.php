@@ -137,6 +137,27 @@
                     </div>
                 @endif
 
+                @if($this->retryableTask)
+                    <div class="max-w-[640px] rounded-lg border border-status-failed/40 bg-surface-raised p-4 space-y-3">
+                        <p class="font-mono text-micro uppercase tracking-[.14em] text-failed-text">Task stuck — recover</p>
+                        <p class="text-body-sm text-text">
+                            <span class="font-mono">{{ $this->retryableTask['key'] }}</span> — {{ $this->retryableTask['title'] }}
+                        </p>
+                        @if($this->retryableTask['reason'])
+                            <p class="font-mono text-meta text-mute">{{ $this->retryableTask['reason'] }}</p>
+                        @endif
+                        <div class="flex flex-wrap items-center gap-3">
+                            <button wire:click="retryTask('{{ $this->retryableTask['key'] }}', false)" wire:loading.attr="disabled" class="rounded-lg border border-border-hover px-3 py-1.5 text-body-sm font-medium text-hi hover:bg-surface-active disabled:opacity-55">
+                                Retry with a fresh brief
+                            </button>
+                            <button wire:click="retryTask('{{ $this->retryableTask['key'] }}', true)" wire:loading.attr="disabled" class="rounded-lg bg-accent px-3 py-1.5 text-body-sm font-semibold text-accent-ink disabled:opacity-55">
+                                Retry on the frontier Builder
+                            </button>
+                        </div>
+                        <p class="font-mono text-meta text-faint">regenerates the brief from the current roadmap, then rebuilds</p>
+                    </div>
+                @endif
+
                 @if($this->latestExecution)
                     <div class="max-w-[640px] rounded-lg border border-border bg-surface-card px-4 py-3">
                         <div class="flex items-center gap-2 flex-wrap">

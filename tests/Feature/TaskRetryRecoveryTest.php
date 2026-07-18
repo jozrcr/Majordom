@@ -71,6 +71,22 @@ it('escalates the retry to the frontier Builder when asked', function () {
         ->and(Event::where('project_id', $project->id)->where('name', 'task.builder_selected')->count())->toBe(1);
 });
 
+it('shows the recovery card for a failed task on the latest execution', function () {
+    $project = Project::factory()->create();
+    $execution = \App\Models\Execution::factory()->create([
+        'project_id' => $project->id,
+        'status' => \App\Enums\ExecutionStatus::Completed,
+        'meta' => ['parked_reason' => 'Reviewer still requesting changes after 5 revisions', 'abandoned' => true],
+    ]);
+    $task = Task::factory()->create(['project_id' => $project->id, 'task_key' => 'T-014', 'title' => 'The tricky one', 'status' => TaskStatus::Failed]);
+    $execution->tasks()->save($task);
+
+    Livewire::test(ProjectWorkspace::class, ['project' => $project])
+        ->assertSee('Task stuck')
+        ->assertSee('T-014')
+        ->assertSee('Retry on the frontier Builder');
+});
+
 it('the workspace action dispatches the retry job', function () {
     Queue::fake();
     $project = Project::factory()->create();

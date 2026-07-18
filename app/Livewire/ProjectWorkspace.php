@@ -254,6 +254,44 @@ class ProjectWorkspace extends Component
     }
 
     /**
+     * A failed/parked task the owner can recover (M14b). Surfaces the retry card
+     * when the latest execution parked, or its task failed (including an
+     * abandoned run like TEST-M12bis's T-014). Null when there's nothing to fix.
+     *
+     * @return array{key: string, title: string, reason: ?string, strategy: string}|null
+     */
+    public function getRetryableTaskProperty(): ?array
+    {
+        $exec = $this->latestExecution;
+        if (! $exec) {
+            return null;
+        }
+
+        $task = $exec->tasks()->first();
+        if (! $task) {
+            return null;
+        }
+
+        $parked = $exec->status === \App\Enums\ExecutionStatus::Parked;
+        $failed = $task->status === \App\Enums\TaskStatus::Failed;
+        if (! $parked && ! $failed) {
+            return null;
+        }
+
+        // Don't compete with a live "Start build" affordance.
+        if ($this->plannedTask !== null) {
+            return null;
+        }
+
+        return [
+            'key' => $task->task_key,
+            'title' => $task->title,
+            'reason' => $exec->meta['parked_reason'] ?? null,
+            'strategy' => $task->strategy()->value,
+        ];
+    }
+
+    /**
      * Recovery for a parked/failed task (M14b): regenerate a fresh brief and
      * relaunch the build, optionally escalating to the frontier Builder. Backs
      * the escalation menu's Retry / Select-stronger-Builder actions.
