@@ -27,6 +27,7 @@ class Project extends Model
         'workflow_id',
         'confirm_commits',
         'capability_level',
+        'actor_budgets',
     ];
 
     protected function casts(): array
@@ -37,7 +38,23 @@ class Project extends Model
             'archived_at' => 'datetime',
             'confirm_commits' => 'boolean',
             'capability_level' => CapabilityLevel::class,
+            'actor_budgets' => 'array',
         ];
+    }
+
+    /**
+     * Per-actor daily spend budget for this project (M14b), or null when the
+     * actor is excluded/uncapped. Shape: ['daily_cap_usd' => float, 'backup' =>
+     * '<role>'|null]. Enforcement lives in App\Core\Usage\SpendGuard.
+     *
+     * @return array{daily_cap_usd?: float, backup?: ?string}|null
+     */
+    public function actorBudget(string $role): ?array
+    {
+        $budgets = $this->actor_budgets ?? [];
+        $entry = $budgets[$role] ?? null;
+
+        return is_array($entry) ? $entry : null;
     }
 
     /**
