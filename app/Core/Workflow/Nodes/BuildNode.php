@@ -38,9 +38,26 @@ class BuildNode extends NodeJob
         // lives on the TASK — the Architect selects a Builder per task, not per
         // workflow — and the build node is model-agnostic, so this is purely a
         // routing decision. Whatever builds still flows execute → test → review.
-        $roleName = $task->strategy() === \App\Enums\ImplementationStrategy::Frontier
+        //
+        // Budget fallback (owner policy): a frontier build whose budget is gone
+        // DOWNGRADES to the local Builder (free) so the loop keeps moving rather
+        // than stalling — see SpendGuard::mustBuildLocal.
+        $wantsFrontier = $task->strategy() === \App\Enums\ImplementationStrategy::Frontier;
+        $downgraded = $wantsFrontier && \App\Core\Usage\SpendGuard::mustBuildLocal($execution, $task);
+        $roleName = ($wantsFrontier && ! $downgraded)
             ? 'frontier_builder'
             : ($node->input['role'] ?? 'builder');
+
+        if ($downgraded) {
+            app(\App\Core\Events\EventRecorder::class)->record(
+                $task->project,
+                'build.builder_downgraded',
+                ['from' => 'frontier_builder', 'to' => $roleName, 'reason' => 'budget'],
+                $execution,
+                $roleName,
+            );
+        }
+
         $binding = app(RoleResolver::class)->resolve($roleName, $task->project);
 
         $endpoint = ProviderEndpoint::named($binding->provider);

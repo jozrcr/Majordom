@@ -270,6 +270,16 @@ invitations. **Commit and push never auto-run** (PHILOSOPHY §2). Overnight runs
 also carry a **frontier-spend cap** per Execution; exceeding it parks the
 Execution in the inbox like any other gate.
 
+**Per-role spend caps + full_auto local fallback (M14b, `SpendGuard`):** the flat
+per-Execution cap is a blunt total — the real cost lever is the frontier Builder,
+while the Reviewer (a cheap model) is inconsequential. `workflow.role_spend_caps.<role>`
+sets a per-role ceiling (frontier_builder capped by default; reviewer/architect/
+builder uncapped). When a frontier build's budget is gone it **downgrades to the
+local Builder** (free) via `SpendGuard::mustBuildLocal`. Under **full_auto** the
+flat cap no longer hard-parks (owner policy: keep moving) — builds go local and
+the cheap Reviewer keeps running; **attended/overnight still park** on the flat
+cap. Emits `build.builder_downgraded`.
+
 Profiles are data, not code — new profiles can be added without touching the
 engine (the engine only asks "is this gate blocking under the active profile?").
 

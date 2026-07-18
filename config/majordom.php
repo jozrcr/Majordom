@@ -28,6 +28,17 @@ return [
         'max_revisions' => (int) env('MAJORDOM_MAX_REVISIONS', 3),
         // Overnight executions carry a frontier-spend ceiling (SPEC §8).
         'overnight_spend_cap_usd' => (float) env('MAJORDOM_OVERNIGHT_SPEND_CAP', 1.00),
+        // Per-role spend caps (M14b): the expensive frontier Builder is the one
+        // worth bounding; the Reviewer (deepseek-v4-flash) is inconsequential,
+        // so it stays uncapped. When a role's per-execution spend exceeds its
+        // cap, a full_auto build DOWNGRADES to the local Builder (free) so the
+        // loop keeps moving instead of stalling; attended/overnight park. A role
+        // absent here (or null) is uncapped. Overridable via Setting
+        // `workflow.role_spend_caps.<role>`.
+        'role_spend_caps' => [
+            'frontier_builder' => (float) env('MAJORDOM_FRONTIER_BUILDER_SPEND_CAP', 1.00),
+            // architect / reviewer / builder: uncapped by default.
+        ],
     ],
 
     // Autonomy profiles are DATA (SPEC §8): per gate, 'block' pings the

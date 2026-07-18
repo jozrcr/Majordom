@@ -40,15 +40,20 @@ abstract class NodeJob implements ShouldQueue
             return;
         }
 
-        // Frontier-spend cap (SPEC §8): exceeding it parks like any gate.
-        if ($execution->spend_cap_usd !== null) {
-            $spent = (float) \App\Models\UsageRecord::where('execution_id', $execution->id)->sum('cost_usd');
+        // Frontier-spend cap (SPEC §8). Exceeding the flat total cap parks for
+        // the owner — EXCEPT under full_auto, which must keep moving: there, a
+        // frontier build downgrades to the local Builder (BuildNode, free) and
+        // the cheap Reviewer keeps running, so the flat cap does not hard-park
+        // (M14b owner policy). The frontier Builder's own per-role cap still
+        // bounds expensive spend via SpendGuard::mustBuildLocal.
+        if ($execution->spend_cap_usd !== null && \App\Core\Usage\SpendGuard::flatCapParks($execution)) {
+            $spent = \App\Core\Usage\SpendGuard::totalSpent($execution);
             if ($spent > (float) $execution->spend_cap_usd) {
                 $node->fail(['reason' => 'spend cap']);
                 $msg = sprintf('Frontier spend cap exceeded ($%.4f of $%.4f) — parked for the owner.', $spent, $execution->spend_cap_usd);
                 $execution->park($msg, ParkedReason::Budget);
                 $execution->project->update(['status' => ProjectStatus::NeedsYou, 'last_activity_at' => now()]);
-                
+
                 app(EscalationRouter::class)->route($execution, ParkedReason::Budget, $msg, $node->type);
 
                 return;
