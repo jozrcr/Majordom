@@ -97,9 +97,13 @@ return [
         'temperature' => (float) env('MAJORDOM_FRONTIER_BUILDER_TEMPERATURE', 0.2),
     ],
 
-    // Reviewer defaults to the Architect's model until bound separately in
-    // Settings → Actors (GLM 5.2 is the standing candidate).
+    // M16-D: the Reviewer IS the Architect — one mind judges the milestone.
+    // By default there is no separate reviewer model; the reviewer role mirrors
+    // the Architect binding (see RoleResolver). Set MAJORDOM_REVIEWER_MODEL only
+    // to opt into a DISTINCT reviewer (e.g. GLM for diversity); `distinct` then
+    // flips true and the seeder/resolver treat it as its own actor.
     'reviewer' => [
+        'distinct' => (bool) env('MAJORDOM_REVIEWER_MODEL'),
         'model' => env('MAJORDOM_REVIEWER_MODEL') ?: env('MAJORDOM_ARCHITECT_MODEL', 'deepseek/deepseek-v4-flash'),
         'max_tokens' => (int) env('MAJORDOM_REVIEWER_MAX_TOKENS', 3000),
         'temperature' => (float) env('MAJORDOM_REVIEWER_TEMPERATURE', 0.2),
