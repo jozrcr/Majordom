@@ -173,3 +173,39 @@ it('a redefine that supersedes a milestone removes its orphaned worktree and bra
     // The surviving milestone is never touched.
     \Illuminate\Support\Facades\Process::assertDidntRun(fn ($run) => $run->command === ['git', 'branch', '-D', 'majordom/M1']);
 });
+
+it('a redefine that omits a BUILT milestone spares its worktree and branch (M16-D2 freeze)', function () {
+    config([
+        'majordom.memory_root' => sys_get_temp_dir().'/mj-redef-built-'.uniqid(),
+        'majordom.worktrees_root' => $wtRoot = sys_get_temp_dir().'/mj-wt-built-'.uniqid(),
+    ]);
+    app()->forgetInstance(\App\Projects\Repositories\WorktreeManager::class);
+
+    $repoDir = sys_get_temp_dir().'/mj-redef-built-repo-'.uniqid();
+    mkdir($repoDir.'/.git', 0755, true);
+
+    $project = Project::factory()->create(['slug' => 'proj', 'repo_path' => $repoDir]);
+    $m1 = \App\Models\Milestone::factory()->create(['project_id' => $project->id, 'milestone_key' => 'M1', 'position' => 1]);
+    $m2 = \App\Models\Milestone::factory()->create(['project_id' => $project->id, 'milestone_key' => 'M2', 'position' => 2]);
+    // M2 is BUILT — an approved task makes deriveStatus() 'done', so a revision
+    // that drops its key must NOT destroy the unmerged work.
+    Task::factory()->create(['project_id' => $project->id, 'milestone_id' => $m1->id, 'task_key' => 'T-001', 'status' => TaskStatus::Approved, 'declared_status' => 'done', 'position' => 1]);
+    Task::factory()->create(['project_id' => $project->id, 'milestone_id' => $m2->id, 'task_key' => 'T-002', 'status' => TaskStatus::Approved, 'declared_status' => 'done', 'position' => 1]);
+
+    mkdir($wtRoot.'/proj/M2', 0755, true);
+    \Illuminate\Support\Facades\Process::fake();
+
+    app()->instance(Provider::class, new RedefineScriptedProvider(['# brief']));
+    $service = new ArchitectService(app(ProviderRegistry::class), MemoryStore::fromConfig(), app(RepoIndex::class));
+
+    // The revision keeps only M1 — but M2 is built, so it must be spared.
+    seedRevision($project, ['roadmap_md' => "## M1 — Skeleton\n- [x] T-001 — Do the thing\n", 'summary' => 'dropped built M2']);
+    $service->approvePlan($project);
+
+    // M2's branch is never deleted, and M2 survives in the DB (frozen).
+    \Illuminate\Support\Facades\Process::assertDidntRun(fn ($run) => $run->command === ['git', 'branch', '-D', 'majordom/M2']);
+    \Illuminate\Support\Facades\Process::assertDidntRun(fn ($run) => $run->command === ['git', 'worktree', 'remove', '--force', $wtRoot.'/proj/M2']);
+    expect(\App\Models\Milestone::where('project_id', $project->id)->where('milestone_key', 'M2')->exists())->toBeTrue();
+    // No milestone was reconciled away.
+    expect($project->events()->where('name', 'worktrees.reconciled')->exists())->toBeFalse();
+});

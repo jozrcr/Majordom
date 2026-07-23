@@ -13,6 +13,7 @@ use App\Core\Usage\UsageLedger;
 use App\Enums\MessageRole;
 use App\Enums\ProjectStatus;
 use App\Models\ConsensusMessage;
+use App\Models\Milestone;
 use App\Models\Project;
 use App\Models\Question;
 use App\Models\Task;
@@ -814,6 +815,34 @@ MD;
      */
     private function applyRevisedRoadmap(Project $project, string $roadmapMd, ?string $architectureMd, string $summary): void
     {
+        // M16-D2 WS3 ordering guard: a revision must not race an open merge gate.
+        // Merging + resuming while a redefine is in flight left two parallel
+        // worktrees on divergent bases (the small-space-sim e2e). Block the
+        // revision until the owner resolves the gate — merge or defer it first.
+        $openGate = $project->approvals()
+            ->where('type', \App\Enums\ApprovalType::MilestoneMerge)
+            ->where('status', \App\Enums\ApprovalStatus::Open)
+            ->first();
+        if ($openGate !== null) {
+            $gm = Milestone::find($openGate->payload['milestone_id'] ?? null);
+            $mkey = $gm?->milestone_key ?? 'a milestone';
+            $project->consensusMessages()->create([
+                'role' => MessageRole::System,
+                'content' => "There's an open merge gate for {$mkey} — merge or defer it before revising the plan, so the worktrees don't diverge. Your revision was NOT applied; resolve the gate, then propose the revision again.",
+                'meta' => ['revision_blocked' => true],
+            ]);
+            app(EventRecorder::class)->record($project, 'plan.revision_blocked', ['reason' => 'open_merge_gate', 'milestone_key' => $mkey], null, 'system');
+
+            return;
+        }
+
+        // M16-D2 WS2c hard freeze: snapshot built (done/ongoing) work BEFORE the
+        // sync so we can undo any rename/renumber/move the model attempted on a
+        // built key — built work is untouchable; a revision may only reword a
+        // not-started milestone, add tasks to the current/later milestones, or
+        // append new milestones.
+        $built = $this->snapshotBuiltPlan($project);
+
         $this->memory->write($project, 'roadmap.md', $roadmapMd);
         if ($architectureMd !== null && trim($architectureMd) !== '') {
             $this->memory->write($project, 'architecture.md', $architectureMd);
@@ -821,14 +850,34 @@ MD;
 
         app(\App\Projects\Roadmap\RoadmapSync::class)->for($project)->sync();
 
-        // M16-C: reconcile worktrees — a revision that drops milestones leaves
-        // their majordom/<key> worktrees/branches orphaned. Remove them so the
-        // active milestone's worktree is unambiguous (no stale majordom/* left).
+        // Restore the built prefix the model may have disturbed (freeze) — undoes
+        // any rename/renumber/move it attempted on a built key.
+        $this->restoreBuiltPlan($project, $built);
+
+        // M16-C: reconcile worktrees — a revision that drops a NOT-started
+        // milestone leaves its majordom/<key> worktree/branch orphaned. liveKeys is
+        // what the REVISION keeps (not the DB, which never deletes milestone rows);
+        // reconcileMilestones itself spares built milestones (never destroy work).
         $liveKeys = \App\Projects\Roadmap\RoadmapSync::milestoneKeysIn($roadmapMd);
         $reconciled = app(\App\Projects\Repositories\WorktreeManager::class)->reconcileMilestones($project, $liveKeys);
         if ($reconciled !== []) {
             app(EventRecorder::class)->record($project, 'worktrees.reconciled', ['removed' => $reconciled], null, 'system');
         }
+
+        // Drop the DB rows for NOT-started milestones the revision removed, so the
+        // canonical roadmap reflects the true plan. Built milestones are frozen and
+        // kept regardless of whether the revision re-listed them.
+        $liveSet = array_flip($liveKeys);
+        foreach (Milestone::where('project_id', $project->id)->get() as $m) {
+            if (! isset($liveSet[$m->milestone_key]) && $m->deriveStatus() === 'todo') {
+                $m->delete();
+            }
+        }
+
+        // Re-render the canonical roadmap from the reconciled DB so the persisted
+        // roadmap.md matches the frozen state (the Builder's decompose reads it).
+        $canonical = app(\App\Projects\Roadmap\RoadmapSync::class)->for($project)->renderMarkdown();
+        $this->memory->write($project, 'roadmap.md', $canonical);
 
         // T-62: the revised plan must not resume the old, possibly-poisoned
         // cycle — reset the execution loop, then name the task the loop restarts
@@ -859,6 +908,85 @@ MD;
         ]);
 
         app(EventRecorder::class)->record($project, 'plan.redefined', ['firstTaskId' => $firstTaskKey], null, 'architect');
+    }
+
+    /**
+     * Snapshot built (done/ongoing) milestones and tasks before a revision syncs
+     * (M16-D2 freeze). Built work is frozen — a revision may only touch not-started
+     * items — so restoreBuiltPlan uses this to undo any rename/renumber/move the
+     * model attempted on a built key. A built task's milestone is itself always
+     * built (a milestone with any non-todo task never derives 'todo'), so its key
+     * is captured here too and resolves back cleanly on restore.
+     *
+     * @return array{milestones: array<string, array{title: ?string, summary: ?string, position: ?int}>, tasks: array<string, array{milestone_key: ?string, position: ?int, title: ?string, declared_status: ?string}>}
+     */
+    private function snapshotBuiltPlan(Project $project): array
+    {
+        $milestones = [];
+        foreach (Milestone::where('project_id', $project->id)->orderBy('position')->get() as $m) {
+            if ($m->deriveStatus() !== 'todo') {
+                $milestones[$m->milestone_key] = [
+                    'title' => $m->title,
+                    'summary' => $m->summary,
+                    'position' => $m->position,
+                ];
+            }
+        }
+
+        $tasks = [];
+        foreach ($project->tasks()->with('milestone')->get() as $t) {
+            if (in_array(\App\Projects\Roadmap\RoadmapSync::effectiveStatus($t), ['done', 'ongoing'], true)) {
+                $tasks[$t->task_key] = [
+                    'milestone_key' => $t->milestone?->milestone_key,
+                    'position' => $t->position,
+                    'title' => $t->title,
+                    'declared_status' => $t->declared_status,
+                ];
+            }
+        }
+
+        return ['milestones' => $milestones, 'tasks' => $tasks];
+    }
+
+    /**
+     * Re-assert the built prefix a revision's sync may have disturbed (M16-D2
+     * freeze): restore each built milestone's title/summary/position and each
+     * built task's milestone/position/title/declared_status. Recreates a built
+     * milestone the model dropped entirely (updateOrCreate never deletes, so this
+     * is defensive), and re-resolves each built task's milestone_id by key so a
+     * recreated milestone reconnects correctly.
+     *
+     * @param array{milestones: array<string, array>, tasks: array<string, array>} $snapshot
+     */
+    private function restoreBuiltPlan(Project $project, array $snapshot): void
+    {
+        foreach ($snapshot['milestones'] as $key => $data) {
+            Milestone::updateOrCreate(
+                ['project_id' => $project->id, 'milestone_key' => $key],
+                ['title' => $data['title'], 'summary' => $data['summary'], 'position' => $data['position']],
+            );
+        }
+
+        foreach ($snapshot['tasks'] as $key => $data) {
+            $task = $project->tasks()->where('task_key', $key)->first();
+            if ($task === null) {
+                continue; // built tasks are never deleted by sync — nothing to restore
+            }
+
+            $milestoneId = $task->milestone_id;
+            if ($data['milestone_key'] !== null) {
+                $milestoneId = Milestone::where('project_id', $project->id)
+                    ->where('milestone_key', $data['milestone_key'])
+                    ->value('id') ?? $milestoneId;
+            }
+
+            $task->update([
+                'milestone_id' => $milestoneId,
+                'position' => $data['position'],
+                'title' => $data['title'],
+                'declared_status' => $data['declared_status'],
+            ]);
+        }
     }
 
     /**
@@ -1096,9 +1224,33 @@ PROMPT;
         // Phase-awareness (M16-B): pre-plan you converge on a FIRST plan;
         // post-plan the same surface lets the owner refine, add constraints, or
         // request a scope change — a propose_plan then REVISES the existing plan.
-        $goalLine = $this->planAlreadyWritten($project)
-            ? 'A plan has ALREADY been approved for this project (architecture.md and roadmap.md exist; work may be underway). The owner is now steering it. They may ask a question, add a constraint, or request a change to the scope — help with whatever they raise. If they want to change WHAT gets built, reach consensus the same way (ask_owner for anything ambiguous), then call propose_plan with the FULL revised roadmap for their approval. A revision PRESERVES existing milestone/task keys — reword or add tasks, never renumber or drop work that may already be built. If they only want to talk, reply in plain text.'
+        //
+        // M16-D2 grounding: post-plan, the roadmap/architecture live in project
+        // MEMORY, not the tracked repo, so read_file/list_repo cannot reach them.
+        // Without the live plan state below, the model re-plans blind and destroys
+        // built work (the small-space-sim e2e). Inject the authoritative DB state.
+        $planExists = $this->planAlreadyWritten($project);
+        $goalLine = $planExists
+            ? 'A plan has ALREADY been approved for this project and work may be underway. The owner is now STEERING it. Consult the "Current plan state" below — it is the authoritative, live status of every milestone and task; the roadmap/architecture docs in memory are only summarized there. When the owner asks a question or adds a constraint, help directly. When they want to change WHAT gets built, reach consensus (ask_owner for anything ambiguous), then propose_plan with the FULL revised roadmap for their approval. A revision may ONLY reword/expand a not-started milestone, add NEW tasks to the current or a later milestone, or append NEW milestones — it PRESERVES every existing milestone/task key exactly and NEVER renumbers, renames, drops, or re-scopes a built or in-progress item. If a milestone is awaiting a merge decision, ask the owner to resolve that gate before restructuring. If they only want to talk, reply in plain text.'
             : 'Your single goal in this conversation is to reach consensus with the human owner on WHAT to build — before any plan is made.';
+
+        $planStateBlock = '';
+        if ($planExists) {
+            $state = $this->currentPlanState($project);
+            $arch = trim((string) $this->memory->read($project, 'architecture.md'));
+            $decisions = trim((string) $this->memory->read($project, 'decisions.md'));
+
+            $planStateBlock = "\n\n## Current plan state — AUTHORITATIVE (the live built state; trust this over any memory of the roadmap)\n"
+                ."Statuses: [x] built & frozen · [~] in progress · [ ] not started. NEVER renumber, rename, drop, or re-scope a [x] or [~] milestone/task — that work already exists. Only reword/expand a [ ] milestone, add NEW tasks to the current or a later milestone, or append NEW milestones; preserve every existing key.\n\n"
+                .($state !== '' ? $state : '(no milestones recorded yet)');
+
+            if ($arch !== '') {
+                $planStateBlock .= "\n\n## Agreed architecture (architecture.md)\n".mb_substr($arch, 0, 4000);
+            }
+            if ($decisions !== '') {
+                $planStateBlock .= "\n\n## Owner decisions & added context (MUST honor)\n".mb_substr($decisions, 0, 4000);
+            }
+        }
 
         $prompt = <<<PROMPT
 You are the Architect of the software project "{$project->name}" (repository: {$project->repo_path}).
@@ -1116,7 +1268,7 @@ You may only propose_plan once every question you ever raised has been answered.
 
 {$openBlock}
 
-{$repoBlock}
+{$repoBlock}{$planStateBlock}
 PROMPT;
 
         if ($extraSystemPrompt !== null && trim($extraSystemPrompt) !== '') {
@@ -1124,5 +1276,60 @@ PROMPT;
         }
 
         return $prompt;
+    }
+
+    /**
+     * The live, authoritative plan state (M16-D2 grounding). Built from the DB —
+     * every milestone with its derived status and every task with its effective
+     * status — so a post-plan steering turn sees what is actually built and cannot
+     * re-plan blind. The roadmap/architecture docs live in project MEMORY, which
+     * the read tools (scoped to the git repo) cannot reach; this is how the
+     * Architect learns which milestones/tasks exist and which are done.
+     *
+     * Marks any milestone awaiting the owner's merge decision (open MilestoneMerge
+     * gate) so steering resolves that gate before restructuring — the guard that
+     * prevents the divergent two-worktree state (M16-D2 WS3).
+     */
+    private function currentPlanState(Project $project): string
+    {
+        $milestones = Milestone::where('project_id', $project->id)
+            ->orderBy('position')
+            ->get();
+
+        if ($milestones->isEmpty()) {
+            return '';
+        }
+
+        $gatedMilestoneIds = $project->approvals()
+            ->where('type', \App\Enums\ApprovalType::MilestoneMerge)
+            ->where('status', \App\Enums\ApprovalStatus::Open)
+            ->get()
+            ->map(fn ($a) => $a->payload['milestone_id'] ?? null)
+            ->filter()
+            ->all();
+
+        $mark = ['done' => 'x', 'ongoing' => '~', 'todo' => ' '];
+        $lines = [];
+
+        foreach ($milestones as $milestone) {
+            $status = $milestone->deriveStatus();
+            $tag = match ($status) {
+                'done' => ' — BUILT (frozen)',
+                'ongoing' => ' — in progress',
+                default => '',
+            };
+            if (in_array($milestone->id, $gatedMilestoneIds, true)) {
+                $tag .= ' — AWAITING YOUR MERGE DECISION (resolve the gate before restructuring)';
+            }
+
+            $lines[] = "{$milestone->milestone_key} — {$milestone->title}  [{$status}]{$tag}";
+
+            foreach ($milestone->tasks as $task) {
+                $ts = \App\Projects\Roadmap\RoadmapSync::effectiveStatus($task);
+                $lines[] = "  - [{$mark[$ts]}] {$task->task_key} — {$task->title}  ({$ts})";
+            }
+        }
+
+        return implode("\n", $lines);
     }
 }

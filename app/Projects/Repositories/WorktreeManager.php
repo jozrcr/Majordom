@@ -215,6 +215,13 @@ class WorktreeManager
                 continue; // still part of the plan — leave it be
             }
 
+            // M16-D2 freeze: never delete a BUILT milestone's worktree/branch,
+            // even if a revision's roadmap omitted its key — that would destroy
+            // work not yet merged. Only a not-started milestone is reconcilable.
+            if ($milestone->deriveStatus() !== 'todo') {
+                continue;
+            }
+
             $path = $this->pathForMilestone($project, $milestone);
             $branch = $this->branchForMilestone($milestone);
             $cleaned = false;
