@@ -13,12 +13,15 @@ final readonly class MilestoneReviewOutcome
     /**
      * @param array<int, array{task_key: ?string, file: ?string, reason: string}> $items
      * @param string[] $questions
+     * @param ?string $howToTest  On approval: concrete steps the owner can run to
+     *                            verify this milestone end-to-end (M16-A merge gate).
      */
     public function __construct(
         public string $type,
         public string $summary = '',
         public array $items = [],
         public array $questions = [],
+        public ?string $howToTest = null,
     ) {}
 
     public function isApproved(): bool

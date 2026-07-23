@@ -99,44 +99,44 @@ notify* vs *auto-proceed & collect*.
    - Runs the Task's/Project's test command. Emits `TestsStarted` →
      `TestsPassed` / `TestsFailed`. On fail, route back to Build with the failure
      as the next task revision (bounded retry budget).
-7. **Review** *(AI: Reviewer + Human)*
-   - Reviewer judges the task's **cumulative** diff — `base_commit..worktree`,
-     where `base_commit` is the worktree HEAD captured at the task's first build
-     (DelegateNode) — NOT just the last aider run's incremental change (M14b fix).
-     A Builder that edits minimally on a revision/retry produces a tiny diff;
-     judged alone against the full acceptance criteria it is always wrongly
-     rejected even when earlier revisions already satisfy them (the infinite
-     re-park loop a *smart* frontier Builder exposes). Falls back to the
-     incremental diff when there's no base (legacy task / greenfield).
-   - Reviewer reads diff + criteria + style + handoff + test result. Emits
-     `ReviewRequested` → `ReviewApproved` / `ReviewChangesRequested`. On changes,
-     comments become the next task revision (`task.v2.md`, …) → back to Build
-     (bounded loop — `workflow.max_revisions`, default 3; exhausting the
-     budget parks the execution with the last revision brief written).
-     Files the Reviewer flagged are handed to the next Build as harness
-     file hints, pointing the Builder at what it keeps missing.
-   - **Escalation:** when the failure is the owner's to resolve (ambiguous
-     criteria, unstated design choice), the Reviewer returns `questions`
-     instead of comments → execution-linked Questions, node waits. The last
-     answer appends *Owner clarifications* to `task.v{n+1}.md`, RESETS the
-     revision budget (`clarified_at_revision`) and re-arms build → review.
-   - **Frontier rescue:** a review step may carry `config.rescue_role`; on
-     budget exhaustion the build step's actor is swapped to that role for
-     one more full loop (one rescue per execution) before parking.
-   - **[gate]** Human may be asked to arbitrate or approve the review.
-8. **Accept** *(Human: Manual test)* — configurable, on by default
-   - **[gate]** Human is invited to test the feature. `HumanTestRequested` →
-     `HumanTestPassed` / rejected (→ back to Build with notes).
-9. **Commit** *(Dev: Git + Human)*
-   - Majordom prepares a `CommitSuggestion` (message + diff). Emits
-     `CommitSuggested`. **[gate]** Human commits; optionally pushes.
-     `Committed` / `Pushed`. **Default: no push without the human.**
+7. **Checkpoint & auto-advance** *(within a milestone)*
+   - Per-task review is gone (M15). Once a task is test-green its work is
+     already committed to the shared milestone branch `majordom/<key>`; the
+     `confirm_commits` checkpoint accepts it (task → Approved, worktree detached)
+     and `TaskChain::advance` decomposes + starts the next task in the same
+     milestone. No per-task human gate, no promotion to main here.
+8. **Milestone review** *(AI: Architect-as-Reviewer, at the boundary)*
+   - When a milestone's tasks are all done (`milestone.tasks_complete`), the
+     Architect (as Reviewer — one mind, §Role) judges the milestone's
+     **cumulative** diff at the right altitude: `base_commit..HEAD` on
+     `majordom/<key>`, where `base_commit` is the first task's recorded fork
+     point (falls back to `main...HEAD`). Read via `MilestoneDiff` — the single
+     definition of "the milestone's work", shared by the review and the gate.
+   - Tool-driven (`MilestoneReviewService`): `read_diff`/`read_file` ground the
+     judgment, then exactly one of `approve_milestone` (with a `how_to_test`) /
+     `request_changes` / `ask_owner`. `request_changes` → **one** keyed fix-task
+     whose acceptance criteria are the findings; it rebuilds and re-reviews,
+     bounded by `MAX_REVIEW_ROUNDS` (2) then escalates instead of looping. An
+     empty diff fast-approves.
+9. **Merge gate** *(Human: review surface + promotion)*
+   - Approve / escalate / stuck all raise the **[gate]** `MilestoneMerge`
+     approval — never a dead end. The gate is a real review surface (M16-A): its
+     payload carries a frozen `recap` — milestone goal, each task with its
+     acceptance criteria, the `git diff --numstat` diffstat, the reviewer's
+     verdict, and the `how_to_test` — assembled once by `MilestoneRecap` so the
+     decision never depends on a worktree that may later be merged away.
+   - Granting promotes the branch: `CommitService::mergeMilestone` runs
+     `git merge --no-ff majordom/<key>` into the project's `repo_path`, removes
+     the milestone worktree, optionally pushes, then `startNextMilestone`. Under
+     **full_auto** the merge is automatic on approval; every other profile waits.
+     **Default: no push without the human.**
 10. **Close** — `current_iteration.md` and `roadmap.md` updated; next milestone
     or `WorkflowCompleted`.
 
 **Batch / overnight:** an Execution (or several, queued) may run under the
 *Overnight* profile — phases 1–8 auto-proceed where non-destructive, piling every
-human-needed item into the morning inbox; phase 9 (commit/push) **always** waits.
+human-needed item into the morning inbox; phase 9 (the merge gate) **always**
+waits (only full_auto promotes to main without you).
 
 ## 4. Node types (v1, coding-scoped)
 

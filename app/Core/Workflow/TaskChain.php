@@ -3,6 +3,7 @@
 namespace App\Core\Workflow;
 
 use App\Agents\Architect\ArchitectService;
+use App\Agents\Reviewer\MilestoneRecap;
 use App\Agents\Reviewer\MilestoneReviewOutcome;
 use App\Agents\Reviewer\MilestoneReviewService;
 use App\Core\Events\EventRecorder;
@@ -112,14 +113,14 @@ class TaskChain
             // Convergence guard: two fix rounds and still not passing — the brief,
             // not the build, is likely the problem. Escalate; don't loop.
             app(EventRecorder::class)->record($project, 'milestone.review_stuck', ['milestone_key' => $milestone->milestone_key, 'summary' => $outcome->summary], null, 'reviewer');
-            $this->raiseMergeGate($project, $milestone, $profile, "the Architect asked for changes twice and it still isn't passing — likely the brief, not the build. Its note: {$outcome->summary}. Merge as-is, or steer it (redefine / chat)");
+            $this->raiseMergeGate($project, $milestone, $profile, "the Architect asked for changes twice and it still isn't passing — likely the brief, not the build. Its note: {$outcome->summary}. Merge as-is, or steer it (redefine / chat)", $outcome);
 
             return;
         }
 
         if ($outcome->isEscalate()) {
             app(EventRecorder::class)->record($project, 'milestone.review_escalated', ['milestone_key' => $milestone->milestone_key, 'questions' => $outcome->questions], null, 'reviewer');
-            $this->raiseMergeGate($project, $milestone, $profile, 'the Architect needs your call — '.trim($outcome->summary.' '.implode(' ', $outcome->questions)));
+            $this->raiseMergeGate($project, $milestone, $profile, 'the Architect needs your call — '.trim($outcome->summary.' '.implode(' ', $outcome->questions)), $outcome);
 
             return;
         }
@@ -139,21 +140,33 @@ class TaskChain
             }
         }
 
-        $this->raiseMergeGate($project, $milestone, $profile);
+        $this->raiseMergeGate($project, $milestone, $profile, null, $outcome);
     }
 
     /** Raise the human milestone-merge gate. $note, when set, explains a review
-     *  concern the owner must weigh before merging (never a silent dead end). */
-    private function raiseMergeGate(Project $project, Milestone $milestone, string $profile, ?string $note = null): void
+     *  concern the owner must weigh before merging (never a silent dead end).
+     *  $outcome (when the review ran) feeds the recap the gate shows the owner. */
+    private function raiseMergeGate(Project $project, Milestone $milestone, string $profile, ?string $note = null, ?MilestoneReviewOutcome $outcome = null): void
     {
         $title = $note !== null
             ? "Milestone {$milestone->milestone_key}: {$note}"
             : "Milestone {$milestone->milestone_key} complete — merge into main + start next";
 
+        // A rich recap — goal, tasks + acceptance criteria, diffstat, review
+        // verdict, how-to-test — so the gate is a real review surface, not a
+        // blind yes/no (M16-A). Frozen into the payload: the worktree may be gone
+        // by the time the owner looks.
+        $recap = app(MilestoneRecap::class)->for($milestone, $outcome);
+
         $project->approvals()->create([
             'type' => ApprovalType::MilestoneMerge,
             'title' => $title,
-            'payload' => ['milestone_id' => $milestone->id, 'profile' => $profile],
+            'payload' => [
+                'milestone_id' => $milestone->id,
+                'profile' => $profile,
+                'note' => $note,
+                'recap' => $recap,
+            ],
             'status' => ApprovalStatus::Open,
         ]);
     }

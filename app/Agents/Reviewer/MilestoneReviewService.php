@@ -11,11 +11,10 @@ use App\Agents\Providers\ToolMessages;
 use App\Core\Usage\UsageLedger;
 use App\Models\Milestone;
 use App\Projects\Memory\MemoryStore;
+use App\Projects\Repositories\MilestoneDiff;
 use App\Projects\Repositories\RepoIndex;
-use App\Projects\Repositories\WorktreeManager;
 use App\Support\RoleBinding;
 use App\Support\RoleResolver;
-use Illuminate\Support\Facades\Process;
 
 /**
  * The milestone review (M15 canonical slice): the Architect judges a milestone's
@@ -41,14 +40,14 @@ class MilestoneReviewService
         private readonly ProviderRegistry $providers,
         private readonly MemoryStore $memory,
         private readonly RepoIndex $repoIndex,
-        private readonly WorktreeManager $worktrees,
+        private readonly MilestoneDiff $diffs,
     ) {}
 
     public function review(Milestone $milestone): MilestoneReviewOutcome
     {
         $project = $milestone->project;
-        $worktree = $this->worktreePath($milestone);
-        $diff = $worktree !== null ? $this->cumulativeDiff($milestone, $worktree) : '';
+        $worktree = $this->diffs->worktree($milestone);
+        $diff = $this->diffs->cumulative($milestone);
 
         // Nothing to review (no worktree, or a milestone whose tasks were all
         // no-ops) — approve and let the boundary proceed.
@@ -77,7 +76,11 @@ class MilestoneReviewService
 
             foreach ($response->toolCalls as $call) {
                 if ($call->name === 'approve_milestone') {
-                    return new MilestoneReviewOutcome('approved', (string) ($call->arguments['summary'] ?? 'Milestone approved.'));
+                    $howToTest = is_string($call->arguments['how_to_test'] ?? null) && trim((string) $call->arguments['how_to_test']) !== ''
+                        ? trim((string) $call->arguments['how_to_test'])
+                        : null;
+
+                    return new MilestoneReviewOutcome('approved', (string) ($call->arguments['summary'] ?? 'Milestone approved.'), howToTest: $howToTest);
                 }
                 if ($call->name === 'request_changes') {
                     return new MilestoneReviewOutcome('changes', (string) ($call->arguments['summary'] ?? 'Changes requested.'), $this->parseItems($call));
@@ -134,7 +137,10 @@ class MilestoneReviewService
         $approve = new ToolDefinition(
             name: 'approve_milestone',
             description: 'Approve the milestone when its cumulative work satisfies its goal and every task\'s acceptance criteria. Ends the review.',
-            parameters: ['type' => 'object', 'properties' => ['summary' => ['type' => 'string', 'description' => '2-4 sentences: what the milestone delivers and why it passes.']], 'required' => ['summary']],
+            parameters: ['type' => 'object', 'properties' => [
+                'summary' => ['type' => 'string', 'description' => '2-4 sentences: what the milestone delivers and why it passes.'],
+                'how_to_test' => ['type' => 'string', 'description' => 'Concrete steps the owner can run to verify this milestone works end-to-end (commands to run, what to click, what they should see). This goes on the merge gate so the owner can check it themselves before merging.'],
+            ], 'required' => ['summary', 'how_to_test']],
         );
         $changes = new ToolDefinition(
             name: 'request_changes',
@@ -225,38 +231,6 @@ class MilestoneReviewService
         }
 
         return $out === [] ? ['This milestone needs your input to proceed.'] : $out;
-    }
-
-    /** The milestone worktree path if it exists, else null. */
-    private function worktreePath(Milestone $milestone): ?string
-    {
-        $path = $this->worktrees->pathForMilestone($milestone->project, $milestone);
-        if (is_dir($path)) {
-            return $path;
-        }
-
-        // Fall back to a task's recorded worktree (older milestones).
-        $task = $milestone->tasks()->whereNotNull('worktree_path')->first();
-
-        return $task && is_dir((string) $task->worktree_path) ? $task->worktree_path : null;
-    }
-
-    /** base_commit..HEAD across the whole milestone (its fork point is the first task's base). */
-    private function cumulativeDiff(Milestone $milestone, string $worktree): string
-    {
-        $base = $milestone->tasks()->whereNotNull('base_commit')->orderBy('position')->value('base_commit');
-
-        if ($base) {
-            $result = Process::path($worktree)->run(['git', 'diff', $base]);
-            if ($result->successful()) {
-                return trim($result->output());
-            }
-        }
-
-        // Fallback: everything the milestone branch added since it forked from main.
-        $result = Process::path($worktree)->run(['git', 'diff', 'main...HEAD']);
-
-        return $result->successful() ? trim($result->output()) : '';
     }
 
     private function reviewContext(Milestone $milestone): string

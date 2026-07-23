@@ -9,8 +9,8 @@ use App\Models\Milestone;
 use App\Models\Project;
 use App\Models\Task;
 use App\Projects\Memory\MemoryStore;
+use App\Projects\Repositories\MilestoneDiff;
 use App\Projects\Repositories\RepoIndex;
-use App\Projects\Repositories\WorktreeManager;
 use Illuminate\Support\Facades\Process;
 
 uses(\Illuminate\Foundation\Testing\RefreshDatabase::class);
@@ -65,7 +65,7 @@ function reviewService(array $responses): MilestoneReviewService
         app(ProviderRegistry::class),
         MemoryStore::fromConfig(),
         app(RepoIndex::class),
-        app(WorktreeManager::class),
+        app(MilestoneDiff::class),
     );
 }
 
@@ -113,7 +113,7 @@ it('short-circuits to approved with no model call when there is no diff', functi
 
     $provider = new MsrScriptedProvider([]);
     app()->instance(Provider::class, $provider);
-    $service = new MilestoneReviewService(app(ProviderRegistry::class), MemoryStore::fromConfig(), app(RepoIndex::class), app(WorktreeManager::class));
+    $service = new MilestoneReviewService(app(ProviderRegistry::class), MemoryStore::fromConfig(), app(RepoIndex::class), app(MilestoneDiff::class));
 
     $outcome = $service->review($this->milestone);
 
@@ -126,7 +126,7 @@ it('grounds the review context in the milestone goal and task briefs', function 
 
     $provider = new MsrScriptedProvider([archReviewReadDiff(), archReviewApprove()]);
     app()->instance(Provider::class, $provider);
-    $service = new MilestoneReviewService(app(ProviderRegistry::class), MemoryStore::fromConfig(), app(RepoIndex::class), app(WorktreeManager::class));
+    $service = new MilestoneReviewService(app(ProviderRegistry::class), MemoryStore::fromConfig(), app(RepoIndex::class), app(MilestoneDiff::class));
 
     $service->review($this->milestone);
 
