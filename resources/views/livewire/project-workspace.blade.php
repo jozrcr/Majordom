@@ -153,6 +153,32 @@
                     </div>
                 @endif
 
+                {{-- M16-A: milestones the owner set aside ("Not yet — keep it ready").
+                     The branch/worktree are intact; merging is one click away, so the
+                     "deferred" state is never a dead end. --}}
+                @foreach($this->deferredMilestoneGates as $gate)
+                    @php $dRecap = $gate->payload['recap'] ?? []; $dStat = $dRecap['diffstat'] ?? null; @endphp
+                    <div class="max-w-[640px] rounded-lg border border-border-strong bg-surface-raised p-4 space-y-3">
+                        <p class="font-mono text-micro uppercase tracking-[.14em] text-mute">Merge later — ready when you are</p>
+                        <p class="text-body-sm text-text">{{ $gate->title }}</p>
+                        <div class="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-meta text-mute">
+                            @if(!empty($dRecap['branch']))<span>branch: <span class="text-t3">{{ $dRecap['branch'] }}</span></span>@endif
+                            @if($dStat)
+                                <span>· {{ $dStat['files'] }} file(s)</span>
+                                <span class="text-diff-add-text">+{{ $dStat['insertions'] }}</span>
+                                <span class="text-diff-del-text">−{{ $dStat['deletions'] }}</span>
+                            @endif
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <button wire:click="mergeDeferred({{ $gate->id }})" wire:loading.attr="disabled" wire:target="mergeDeferred({{ $gate->id }})" class="rounded-lg bg-accent px-3 py-1.5 text-body-sm font-semibold text-accent-ink disabled:opacity-55">
+                                <span wire:loading.remove wire:target="mergeDeferred({{ $gate->id }})">Merge now &amp; start next</span>
+                                <span wire:loading wire:target="mergeDeferred({{ $gate->id }})">Merging…</span>
+                            </button>
+                            <span class="font-mono text-meta text-faint">promotes {{ $dRecap['branch'] ?? 'the milestone branch' }} into your checked-out branch</span>
+                        </div>
+                    </div>
+                @endforeach
+
                 @if($this->latestExecution)
                     <div class="max-w-[640px] rounded-lg border border-border bg-surface-card px-4 py-3">
                         <div class="flex items-center gap-2 flex-wrap">

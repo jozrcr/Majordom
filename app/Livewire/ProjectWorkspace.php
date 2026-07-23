@@ -26,6 +26,9 @@ class ProjectWorkspace extends Component
     /** Free-text answers; when non-empty they win over a picked option. */
     public array $customDrafts = [];
     public ?string $gateComment = null;
+    /** M16-A: lazily-loaded cumulative diff for the milestone merge gate. */
+    public bool $showMilestoneDiff = false;
+    public ?string $milestoneDiff = null;
     public ?int $selectedEventId = null;
     public ?int $workflowId = null;
     public ?int $selectedExecutionId = null;
@@ -683,8 +686,7 @@ class ProjectWorkspace extends Component
             true,
             $this->gateComment
         );
-        $this->gateComment = null;
-        unset($this->openApproval);
+        $this->resetGateState();
     }
 
     public function rejectApproval(): void
@@ -705,7 +707,15 @@ class ProjectWorkspace extends Component
             false,
             $this->gateComment
         );
+        $this->resetGateState();
+    }
+
+    /** Clear the gate modal's transient state after a resolution. */
+    private function resetGateState(): void
+    {
         $this->gateComment = null;
+        $this->showMilestoneDiff = false;
+        $this->milestoneDiff = null;
         unset($this->openApproval);
     }
 
@@ -722,8 +732,7 @@ class ProjectWorkspace extends Component
         }
 
         app(\App\Core\Workflow\WorkflowEngine::class)->deferMilestoneGate($approval);
-        $this->gateComment = null;
-        unset($this->openApproval);
+        $this->resetGateState();
     }
 
     /**
@@ -745,8 +754,27 @@ class ProjectWorkspace extends Component
         }
 
         app(\App\Core\Workflow\WorkflowEngine::class)->requestMilestoneGateChanges($approval, $this->gateComment);
-        $this->gateComment = null;
-        unset($this->openApproval);
+        $this->resetGateState();
+    }
+
+    /**
+     * Show/hide the milestone's cumulative diff inside the gate (M16-A "view
+     * diff"). Loaded on demand — the recap is frozen in the payload, but the
+     * full diff is read live from the still-present worktree.
+     */
+    public function toggleMilestoneDiff(): void
+    {
+        $this->showMilestoneDiff = ! $this->showMilestoneDiff;
+
+        if ($this->showMilestoneDiff && $this->milestoneDiff === null) {
+            $approval = $this->openApproval;
+            $milestone = $approval
+                ? \App\Models\Milestone::find($approval->payload['milestone_id'] ?? 0)
+                : null;
+            $this->milestoneDiff = $milestone
+                ? app(\App\Projects\Repositories\MilestoneDiff::class)->cumulative($milestone)
+                : '';
+        }
     }
 
     /** Merge a previously deferred milestone gate (M16-A "merge later"). */
