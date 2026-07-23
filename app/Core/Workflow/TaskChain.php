@@ -3,6 +3,8 @@
 namespace App\Core\Workflow;
 
 use App\Agents\Architect\ArchitectService;
+use App\Agents\Reviewer\MilestoneReviewOutcome;
+use App\Agents\Reviewer\MilestoneReviewService;
 use App\Core\Events\EventRecorder;
 use App\Enums\ApprovalStatus;
 use App\Enums\ApprovalType;
@@ -10,6 +12,7 @@ use App\Enums\TaskStatus;
 use App\Models\Milestone;
 use App\Models\Project;
 use App\Models\Task;
+use App\Projects\Memory\MemoryStore;
 use App\Projects\Repositories\CommitService;
 
 /**
@@ -67,11 +70,16 @@ class TaskChain
         ImplementFeatureWorkflow::startForTask($project, $next->task_key, $next->title, $profile);
     }
 
+    /** Owner-locked convergence guard (M15): after this many review→fix rounds
+     *  with no approval, escalate instead of looping forever. */
+    private const MAX_REVIEW_ROUNDS = 2;
+
     /**
-     * All of a milestone's tasks are done. full_auto merges to main and rolls
-     * into the next milestone unattended; attended/overnight raise a milestone
-     * gate (an Approval) for the owner to merge + start the next milestone.
-     * The milestone boundary always requires consent EXCEPT under full_auto.
+     * All of a milestone's tasks are done (test-green). M15: the Architect now
+     * REVIEWS the milestone's cumulative work here — the right altitude — before
+     * any merge. Approve → the human e2e/merge gate (full_auto auto-merges);
+     * request_changes → keyed fix-tasks that rebuild and re-review (bounded by
+     * MAX_REVIEW_ROUNDS); escalate / stuck → an actionable gate, never a dead end.
      */
     private function reachMilestoneBoundary(Project $project, Milestone $milestone, string $profile): void
     {
@@ -83,9 +91,43 @@ class TaskChain
             'system'
         );
 
+        try {
+            $outcome = app(MilestoneReviewService::class)->review($milestone);
+        } catch (\Throwable $e) {
+            report($e);
+            // A review that can't run must not stall the roadmap — hand the owner
+            // an actionable merge gate that explains why.
+            $this->raiseMergeGate($project, $milestone, $profile, "the review could not run ({$e->getMessage()}) — please review and merge manually");
+
+            return;
+        }
+
+        if ($outcome->isChanges()) {
+            if ($this->changeRounds($project, $milestone) < self::MAX_REVIEW_ROUNDS) {
+                $this->requestMilestoneChanges($project, $milestone, $outcome, $profile);
+
+                return;
+            }
+
+            // Convergence guard: two fix rounds and still not passing — the brief,
+            // not the build, is likely the problem. Escalate; don't loop.
+            app(EventRecorder::class)->record($project, 'milestone.review_stuck', ['milestone_key' => $milestone->milestone_key, 'summary' => $outcome->summary], null, 'reviewer');
+            $this->raiseMergeGate($project, $milestone, $profile, "the Architect asked for changes twice and it still isn't passing — likely the brief, not the build. Its note: {$outcome->summary}. Merge as-is, or steer it (redefine / chat)");
+
+            return;
+        }
+
+        if ($outcome->isEscalate()) {
+            app(EventRecorder::class)->record($project, 'milestone.review_escalated', ['milestone_key' => $milestone->milestone_key, 'questions' => $outcome->questions], null, 'reviewer');
+            $this->raiseMergeGate($project, $milestone, $profile, 'the Architect needs your call — '.trim($outcome->summary.' '.implode(' ', $outcome->questions)));
+
+            return;
+        }
+
+        // Approved.
+        app(EventRecorder::class)->record($project, 'milestone.review_approved', ['milestone_key' => $milestone->milestone_key, 'summary' => $outcome->summary], null, 'reviewer');
+
         if ($profile === 'full_auto') {
-            // Auto-merge; if it fails, fall back to a human gate rather than
-            // silently stalling the roadmap.
             try {
                 app(CommitService::class)->mergeMilestone($milestone);
                 $this->startNextMilestone($project, $milestone, $profile);
@@ -97,12 +139,84 @@ class TaskChain
             }
         }
 
+        $this->raiseMergeGate($project, $milestone, $profile);
+    }
+
+    /** Raise the human milestone-merge gate. $note, when set, explains a review
+     *  concern the owner must weigh before merging (never a silent dead end). */
+    private function raiseMergeGate(Project $project, Milestone $milestone, string $profile, ?string $note = null): void
+    {
+        $title = $note !== null
+            ? "Milestone {$milestone->milestone_key}: {$note}"
+            : "Milestone {$milestone->milestone_key} complete — merge into main + start next";
+
         $project->approvals()->create([
             'type' => ApprovalType::MilestoneMerge,
-            'title' => "Milestone {$milestone->milestone_key} complete — merge into main + start next",
+            'title' => $title,
             'payload' => ['milestone_id' => $milestone->id, 'profile' => $profile],
             'status' => ApprovalStatus::Open,
         ]);
+    }
+
+    /** How many change rounds this milestone has already been through. */
+    private function changeRounds(Project $project, Milestone $milestone): int
+    {
+        return $project->events()
+            ->where('name', 'milestone.changes_requested')
+            ->get()
+            ->filter(fn ($e) => ($e->payload['milestone_key'] ?? null) === $milestone->milestone_key)
+            ->count();
+    }
+
+    /**
+     * Turn the review's findings into ONE keyed, observable fix-task (owner
+     * decision #3) whose acceptance criteria are the findings, then build it. When
+     * it lands, the boundary — and the review — run again.
+     */
+    private function requestMilestoneChanges(Project $project, Milestone $milestone, MilestoneReviewOutcome $outcome, string $profile): void
+    {
+        $round = $this->changeRounds($project, $milestone) + 1;
+        $key = $this->nextTaskKey($project);
+        $position = (int) ($milestone->tasks()->max('position') ?? 0) + 1;
+
+        $task = $milestone->tasks()->create([
+            'project_id' => $project->id,
+            'task_key' => $key,
+            'title' => "Address review findings (round {$round})",
+            'position' => $position,
+            'status' => TaskStatus::Pending,
+        ]);
+
+        $criteria = collect($outcome->items)
+            ->map(fn ($i) => '- '.($i['file'] ? "`{$i['file']}`: " : '').$i['reason'])
+            ->implode("\n");
+        $criteria = $criteria !== '' ? $criteria : '- '.$outcome->summary;
+
+        $brief = "# {$task->title}\n\n## Goal\nResolve the milestone review's findings so {$milestone->milestone_key} — {$milestone->title} meets its goal.\n\n## Acceptance criteria\n{$criteria}\n\n## Notes\nFollow-up fix task from the milestone review. Make the smallest change that resolves each finding; do not touch unrelated code.\n";
+        app(MemoryStore::class)->write($project, "tasks/{$key}/task.md", $brief);
+
+        app(EventRecorder::class)->record(
+            $project,
+            'milestone.changes_requested',
+            ['milestone_key' => $milestone->milestone_key, 'round' => $round, 'task_key' => $key, 'findings' => count($outcome->items)],
+            null,
+            'reviewer'
+        );
+
+        ImplementFeatureWorkflow::startForTask($project, $key, $task->title, $profile);
+    }
+
+    /** Next free T-0NN key across the project. */
+    private function nextTaskKey(Project $project): string
+    {
+        $max = 0;
+        foreach ($project->tasks()->pluck('task_key') as $k) {
+            if (preg_match('/^T-?(\d+)$/i', (string) $k, $m)) {
+                $max = max($max, (int) $m[1]);
+            }
+        }
+
+        return 'T-'.str_pad((string) ($max + 1), 3, '0', STR_PAD_LEFT);
     }
 
     /**

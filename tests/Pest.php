@@ -106,6 +106,41 @@ function samplePlan(array $overrides = []): array
     ], $overrides);
 }
 
+/*
+| M15 milestone-review tool-call helpers.
+*/
+
+function archReviewReadDiff(): \App\Agents\Providers\ProviderResponse
+{
+    return new \App\Agents\Providers\ProviderResponse('', 'tool_calls', 5, 5, [
+        new \App\Agents\Providers\ToolCall('c_rd', 'read_diff', []),
+    ]);
+}
+
+function archReviewApprove(string $summary = 'looks good'): \App\Agents\Providers\ProviderResponse
+{
+    return new \App\Agents\Providers\ProviderResponse('', 'tool_calls', 5, 5, [
+        new \App\Agents\Providers\ToolCall('c_ap', 'approve_milestone', ['summary' => $summary]),
+    ]);
+}
+
+/** $items are strings or ['task_key'=>…,'file'=>…,'reason'=>…] maps. */
+function archReviewChanges(array $items, string $summary = 'needs work'): \App\Agents\Providers\ProviderResponse
+{
+    $norm = array_map(fn ($i) => is_string($i) ? ['reason' => $i] : $i, $items);
+
+    return new \App\Agents\Providers\ProviderResponse('', 'tool_calls', 5, 5, [
+        new \App\Agents\Providers\ToolCall('c_ch', 'request_changes', ['summary' => $summary, 'items' => $norm]),
+    ]);
+}
+
+function archReviewEscalate(array $questions, string $summary = ''): \App\Agents\Providers\ProviderResponse
+{
+    return new \App\Agents\Providers\ProviderResponse('', 'tool_calls', 5, 5, [
+        new \App\Agents\Providers\ToolCall('c_es', 'ask_owner', ['summary' => $summary, 'questions' => $questions]),
+    ]);
+}
+
 function setupMemoryRoot(): string
 {
     $root = sys_get_temp_dir().'/majordom-test-'.uniqid();

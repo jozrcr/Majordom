@@ -22,11 +22,13 @@ use App\Support\Setting;
  */
 class ImplementFeatureWorkflow
 {
-    // M12: the default chain ends in `finalize` — the Builder's work is already
-    // committed to the milestone branch during build, so there's no per-task
-    // promotion. A project that opts into `confirm_commits` swaps in a
-    // `commit_suggestion` human checkpoint instead (see chainFor()).
-    public const CHAIN = ['delegate', 'build', 'test', 'review', 'finalize'];
+    // M15: the per-task chain is TEST-gated only — `review` moved to the
+    // milestone boundary (TaskChain::reachMilestoneBoundary → MilestoneReviewService),
+    // the right altitude to judge coherent work. Per task: build, test (the
+    // Builder's own gate; TestNode retries/parks on failure), finalize. The work
+    // is already on the milestone branch; `confirm_commits` swaps `finalize` for a
+    // `commit_suggestion` human checkpoint (see chainFor()).
+    public const CHAIN = ['delegate', 'build', 'test', 'finalize'];
 
     /** @return array<string, class-string<NodeJob>> */
     public static function nodeMap(): array
