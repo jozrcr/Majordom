@@ -111,6 +111,18 @@
                     @endif
                 </div>
 
+                @if(!empty($recap['worktree']))
+                    {{-- Make the disposable worktree legible (M16-C): where the work
+                         physically lives, plus a one-click editor launch on it. --}}
+                    <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+                        <span class="font-mono text-meta text-faint" title="{{ $recap['worktree'] }}">worktree: <span class="text-mute">{{ $recap['worktree'] }}</span></span>
+                        <button wire:click="openInEditor" wire:loading.attr="disabled" class="rounded-md border border-border px-2 py-0.5 font-mono text-meta text-mute hover:text-hi hover:bg-surface-active disabled:opacity-55">
+                            <span wire:loading.remove wire:target="openInEditor">Open in VS Code</span>
+                            <span wire:loading wire:target="openInEditor">opening…</span>
+                        </button>
+                    </div>
+                @endif
+
                 @if(!empty($recap['review_summary']))
                     <div class="rounded-md border border-border-soft bg-surface p-3">
                         <p class="font-mono text-micro uppercase tracking-[.14em] text-mute mb-1">Architect's verdict</p>

@@ -190,4 +190,59 @@ class WorktreeManager
             throw new RuntimeException("Git worktree remove failed: {$result->errorOutput()}");
         }
     }
+
+    /**
+     * Reconcile milestone worktrees after a redefine (M16-C, finding #13). Any
+     * milestone whose key the revised roadmap no longer declares is orphaned —
+     * remove its worktree AND delete its `majordom/<key>` branch so no stale
+     * worktree shadows the active milestone. Best-effort: a single failed cleanup
+     * must never raise into the redefine job, so each milestone is guarded and
+     * the method returns the keys it actually cleaned.
+     *
+     * @param array<int, string> $liveKeys milestone keys the revised roadmap keeps
+     * @return array<int, string> keys whose worktree/branch were removed
+     */
+    public function reconcileMilestones(Project $project, array $liveKeys): array
+    {
+        $repoPath = $project->repo_path;
+        if (!is_dir($repoPath) || !is_dir($repoPath.'/.git')) {
+            return [];
+        }
+
+        $removed = [];
+        foreach (Milestone::where('project_id', $project->id)->get() as $milestone) {
+            if (in_array($milestone->milestone_key, $liveKeys, true)) {
+                continue; // still part of the plan — leave it be
+            }
+
+            $path = $this->pathForMilestone($project, $milestone);
+            $branch = $this->branchForMilestone($milestone);
+            $cleaned = false;
+
+            try {
+                if (is_dir($path)) {
+                    Process::path($repoPath)->run(['git', 'worktree', 'remove', '--force', $path]);
+                    $cleaned = true;
+                }
+
+                $verify = Process::path($repoPath)->run(['git', 'rev-parse', '--verify', $branch]);
+                if ($verify->successful()) {
+                    Process::path($repoPath)->run(['git', 'branch', '-D', $branch]);
+                    $cleaned = true;
+                }
+            } catch (\Throwable) {
+                continue; // never let stale-worktree cleanup break the redefine
+            }
+
+            if ($cleaned) {
+                $removed[] = $milestone->milestone_key;
+            }
+        }
+
+        if ($removed !== []) {
+            Process::path($repoPath)->run(['git', 'worktree', 'prune']);
+        }
+
+        return $removed;
+    }
 }

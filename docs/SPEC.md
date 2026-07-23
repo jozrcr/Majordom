@@ -123,8 +123,13 @@ notify* vs *auto-proceed & collect*.
      approval — never a dead end. The gate is a real review surface (M16-A): its
      payload carries a frozen `recap` — milestone goal, each task with its
      acceptance criteria, the `git diff --numstat` diffstat, the reviewer's
-     verdict, and the `how_to_test` — assembled once by `MilestoneRecap` so the
-     decision never depends on a worktree that may later be merged away.
+     verdict, the `how_to_test`, and the `branch`/`worktree` — assembled once by
+     `MilestoneRecap` so the decision never depends on a worktree that may later
+     be merged away. The gate surfaces that `worktree` path with an **Open in
+     VS Code** action (M16-C) so the disposable worktree is legible — the target
+     dir is derived server-side (gate worktree, else `repo_path`), launched via
+     the array-form `Process` under `majordom.editor.command`; best-effort, it
+     never raises into the request (`editor.opened`).
    - **Three resolutions** (no silent decline): **merge now** promotes the
      branch; **not yet** DEFERS (`ApprovalStatus::Deferred`) — branch and
      worktree kept intact, out of the inbox but re-openable via
@@ -318,8 +323,12 @@ Reverb for live updates.
        is not a separate mode — a plain reply just continues the conversation, and
        asking for a scope change lets the Architect re-`propose_plan`. That revision
        is human-gated exactly like the first plan; approving it preserves built work
-       (RoadmapSync upserts by key), resets the loop, and regenerates the restart
-       brief (`plan.redefined`). No one-shot redefine turn — it is the tool loop.
+       (RoadmapSync upserts by key), resets the loop, regenerates the restart
+       brief (`plan.redefined`), and reconciles worktrees — a milestone the revised
+       roadmap no longer declares (`RoadmapSync::milestoneKeysIn`) has its orphaned
+       `majordom/<key>` worktree and branch removed (`WorktreeManager::reconcileMilestones`,
+       best-effort, `worktrees.reconciled`) so no stale worktree shadows the active
+       one. No one-shot redefine turn — it is the tool loop.
     2. **Roadmap** — milestones → tasks, editable, reflecting `roadmap.md`.
     3. **Activity timeline** — the live event feed (Reverb): delegated → building →
        review → …

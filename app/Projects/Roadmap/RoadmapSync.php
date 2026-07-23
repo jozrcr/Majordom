@@ -21,6 +21,26 @@ class RoadmapSync
         return new self($project);
     }
 
+    /**
+     * The milestone keys (`M<N>`) a roadmap markdown declares, in document order.
+     * The one authority on "which milestones does this roadmap still define" —
+     * used by the redefine reconciler (M16-C) to spot milestones a revision
+     * dropped. Same header grammar as the full parser.
+     *
+     * @return array<int, string>
+     */
+    public static function milestoneKeysIn(string $markdown): array
+    {
+        $keys = [];
+        foreach (explode("\n", $markdown) as $line) {
+            if (preg_match('/^##\s+(?:M(?:ilestone)?)\s*(\d+(?:[a-z]?)?)\s*[—:]\s*(.+)$/iu', $line, $m)) {
+                $keys[] = 'M'.$m[1];
+            }
+        }
+
+        return $keys;
+    }
+
     public function sync(): void
     {
         $filePath = rtrim($this->project->repo_path ?? '', '/') . '/agents/ROADMAP.md';

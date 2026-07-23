@@ -132,3 +132,44 @@ it('approving a revision resets the loop after a valid revision', function () {
     expect($project->events()->where('name', 'plan.redefine_reset')->count())->toBe(1)
         ->and($exec->fresh()->status)->toBe(ExecutionStatus::Completed);
 });
+
+it('a redefine that supersedes a milestone removes its orphaned worktree and branch (M16-C)', function () {
+    config([
+        'majordom.memory_root' => sys_get_temp_dir().'/mj-redef-wt-'.uniqid(),
+        'majordom.worktrees_root' => $wtRoot = sys_get_temp_dir().'/mj-wt-root-'.uniqid(),
+    ]);
+    // The WorktreeManager singleton was built fromConfig at boot — re-resolve it
+    // so it picks up this test's worktrees_root.
+    app()->forgetInstance(\App\Projects\Repositories\WorktreeManager::class);
+
+    $repoDir = sys_get_temp_dir().'/mj-redef-repo-'.uniqid();
+    mkdir($repoDir.'/.git', 0755, true);
+
+    $project = Project::factory()->create(['slug' => 'proj', 'repo_path' => $repoDir]);
+    \App\Models\Milestone::factory()->create(['project_id' => $project->id, 'milestone_key' => 'M1', 'position' => 1]);
+    \App\Models\Milestone::factory()->create(['project_id' => $project->id, 'milestone_key' => 'M2', 'position' => 2]);
+
+    // M2's worktree exists on disk — the redefine must clean it.
+    $droppedPath = $wtRoot.'/proj/M2';
+    mkdir($droppedPath, 0755, true);
+
+    // Bare fake → every git command is faked, successful, and recorded (a keyed
+    // fake would let unlisted commands run for real against the empty .git dir).
+    \Illuminate\Support\Facades\Process::fake();
+
+    app()->instance(Provider::class, new RedefineScriptedProvider(['# brief']));
+    $service = new ArchitectService(app(ProviderRegistry::class), MemoryStore::fromConfig(), app(RepoIndex::class));
+
+    // The revised roadmap keeps only M1 — M2 is superseded.
+    seedRevision($project, ['roadmap_md' => "## M1 — Skeleton\n- [ ] T-001 — Do the thing\n", 'summary' => 'dropped M2']);
+    $service->approvePlan($project);
+
+    $reconciled = $project->events()->where('name', 'worktrees.reconciled')->first();
+    expect($reconciled)->not->toBeNull()
+        ->and($reconciled->payload['removed'])->toBe(['M2']);
+
+    \Illuminate\Support\Facades\Process::assertRan(fn ($run) => $run->command === ['git', 'worktree', 'remove', '--force', $droppedPath]);
+    \Illuminate\Support\Facades\Process::assertRan(fn ($run) => $run->command === ['git', 'branch', '-D', 'majordom/M2']);
+    // The surviving milestone is never touched.
+    \Illuminate\Support\Facades\Process::assertDidntRun(fn ($run) => $run->command === ['git', 'branch', '-D', 'majordom/M1']);
+});

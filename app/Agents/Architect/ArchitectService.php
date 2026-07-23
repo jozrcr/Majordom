@@ -821,6 +821,15 @@ MD;
 
         app(\App\Projects\Roadmap\RoadmapSync::class)->for($project)->sync();
 
+        // M16-C: reconcile worktrees — a revision that drops milestones leaves
+        // their majordom/<key> worktrees/branches orphaned. Remove them so the
+        // active milestone's worktree is unambiguous (no stale majordom/* left).
+        $liveKeys = \App\Projects\Roadmap\RoadmapSync::milestoneKeysIn($roadmapMd);
+        $reconciled = app(\App\Projects\Repositories\WorktreeManager::class)->reconcileMilestones($project, $liveKeys);
+        if ($reconciled !== []) {
+            app(EventRecorder::class)->record($project, 'worktrees.reconciled', ['removed' => $reconciled], null, 'system');
+        }
+
         // T-62: the revised plan must not resume the old, possibly-poisoned
         // cycle — reset the execution loop, then name the task the loop restarts
         // from (its first still-pending task in roadmap order).

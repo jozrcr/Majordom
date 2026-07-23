@@ -4,6 +4,13 @@ return [
     'token' => env('MAJORDOM_TOKEN'),
     'memory_root' => env('MAJORDOM_MEMORY_ROOT'),
     'worktrees_root' => env('MAJORDOM_WORKTREES_ROOT'), // null => $HOME/.majordom/worktrees
+
+    // The owner's editor for the "Open in VS Code" gate action (M16-C). A local
+    // desktop launch on the active worktree (fallback: the project folder).
+    // Any CLI that takes a directory works — `code`, `cursor`, `subl`, etc.
+    'editor' => [
+        'command' => env('MAJORDOM_EDITOR', 'code'),
+    ],
     'metallama' => [
         'base_url' => env('METALLAMA_BASE_URL', 'http://127.0.0.1:8010'),
         'token' => env('METALLAMA_TOKEN'),

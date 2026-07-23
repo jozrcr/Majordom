@@ -773,6 +773,54 @@ class ProjectWorkspace extends Component
         return $this->project->deferredMilestoneGates()->get();
     }
 
+    /**
+     * Open the owner's editor on the milestone's worktree — the escape hatch that
+     * makes the disposable worktree legible (M16-C, finding #8). The target is
+     * derived server-side (never a client-supplied path): the open gate's recap
+     * worktree if it still exists, else the project folder. A local desktop
+     * launch; best-effort — a missing editor must never raise into the request.
+     */
+    public function openInEditor(): void
+    {
+        $dir = $this->editorTargetDir();
+        if ($dir === null) {
+            $this->runNotice = 'No folder to open yet — the worktree has not been created.';
+
+            return;
+        }
+
+        try {
+            // Array form → no shell, no injection. Async start so the request
+            // doesn't wait on the editor process.
+            \Illuminate\Support\Facades\Process::path($dir)
+                ->start([config('majordom.editor.command', 'code'), $dir]);
+
+            app(EventRecorder::class)->record($this->project, 'editor.opened', ['dir' => $dir], null, 'you');
+        } catch (\Throwable) {
+            // Desktop convenience only — swallow so the gate never breaks.
+        }
+    }
+
+    /** The real directory "Open in editor" targets: gate worktree, else repo. */
+    private function editorTargetDir(): ?string
+    {
+        $candidates = [];
+
+        $approval = $this->openApproval;
+        if ($approval && is_string($wt = $approval->payload['recap']['worktree'] ?? null)) {
+            $candidates[] = $wt;
+        }
+        $candidates[] = $this->project->repo_path;
+
+        foreach ($candidates as $dir) {
+            if (is_string($dir) && $dir !== '' && is_dir($dir)) {
+                return $dir;
+            }
+        }
+
+        return null;
+    }
+
     public function selectEvent(int $eventId): void
     {
         $this->selectedEventId = $this->selectedEventId === $eventId ? null : $eventId;
