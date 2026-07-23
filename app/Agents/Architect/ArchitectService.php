@@ -97,6 +97,8 @@ PROMPT;
         $readRounds = 0;
         $outcome = null;
         $lastResponse = null;
+        $continued = false;   // one auto-continue per turn (dropped-intent recovery)
+        $replyText = '';      // the model's prose, carried across a continue
 
         while ($outcome === null) {
             // On the last permitted round, withdraw the read tools so the model
@@ -106,7 +108,25 @@ PROMPT;
             $lastResponse = $response;
 
             if (! $response->hasToolCalls()) {
-                $outcome = ['type' => 'reply', 'reply' => $response->content];
+                if ($response->content !== '') {
+                    $replyText = $response->content;
+                }
+
+                // Dropped-intent recovery: a model sometimes NARRATES its intent
+                // ("Let me ask the next batch…") as prose without calling ask_owner
+                // in the same turn — which would leave the owner with a promise and
+                // no questions. Give it ONE chance to follow through with a tool
+                // before we treat the turn as the owner's. Still a known state.
+                if (! $continued) {
+                    $continued = true;
+                    app(EventRecorder::class)->record($project, 'consensus.continued', ['messageId' => null], null, 'architect');
+                    $messages[] = ['role' => 'assistant', 'content' => $response->content !== '' ? $response->content : '(thinking)'];
+                    $messages[] = ['role' => 'user', 'content' => '[system note] Continue now: if you have questions for the owner, call ask_owner with them in THIS turn; if the scope is fully clear, call propose_plan; if you are genuinely waiting on the owner, reply briefly to confirm.'];
+
+                    continue;
+                }
+
+                $outcome = ['type' => 'reply', 'reply' => $replyText];
                 break;
             }
 
@@ -1092,7 +1112,7 @@ Non-negotiable mandate: surface EVERY open question before proposing anything. A
 
 How you act each turn — through your tools:
 - To inspect the repository, call read_file or list_repo. The engine fulfils the read and hands you the contents; then continue. Never ask permission to read, and never ask the owner to paste a file.
-- When anything about the scope is ambiguous, call ask_owner with specific questions. This ends your turn until the owner answers.
+- When anything about the scope is ambiguous, call ask_owner with specific questions. This ends your turn until the owner answers. If you tell the owner you have questions, ask them in that SAME turn via ask_owner — never announce a batch of questions you then don't ask.
 - When every question is answered and the scope is clear, call propose_plan (architecture, roadmap, first task brief, summary). The owner must approve before anything is written.
 - If you are only replying conversationally (acknowledging, thinking aloud), just write text — it is the owner's turn next.
 

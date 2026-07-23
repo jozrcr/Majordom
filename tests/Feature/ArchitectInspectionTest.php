@@ -100,10 +100,10 @@ it('withdraws read tools after the read-round budget so the loop must conclude',
 
     $result = $service->converse($this->project, 'Start');
 
-    // 4 read rounds + 1 concluding turn where reads were no longer offered.
+    // 4 read rounds + a concluding reply + one auto-continue (dropped-intent guard).
     $lastTools = array_map(fn ($t) => $t->name, end($provider->requests)->tools);
 
-    expect($provider->calls)->toBe(5)
+    expect($provider->calls)->toBe(6)
         ->and($lastTools)->not->toContain('read_file')
         ->and($lastTools)->toContain('propose_plan')
         ->and($result['message']->content)->toContain('enough context');

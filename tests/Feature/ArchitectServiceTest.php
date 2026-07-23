@@ -151,6 +151,37 @@ it('a plain-text reply (no tool call) is the owner\'s turn, not a crash or stall
         ->and($this->project->events()->where('name', 'consensus.stalled')->count())->toBe(0);
 });
 
+it('auto-continues a prose-only turn so an announced-but-unasked batch still reaches the owner', function () {
+    // The exact live bug: the Architect narrated "let me ask the next batch" as
+    // prose without calling ask_owner, leaving the owner with a promise and no
+    // questions. One nudge lets it follow through automatically.
+    [$service, $provider] = architect([
+        archReply('Good, that gives me a foundation. Let me ask the next batch about the data model.'),
+        archAsk([['text' => 'Which storage engine?'], ['text' => 'Normalize prices?']], 'Here they are.'),
+    ]);
+
+    $result = $service->converse($this->project, 'go');
+
+    expect($this->project->openQuestions()->count())->toBe(2)
+        ->and($this->project->events()->where('name', 'consensus.continued')->count())->toBe(1)
+        ->and(count($provider->requests))->toBe(2)
+        ->and($result['consensusPending'])->toBeFalse();
+});
+
+it('a genuinely conversational turn ends as the owner\'s turn after a single nudge', function () {
+    [$service, $provider] = architect([
+        archReply('Sure, that works for me.'),
+        archReply('Ready when you are.'),
+    ]);
+
+    $result = $service->converse($this->project, 'ok');
+
+    expect($result['message']->content)->toBe('Ready when you are.')
+        ->and($this->project->openQuestions()->count())->toBe(0)
+        ->and(count($provider->requests))->toBe(2) // one nudge, then it terminates — no loop
+        ->and($result['consensusPending'])->toBeFalse();
+});
+
 it('records answers and feeds them into the next turn history', function () {
     [$service, $provider] = architect([
         archAsk([['text' => 'Tabs or spaces?']], 'Q time.'),

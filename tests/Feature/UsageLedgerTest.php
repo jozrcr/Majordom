@@ -112,11 +112,13 @@ test('ArchitectService turn records an architect row', function () {
     $mockProvider = new class implements Provider {
         public function chat(ProviderRequest $request): ProviderResponse
         {
+            // A terminating tool call (ask_owner) — one turn, one usage row.
             return new ProviderResponse(
-                content: json_encode(['reply' => 'Test', 'questions' => [], 'consensus_reached' => false]),
-                finishReason: 'stop',
+                content: '',
+                finishReason: 'tool_calls',
                 promptTokens: 150,
-                completionTokens: 50
+                completionTokens: 50,
+                toolCalls: [new \App\Agents\Providers\ToolCall('c', 'ask_owner', ['questions' => [['text' => 'Which stack?']]])],
             );
         }
     };
