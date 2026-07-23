@@ -5,6 +5,7 @@ namespace App\Core\Workflow;
 use App\Core\Events\EventRecorder;
 use App\Enums\ExecutionStatus;
 use App\Enums\NodeStatus;
+use App\Enums\ParkedReason;
 use App\Enums\ProjectStatus;
 use App\Models\Execution;
 use App\Models\Node;
@@ -39,13 +40,21 @@ abstract class NodeJob implements ShouldQueue
             return;
         }
 
-        // Frontier-spend cap (SPEC §8): exceeding it parks like any gate.
-        if ($execution->spend_cap_usd !== null) {
-            $spent = (float) \App\Models\UsageRecord::where('execution_id', $execution->id)->sum('cost_usd');
+        // Frontier-spend cap (SPEC §8). Exceeding the flat total cap parks for
+        // the owner — EXCEPT under full_auto, which must keep moving: there, a
+        // frontier build downgrades to the local Builder (BuildNode, free) and
+        // the cheap Reviewer keeps running, so the flat cap does not hard-park
+        // (M14b owner policy). The frontier Builder's own per-role cap still
+        // bounds expensive spend via SpendGuard::mustBuildLocal.
+        if ($execution->spend_cap_usd !== null && \App\Core\Usage\SpendGuard::flatCapParks($execution)) {
+            $spent = \App\Core\Usage\SpendGuard::totalSpent($execution);
             if ($spent > (float) $execution->spend_cap_usd) {
                 $node->fail(['reason' => 'spend cap']);
-                $execution->park(sprintf('Frontier spend cap exceeded ($%.4f of $%.4f) — parked for the owner.', $spent, $execution->spend_cap_usd));
-                $execution->project->update(['status' => \App\Enums\ProjectStatus::NeedsYou, 'last_activity_at' => now()]);
+                $msg = sprintf('Frontier spend cap exceeded ($%.4f of $%.4f) — parked for the owner.', $spent, $execution->spend_cap_usd);
+                $execution->park($msg, ParkedReason::Budget);
+                $execution->project->update(['status' => ProjectStatus::NeedsYou, 'last_activity_at' => now()]);
+
+                app(EscalationRouter::class)->route($execution, ParkedReason::Budget, $msg, $node->type);
 
                 return;
             }
@@ -73,7 +82,7 @@ abstract class NodeJob implements ShouldQueue
         match ($result->status) {
             'done' => $this->completeAndAdvance($node, $execution, $result),
             'waiting' => $this->waitForHuman($node, $execution, $result),
-            'failed' => $this->parkOn($node, $execution, $result->failureReason, $result->output),
+            'failed' => $this->parkOn($node, $execution, $result->failureReason, $result->output, $result->parkedReason),
             'retry' => $this->retryFrom($node, $execution, $result),
             'escalated' => $this->waitForAnswers($node, $execution, $result),
         };
@@ -178,10 +187,11 @@ abstract class NodeJob implements ShouldQueue
         $execution->project->update(['status' => ProjectStatus::NeedsYou, 'last_activity_at' => now()]);
     }
 
-    private function parkOn(Node $node, Execution $execution, string $reason, array $output): void
+    private function parkOn(Node $node, Execution $execution, string $reason, array $output, ?ParkedReason $class = null): void
     {
+        $class ??= ParkedReason::HarnessFailure;
         $node->fail($output + ['reason' => $reason]);
-        $execution->park($reason);
+        $execution->park($reason, $class);
         $execution->project->update(['status' => ProjectStatus::Parked, 'last_activity_at' => now()]);
 
         app(EventRecorder::class)->record(
@@ -191,6 +201,8 @@ abstract class NodeJob implements ShouldQueue
             $execution,
             $this->actorFor($node)
         );
+
+        app(EscalationRouter::class)->route($execution, $class, $reason, $node->type);
     }
 
     private function actorFor(Node $node): string

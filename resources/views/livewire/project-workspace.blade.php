@@ -4,20 +4,29 @@
          path; this catches anything the socket misses. --}}
     <div wire:poll.3s class="hidden"></div>
     <div class="flex h-full min-w-0 flex-1 flex-col justify-start">
+        <div class="flex items-center justify-between border-b border-border px-4 py-3">
+            <div class="min-w-0">
+                <h1 class="truncate text-title font-semibold text-hi">{{ $project->name }}</h1>
+                <p class="truncate font-mono text-meta text-mute" title="{{ $project->repo_path }}">{{ $project->repo_path }}</p>
+            </div>
+            @if($project->status)
+                <span class="ml-4 shrink-0 rounded-[5px] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[.1em] text-accent bg-accent-tint">
+                    {{ $project->status->label() }}
+                </span>
+            @endif
+        </div>
+
         <div class="flex items-center gap-4 border-b border-border px-1">
             <button wire:click="$set('tab', 'chat')" class="px-3 py-2 text-sm font-medium transition-colors {{ $tab === 'chat' ? 'text-accent border-b-2 border-accent' : 'text-mute hover:text-t3' }}">Chat</button>
             <button wire:click="$set('tab', 'overview')" class="px-3 py-2 text-sm font-medium transition-colors {{ $tab === 'overview' ? 'text-accent border-b-2 border-accent' : 'text-mute hover:text-t3' }}">Overview</button>
             <button wire:click="$set('tab', 'stats')" class="px-3 py-2 text-sm font-medium transition-colors {{ $tab === 'stats' ? 'text-accent border-b-2 border-accent' : 'text-mute hover:text-t3' }}">Stats</button>
             <button wire:click="$set('tab', 'roadmap')" class="px-3 py-2 text-sm font-medium transition-colors {{ $tab === 'roadmap' ? 'text-accent border-b-2 border-accent' : 'text-mute hover:text-t3' }}">Roadmap</button>
             <button wire:click="$set('tab', 'exchanges')" class="px-3 py-2 text-sm font-medium transition-colors {{ $tab === 'exchanges' ? 'text-accent border-b-2 border-accent' : 'text-mute hover:text-t3' }}">Exchanges</button>
+            <button wire:click="$set('tab', 'settings')" class="px-3 py-2 text-sm font-medium transition-colors {{ $tab === 'settings' ? 'text-accent border-b-2 border-accent' : 'text-mute hover:text-t3' }}">Settings</button>
         </div>
 
         @if($tab === 'chat')
             <div class="py-4 flex items-center gap-3 border-b border-border pr-4">
-                <div class="min-w-0">
-                    <h1 class="truncate text-title font-semibold text-hi">{{ $project->name }}</h1>
-                    <p class="truncate font-mono text-meta text-mute" title="{{ $project->repo_path }}">{{ $project->repo_path }}</p>
-                </div>
                 <div class="min-w-0 flex flex-col">
                     <span class="w-fit rounded-[5px] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[.1em]">Architect</span>
                     <span class="pl-1 font-mono text-meta text-mute">{{ config('majordom.architect.model') }}</span>
@@ -35,6 +44,16 @@
                     <span class="ml-auto rounded-full border px-2.5 py-0.5 font-mono text-[10.5px] font-semibold tracking-[.06em] text-accent">{{ $openCount }} question{{ $openCount > 1 ? 's' : '' }} remaining</span>
                 @endif
             </div>
+
+            @if($runNotice)
+                <div class="mt-3 flex items-center justify-between gap-3 rounded-lg border border-accent/40 bg-accent-tint px-4 py-2.5">
+                    <p class="text-body-sm text-accent">{{ $runNotice }}</p>
+                    <button wire:click="$set('runNotice', null)" class="font-mono text-meta text-mute hover:text-t3">dismiss</button>
+                </div>
+            @endif
+
+            @include('livewire.partials.project-pipeline')
+            @include('livewire.partials.node-inspector')
 
             <div class="flex-1 space-y-4 overflow-y-auto py-5">
                 @if(empty($sessions))
@@ -75,19 +94,48 @@
                 @endif
 
                 @if($this->consensusPending && !$this->thinking)
-                    {{-- Plan-approval moment (design §2.6): the human owns this gate. --}}
+                    {{-- Plan-approval moment (design §2.6): the human owns this gate.
+                         M16-B: the card shows the recap the owner is agreeing to —
+                         summary + roadmap — and is revision-aware. A revision to an
+                         already-approved plan preserves built work; a first plan
+                         writes fresh memory. --}}
+                    @php $plan = $this->proposedPlan; $isRevision = $this->planExists; @endphp
                     <div class="max-w-[640px] rounded-lg border bg-surface-raised p-4 space-y-3">
-                        <p class="font-mono text-micro uppercase tracking-[.14em] text-accent">Plan approval</p>
-                        <p class="text-body-sm text-text">Consensus reached. Approve to let the Architect write the project memory — architecture.md, roadmap.md and the first task brief. Not confident yet? Keep talking below; the scope stays open.</p>
+                        <p class="font-mono text-micro uppercase tracking-[.14em] text-accent">{{ $isRevision ? 'Revised plan' : 'Plan approval' }}</p>
+
+                        @if($plan)
+                            @if(!empty($plan['summary']))
+                                <p class="text-body-sm text-t2">{{ $plan['summary'] }}</p>
+                            @endif
+                            @if(!empty($plan['roadmap_md']))
+                                <details class="text-caption text-t3" open>
+                                    <summary class="cursor-pointer font-mono text-meta text-mute hover:text-t3">roadmap</summary>
+                                    <pre class="mt-2 max-h-[280px] overflow-auto rounded-md border border-border-soft bg-bg p-2 whitespace-pre-wrap text-caption text-t2">{{ $plan['roadmap_md'] }}</pre>
+                                </details>
+                            @endif
+                        @endif
+
+                        <p class="text-body-sm text-text">
+                            @if($isRevision)
+                                Approve to update the roadmap. Existing milestones and tasks are preserved — reworded or added, never renumbered — and the build loop is reset to the first pending task. Not sure yet? Keep talking below; the scope stays open.
+                            @else
+                                Consensus reached. Approve to let the Architect write the project memory — architecture.md, roadmap.md and the first task brief. Not confident yet? Keep talking below; the scope stays open.
+                            @endif
+                        </p>
                         <div class="flex items-center gap-3">
-                            <button wire:click="approvePlan" wire:loading.attr="disabled" class="rounded-lg px-3 py-1.5 text-body-sm font-semibold disabled:opacity-55">
-                                <span wire:loading.remove wire:target="approvePlan">Approve plan</span>
+                            <button wire:click="approvePlan" wire:confirm="{{ $isRevision ? 'Approve this revised plan? Majordom will update the roadmap and reset the build loop.' : 'Approve this plan and start the build? Majordom will begin executing immediately.' }}" wire:loading.attr="disabled" class="rounded-lg px-3 py-1.5 text-body-sm font-semibold disabled:opacity-55">
+                                <span wire:loading.remove wire:target="approvePlan">{{ $isRevision ? 'Approve revision' : 'Approve plan' }}</span>
                                 <span wire:loading wire:target="approvePlan">Approving…</span>
                             </button>
-                            <span class="font-mono text-meta text-faint">writes project memory · nothing touches your repo</span>
+                            <span class="font-mono text-meta text-faint">{{ $isRevision ? 'updates the roadmap · preserves built work' : 'writes project memory · nothing touches your repo' }}</span>
                         </div>
                     </div>
                 @endif
+
+                {{-- M15: the "Architect stalled" card is gone. With the tool
+                     contract a consensus turn always ends in a known state (a
+                     question to answer, a plan to approve, or a plain reply that
+                     is simply the owner's turn) — there is no stall to recover. --}}
 
                 @if($this->plannedTask)
                     <div class="max-w-[640px] rounded-lg border border-border-strong bg-surface-raised p-4 space-y-3">
@@ -108,10 +156,62 @@
                     </div>
                 @endif
 
+                @if($this->retryableTask)
+                    <div class="max-w-[640px] rounded-lg border border-status-failed/40 bg-surface-raised p-4 space-y-3">
+                        <p class="font-mono text-micro uppercase tracking-[.14em] text-failed-text">Task stuck — recover</p>
+                        <p class="text-body-sm text-text">
+                            <span class="font-mono">{{ $this->retryableTask['key'] }}</span> — {{ $this->retryableTask['title'] }}
+                        </p>
+                        @if($this->retryableTask['reason'])
+                            <p class="font-mono text-meta text-mute">{{ $this->retryableTask['reason'] }}</p>
+                        @endif
+                        <div class="flex flex-wrap items-center gap-3">
+                            <button wire:click="retryTask('{{ $this->retryableTask['key'] }}', false)" wire:loading.attr="disabled" class="rounded-lg border border-border-hover px-3 py-1.5 text-body-sm font-medium text-hi hover:bg-surface-active disabled:opacity-55">
+                                Retry with a fresh brief
+                            </button>
+                            <button wire:click="retryTask('{{ $this->retryableTask['key'] }}', true)" wire:loading.attr="disabled" class="rounded-lg bg-accent px-3 py-1.5 text-body-sm font-semibold text-accent-ink disabled:opacity-55">
+                                Retry on the frontier Builder
+                            </button>
+                        </div>
+                        <p class="font-mono text-meta text-faint">regenerates the brief from the current roadmap, then rebuilds</p>
+                    </div>
+                @endif
+
+                {{-- M16-A: milestones the owner set aside ("Not yet — keep it ready").
+                     The branch/worktree are intact; merging is one click away, so the
+                     "deferred" state is never a dead end. --}}
+                @foreach($this->deferredMilestoneGates as $gate)
+                    @php $dRecap = $gate->payload['recap'] ?? []; $dStat = $dRecap['diffstat'] ?? null; @endphp
+                    <div class="max-w-[640px] rounded-lg border border-border-strong bg-surface-raised p-4 space-y-3">
+                        <p class="font-mono text-micro uppercase tracking-[.14em] text-mute">Merge later — ready when you are</p>
+                        <p class="text-body-sm text-text">{{ $gate->title }}</p>
+                        <div class="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-meta text-mute">
+                            @if(!empty($dRecap['branch']))<span>branch: <span class="text-t3">{{ $dRecap['branch'] }}</span></span>@endif
+                            @if($dStat)
+                                <span>· {{ $dStat['files'] }} file(s)</span>
+                                <span class="text-diff-add-text">+{{ $dStat['insertions'] }}</span>
+                                <span class="text-diff-del-text">−{{ $dStat['deletions'] }}</span>
+                            @endif
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <button wire:click="mergeDeferred({{ $gate->id }})" wire:loading.attr="disabled" wire:target="mergeDeferred({{ $gate->id }})" class="rounded-lg bg-accent px-3 py-1.5 text-body-sm font-semibold text-accent-ink disabled:opacity-55">
+                                <span wire:loading.remove wire:target="mergeDeferred({{ $gate->id }})">Merge now &amp; start next</span>
+                                <span wire:loading wire:target="mergeDeferred({{ $gate->id }})">Merging…</span>
+                            </button>
+                            <span class="font-mono text-meta text-faint">promotes {{ $dRecap['branch'] ?? 'the milestone branch' }} into your checked-out branch</span>
+                        </div>
+                    </div>
+                @endforeach
+
                 @if($this->latestExecution)
                     <div class="max-w-[640px] rounded-lg border border-border bg-surface-card px-4 py-3">
                         <div class="flex items-center gap-2 flex-wrap">
                             <span class="font-mono text-meta text-mute">execution #{{ $this->latestExecution->id }}</span>
+                            @if($this->builderBadge)
+                                <span class="font-mono text-meta {{ $this->builderBadge['downgraded'] ? 'text-accent' : 'text-mute' }}">
+                                    · {{ $this->builderBadge['label'] }} Builder
+                                </span>
+                            @endif
                             @foreach($this->latestExecution->nodes as $index => $node)
                                 @if($index > 0)<span class="text-faint">·</span>@endif
                                 @php
@@ -142,160 +242,63 @@
                     </div>
                 @endif
 
-                @if($this->openApproval)
-                    @if($this->openApproval->type === \App\Enums\ApprovalType::HumanTask)
-                        <div class="max-w-[640px] rounded-lg border bg-surface-raised p-4 space-y-3">
-                            <div class="flex items-center gap-2">
-                                <span class="rounded-[5px] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[.1em]">Your Turn</span>
-                                <p class="text-body-sm text-text">{{ $this->openApproval->title }}</p>
-                            </div>
-                            <div class="font-mono text-meta text-mute">
-                                worktree: {{ $this->openApproval->payload['worktree'] ?? 'N/A' }}
-                            </div>
-                            <details class="text-caption text-t3">
-                                <summary class="cursor-pointer font-mono text-meta text-mute hover:text-t3">view brief</summary>
-                                <pre class="mt-2 max-h-[200px] overflow-auto rounded-md border border-border-soft bg-bg p-2 whitespace-pre-wrap">{{ $this->openApproval->payload['brief'] ?? '' }}</pre>
-                            </details>
-                            <input type="text" wire:model="gateComment" placeholder="Comment (required to skip)…" class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-body text-hi placeholder:text-faint">
-                            @error('gateComment') <p class="text-caption text-failed-text">{{ $message }}</p> @enderror
-                            <div class="flex items-center gap-3">
-                                <button wire:click="approveApproval" wire:loading.attr="disabled" class="rounded-lg bg-accent px-3 py-1.5 text-body-sm font-semibold text-accent-ink disabled:opacity-55">
-                                    <span wire:loading.remove wire:target="approveApproval">I'm done</span>
-                                    <span wire:loading wire:target="approveApproval">Submitting…</span>
-                                </button>
-                                <button wire:click="rejectApproval" wire:loading.attr="disabled" class="rounded-lg border border-failed-border px-3 py-1.5 text-body-sm font-semibold text-failed-text disabled:opacity-55 hover:bg-failed-tint">
-                                    <span wire:loading.remove wire:target="rejectApproval">Skip / park</span>
-                                    <span wire:loading wire:target="rejectApproval">Parking…</span>
-                                </button>
-                            </div>
-                        </div>
-                    @elseif($this->openApproval->type === \App\Enums\ApprovalType::Review)
-                        <div class="max-w-[640px] rounded-lg border bg-surface-raised p-4 space-y-3">
-                            <div class="flex items-center gap-2">
-                                <span class="rounded-[5px] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[.1em]">Gate</span>
-                                <p class="text-body-sm text-text">{{ $this->openApproval->title }}</p>
-                                <div class="ml-auto font-mono text-meta">
-                                    @if($this->openApproval->payload['testsPassed'] === true)
-                                        <span class="text-ok">tests ✓</span>
-                                    @elseif($this->openApproval->payload['testsPassed'] === false)
-                                        <span class="text-failed-text">tests ✗</span>
-                                    @else
-                                        <span class="text-mute">no tests</span>
-                                    @endif
+                @if($this->commitSuggestion)
+                    <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+                        <div class="max-w-[720px] w-full max-h-[85vh] overflow-auto rounded-lg border border-border bg-surface-raised p-5 space-y-3">
+                            <p class="font-mono text-micro uppercase tracking-[.14em] text-ok">COMMIT READY</p>
+                            <p class="font-mono text-meta text-mute">branch {{ $this->commitSuggestion->branch }} · you commit — Majordom never does</p>
+                            <textarea readonly rows="6" class="w-full rounded-md border border-border-soft bg-surface p-3 font-mono text-[12px] text-body">{{ $this->commitSuggestion->message }}</textarea>
+                            <div x-data="{ open: false }">
+                                <button type="button" @click="open = !open" class="cursor-pointer font-mono text-meta text-mute hover:text-t3">view diff</button>
+                                <div x-show="open" x-cloak>
+                                <div class="mt-2 max-h-[420px] overflow-auto rounded-md border border-border-soft bg-surface font-mono text-[12px] leading-[1.75]">
+                                    @php
+                                        $commitDiffLines = explode("\n", $this->commitSuggestion->diff ?? '');
+                                    @endphp
+                                    @foreach($commitDiffLines as $line)
+                                        @php
+                                            $cls = 'text-t3';
+                                            if (str_starts_with($line, '+++') || str_starts_with($line, '---')) { $cls = 'text-t3'; }
+                                            elseif (str_starts_with($line, '+')) { $cls = 'bg-diff-add-bg text-diff-add-text'; }
+                                            elseif (str_starts_with($line, '-')) { $cls = 'bg-diff-del-bg text-diff-del-text'; }
+                                            elseif (str_starts_with($line, '@@')) { $cls = 'bg-diff-hunk-bg text-diff-hunk-text'; }
+                                            elseif (str_starts_with($line, 'diff --git')) { $cls = 'text-t2 font-semibold'; }
+                                        @endphp
+                                        <div class="whitespace-pre px-4 {{ $cls }}">{{ $line }}</div>
+                                    @endforeach
+                                </div>
                                 </div>
                             </div>
-
-                            <p class="font-mono text-meta text-mute">{{ count($this->openApproval->payload['filesChanged'] ?? []) }} file(s) · builder: {{ config('majordom.builder.gateway_model') }}</p>
-
-                            <p class="text-body-sm text-t2">{{ $this->openApproval->payload['verdict']['summary'] ?? '' }}</p>
-                            @if(!empty($this->openApproval->payload['verdict']['comments']))
-                                <ul class="text-caption text-t3 list-disc pl-4 space-y-1">
-                                    @foreach($this->openApproval->payload['verdict']['comments'] as $comment)
-                                        {{-- Reviewer comments may be plain strings or {file, comment} objects. --}}
-                                        <li>
-                                            @if(is_array($comment))
-                                                @if(!empty($comment['file']))<span class="font-mono text-mute">{{ $comment['file'] }}:</span> @endif{{ $comment['comment'] ?? $comment['text'] ?? '' }}
-                                            @else
-                                                {{ $comment }}
-                                            @endif
-                                        </li>
-                                    @endforeach
-                                </ul>
-                            @endif
-
-                            <div class="max-h-[420px] overflow-auto rounded-md border border-border-soft bg-surface font-mono text-[12px] leading-[1.75]">
-                                @php
-                                    $diffLines = explode("\n", $this->openApproval->payload['diff'] ?? '');
-                                @endphp
-                                @foreach($diffLines as $line)
-                                    @php
-                                        $cls = 'text-t3';
-                                        if (str_starts_with($line, '+++') || str_starts_with($line, '---')) { $cls = 'text-t3'; }
-                                        elseif (str_starts_with($line, '+')) { $cls = 'bg-diff-add-bg text-diff-add-text'; }
-                                        elseif (str_starts_with($line, '-')) { $cls = 'bg-diff-del-bg text-diff-del-text'; }
-                                        elseif (str_starts_with($line, '@@')) { $cls = 'bg-diff-hunk-bg text-diff-hunk-text'; }
-                                        elseif (str_starts_with($line, 'diff --git')) { $cls = 'text-t2 font-semibold'; }
-                                    @endphp
-                                    <div class="whitespace-pre px-4 {{ $cls }}">{{ $line }}</div>
-                                @endforeach
-                            </div>
-
-                            <input type="text" wire:model="gateComment" placeholder="Comment (required to reject)…" class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-body text-hi placeholder:text-faint">
-                            @error('gateComment') <p class="text-caption text-failed-text">{{ $message }}</p> @enderror
-
-                            <div class="flex items-center gap-3">
-                                <button wire:click="approveApproval" wire:loading.attr="disabled" class="rounded-lg px-3 py-1.5 text-body-sm font-semibold disabled:opacity-55">
-                                    <span wire:loading.remove wire:target="approveApproval">Approve</span>
-                                    <span wire:loading wire:target="approveApproval">Approving…</span>
+                            <input type="text" wire:model="commitComment" placeholder="Comment (required for rework)…"
+                                   class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-body-sm text-hi placeholder:text-faint">
+                            @error('commitComment') <p class="text-caption text-failed-text">{{ $message }}</p> @enderror
+                            <div class="flex items-center gap-2">
+                                <button wire:click="applyCommit" wire:confirm="Squash-merge {{ $this->commitSuggestion->branch }} into your current branch and commit?" wire:loading.attr="disabled"
+                                        class="rounded-lg bg-accent px-3 py-1.5 text-body-sm font-semibold text-accent-ink disabled:opacity-55">
+                                    <span wire:loading.remove wire:target="applyCommit">Merge into {{ $this->commitSuggestion->branch }}</span>
+                                    <span wire:loading wire:target="applyCommit">Merging…</span>
                                 </button>
-                                <button wire:click="rejectApproval" wire:loading.attr="disabled" class="rounded-lg border px-3 py-1.5 text-body-sm font-semibold text-failed-text disabled:opacity-55 hover:bg-failed-tint">
-                                    <span wire:loading.remove wire:target="rejectApproval">Reject</span>
-                                    <span wire:loading wire:target="rejectApproval">Rejecting…</span>
+                                <button wire:click="reworkCommit" wire:loading.attr="disabled"
+                                        class="rounded-lg border border-border-hover px-3 py-1.5 text-body-sm font-semibold text-[#c7d2df] hover:bg-surface-active disabled:opacity-55">
+                                    <span wire:loading.remove wire:target="reworkCommit">Rework</span>
+                                    <span wire:loading wire:target="reworkCommit">Restarting…</span>
                                 </button>
                             </div>
                         </div>
-                    @elseif($this->openApproval->type === \App\Enums\ApprovalType::MilestoneMerge)
-                        <div class="max-w-[640px] rounded-lg border border-ok/40 bg-surface-card p-4 space-y-3">
-                            <p class="font-mono text-micro uppercase tracking-[.14em] text-ok">Milestone complete</p>
-                            <p class="text-body-sm text-text">{{ $this->openApproval->title }}</p>
-                            <p class="font-mono text-meta text-mute">Merging promotes this milestone's branch into your main branch. The next milestone starts automatically.</p>
-                            <input type="text" wire:model="gateComment" placeholder="Optional note…" class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-body text-hi placeholder:text-faint">
-                            <div class="flex items-center gap-3">
-                                <button wire:click="approveApproval" wire:loading.attr="disabled" class="rounded-lg bg-accent px-3 py-1.5 text-body-sm font-semibold text-accent-ink disabled:opacity-55">
-                                    <span wire:loading.remove wire:target="approveApproval">Merge into main &amp; start next</span>
-                                    <span wire:loading wire:target="approveApproval">Merging…</span>
-                                </button>
-                                <button wire:click="rejectApproval" wire:loading.attr="disabled" class="rounded-lg border border-border px-3 py-1.5 text-body-sm font-semibold text-mute disabled:opacity-55 hover:text-hi">
-                                    <span wire:loading.remove wire:target="rejectApproval">Not yet</span>
-                                    <span wire:loading wire:target="rejectApproval">…</span>
-                                </button>
-                            </div>
-                        </div>
-                    @endif
+                    </div>
                 @endif
 
-                @if($this->commitSuggestion)
-                    <div class="max-w-[640px] rounded-lg border border-border bg-surface-card p-4 space-y-3">
-                        <p class="font-mono text-micro uppercase tracking-[.14em] text-ok">COMMIT READY</p>
-                        <p class="font-mono text-meta text-mute">branch {{ $this->commitSuggestion->branch }} · you commit — Majordom never does</p>
-                        <textarea readonly rows="6" class="w-full rounded-md border border-border-soft bg-surface p-3 font-mono text-[12px] text-body">{{ $this->commitSuggestion->message }}</textarea>
-                        <div x-data="{ open: false }">
-                            <button type="button" @click="open = !open" class="cursor-pointer font-mono text-meta text-mute hover:text-t3">view diff</button>
-                            <div x-show="open" x-cloak>
-                            <div class="mt-2 max-h-[420px] overflow-auto rounded-md border border-border-soft bg-surface font-mono text-[12px] leading-[1.75]">
-                                @php
-                                    $commitDiffLines = explode("\n", $this->commitSuggestion->diff ?? '');
-                                @endphp
-                                @foreach($commitDiffLines as $line)
-                                    @php
-                                        $cls = 'text-t3';
-                                        if (str_starts_with($line, '+++') || str_starts_with($line, '---')) { $cls = 'text-t3'; }
-                                        elseif (str_starts_with($line, '+')) { $cls = 'bg-diff-add-bg text-diff-add-text'; }
-                                        elseif (str_starts_with($line, '-')) { $cls = 'bg-diff-del-bg text-diff-del-text'; }
-                                        elseif (str_starts_with($line, '@@')) { $cls = 'bg-diff-hunk-bg text-diff-hunk-text'; }
-                                        elseif (str_starts_with($line, 'diff --git')) { $cls = 'text-t2 font-semibold'; }
-                                    @endphp
-                                    <div class="whitespace-pre px-4 {{ $cls }}">{{ $line }}</div>
-                                @endforeach
+                @if($commitWarning !== null)
+                    <div class="fixed inset-0 z-[60] flex items-center justify-center bg-black/60">
+                        <div class="max-w-[480px] w-full rounded-lg border border-failed-border bg-surface-raised p-5 space-y-3">
+                            <div class="flex items-center gap-2">
+                                <span class="text-failed-text text-lg">⚠</span>
+                                <p class="font-mono text-micro uppercase tracking-[.14em] text-failed-text">CAN'T MERGE</p>
                             </div>
+                            <p class="text-body-sm text-text">{{ $commitWarning }}</p>
+                            <div class="flex justify-end">
+                                <button wire:click="$set('commitWarning', null)" class="rounded-lg border border-border px-3 py-1.5 text-body-sm font-semibold text-mute hover:text-hi hover:bg-surface-active">OK</button>
                             </div>
-                        </div>
-                        <input type="text" wire:model="commitComment" placeholder="Comment (required for rework / reject)…"
-                               class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-body-sm text-hi placeholder:text-faint">
-                        @error('commitComment') <p class="text-caption text-failed-text">{{ $message }}</p> @enderror
-                        <div class="flex items-center gap-2">
-                            <button wire:click="applyCommit" wire:confirm="Squash-merge {{ $this->commitSuggestion->branch }} into your current branch and commit?" wire:loading.attr="disabled"
-                                    class="rounded-lg bg-accent px-3 py-1.5 text-body-sm font-semibold text-accent-ink disabled:opacity-55">
-                                <span wire:loading.remove wire:target="applyCommit">Commit</span>
-                                <span wire:loading wire:target="applyCommit">Committing…</span>
-                            </button>
-                            <button wire:click="reworkCommit" wire:loading.attr="disabled"
-                                    class="rounded-lg border border-border-hover px-3 py-1.5 text-body-sm font-semibold text-[#c7d2df] hover:bg-surface-active disabled:opacity-55">
-                                <span wire:loading.remove wire:target="reworkCommit">Rework</span>
-                                <span wire:loading wire:target="reworkCommit">Restarting…</span>
-                            </button>
-                            <button wire:click="rejectCommit" wire:loading.attr="disabled"
-                                    class="rounded-lg border border-failed-border px-3 py-1.5 text-body-sm font-semibold text-failed-text hover:bg-failed-tint disabled:opacity-55">Reject</button>
                         </div>
                     </div>
                 @endif
@@ -309,41 +312,18 @@
             </div>
 
             <div class="border-t border-border py-4">
-                @if(! $this->planExists)
-                    {{-- Consensus phase: free chat with the Architect. --}}
-                    <form wire:submit="send" class="flex gap-2">
-                        <textarea wire:model="draft" rows="2" placeholder="Describe what to build…" class="flex-1 rounded-lg border border-border-strong bg-surface px-3 py-2 text-body text-hi placeholder:text-faint" @disabled($this->thinking)></textarea>
-                        <button type="submit" wire:loading.attr="disabled" class="rounded-lg border border-border-hover px-3 py-1.5 text-body-sm font-semibold text-[#c7d2df] hover:bg-surface-active disabled:opacity-55" @disabled($this->thinking)>
-                            <span wire:loading.remove wire:target="send">Send</span>
-                            <span wire:loading wire:target="send">Sending…</span>
-                        </button>
-                    </form>
-                    @error('draft') <p class="text-caption text-failed-text mt-1">{{ $message }}</p> @enderror
-                @elseif($chatMode === null)
-                    {{-- Post-plan: free chat is off; steer via defined actions. --}}
-                    <div class="flex flex-wrap items-center gap-2">
-                        <span class="font-mono text-meta text-mute mr-1">steer the project:</span>
-                        <button wire:click="setChatMode('add_context')" @disabled($this->thinking) class="rounded-lg border border-border px-3 py-1.5 text-body-sm font-medium text-hi hover:bg-surface-active disabled:opacity-55">Add context</button>
-                        <button wire:click="setChatMode('redefine')" @disabled($this->thinking) class="rounded-lg border border-border px-3 py-1.5 text-body-sm font-medium text-hi hover:bg-surface-active disabled:opacity-55">Redefine milestones / specs</button>
-                    </div>
-                @else
-                    {{-- A mode is active: labeled composer. --}}
-                    <form wire:submit="submitChatMode" class="space-y-2">
-                        <p class="font-mono text-meta text-accent">
-                            {{ $chatMode === 'add_context'
-                                ? 'Adding context — a durable constraint every future task will follow.'
-                                : 'Redefining the roadmap — the Architect amends milestones/tasks (keys stay stable).' }}
-                        </p>
-                        <textarea wire:model="draft" rows="2" placeholder="{{ $chatMode === 'add_context' ? 'e.g. Must also work on Wayland…' : 'e.g. Split milestone 3 into UI and daemon…' }}" class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-body text-hi placeholder:text-faint" @disabled($this->thinking)></textarea>
-                        <div class="flex items-center gap-2">
-                            <button type="submit" wire:loading.attr="disabled" class="rounded-lg bg-accent px-3 py-1.5 text-body-sm font-semibold text-accent-ink disabled:opacity-55" @disabled($this->thinking)>
-                                {{ $chatMode === 'add_context' ? 'Add' : 'Redefine' }}
-                            </button>
-                            <button type="button" wire:click="cancelChatMode" class="rounded-lg border border-border px-3 py-1.5 text-body-sm font-medium text-mute hover:text-hi">Cancel</button>
-                        </div>
-                        @error('draft') <p class="text-caption text-failed-text">{{ $message }}</p> @enderror
-                    </form>
-                @endif
+                {{-- M16-B: one conversation, before and after the plan. The same
+                     free chat reaches the Architect the whole way — a plain reply
+                     to a proposal continues consensus; asking for a change lets the
+                     Architect re-propose (no forced mode buttons). --}}
+                <form wire:submit="send" class="flex gap-2">
+                    <textarea wire:model="draft" rows="2" placeholder="{{ $this->planExists ? 'Ask a question, add a constraint, or request a change…' : 'Describe what to build…' }}" class="flex-1 rounded-lg border border-border-strong bg-surface px-3 py-2 text-body text-hi placeholder:text-faint" @disabled($this->thinking)></textarea>
+                    <button type="submit" wire:loading.attr="disabled" class="rounded-lg border border-border-hover px-3 py-1.5 text-body-sm font-semibold text-[#c7d2df] hover:bg-surface-active disabled:opacity-55" @disabled($this->thinking)>
+                        <span wire:loading.remove wire:target="send">Send</span>
+                        <span wire:loading wire:target="send">Sending…</span>
+                    </button>
+                </form>
+                @error('draft') <p class="text-caption text-failed-text mt-1">{{ $message }}</p> @enderror
             </div>
         @elseif($tab === 'overview')
             @include('livewire.partials.project-overview')
@@ -353,6 +333,8 @@
             @include('livewire.partials.project-roadmap')
         @elseif($tab === 'exchanges')
             @include('livewire.partials.project-exchanges')
+        @elseif($tab === 'settings')
+            @include('livewire.partials.project-settings')
         @endif
     </div>
 
@@ -366,65 +348,141 @@
             <div class="flex-1 overflow-y-auto">
                 @forelse($timelineGroups as $group)
                     @php $targetSession = $group['key'] === 'consensus' ? 0 : ($executionSessionMap[$group['key']] ?? null); @endphp
-                    <button type="button"
-                            @if($targetSession !== null) onclick="window.dispatchEvent(new CustomEvent('open-session', { detail: { session: {{ $targetSession }} } }))" @endif
-                            class="block w-full cursor-pointer border-b border-border-soft bg-surface-card px-4 py-1.5 text-left font-mono text-micro uppercase tracking-[.14em] text-mute transition-colors duration-120 hover:bg-surface-active hover:text-accent"
-                            title="show the linked chat session">
-                        {{ $group['key'] === 'consensus' ? 'consensus' : 'execution #'.$group['key'] }} <span class="normal-case tracking-normal text-faint">↖</span>
-                    </button>
-                    @foreach($group['events'] as $ev)
-                        <div class="border-b border-border-soft px-4 py-2.5 cursor-pointer {{ str_contains($ev->name, 'waiting_human') || str_contains($ev->name, 'question') ? 'bg-accent-tint' : '' }} {{ $selectedEventId === $ev->id ? 'bg-surface-active' : '' }}"
-                             @if(!empty($ev->payload['messageId']))
-                                 onclick="document.getElementById('msg-{{ $ev->payload['messageId'] }}')?.scrollIntoView({behavior: 'smooth', block: 'center'})"
-                             @endif>
-                            <button type="button" wire:click="selectEvent({{ $ev->id }})" class="block w-full text-left">
-                                <div class="flex items-baseline gap-2">
-                                    <span class="font-mono text-meta text-mute">{{ $ev->created_at->format('H:i:s') }}</span>
-                                    <span class="font-mono text-[11.5px] font-medium text-text">{{ $ev->name }}</span>
-                                    @php $actor = $ev->actor; @endphp
-                                    <span class="ml-auto rounded-[5px] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[.1em]">{{ $actor }}</span>
+                    <div x-data="{ open: {{ $group['is_current'] ? 'true' : 'false' }} }">
+                        <button type="button"
+                                @click="open = !open"
+                                @if($targetSession !== null) onclick="window.dispatchEvent(new CustomEvent('open-session', { detail: { session: {{ $targetSession }} } }))" @endif
+                                class="flex w-full items-center gap-2 border-b border-border-soft bg-surface-card px-4 py-2 text-left font-mono text-micro uppercase tracking-[.14em] text-mute transition-colors duration-120 hover:bg-surface-active hover:text-accent">
+                            <span class="transition-transform duration-120" :class="open && 'rotate-90'">›</span>
+                            <span>{{ $group['label'] }}</span>
+                            @if(!$group['is_current'])
+                                <span class="ml-auto normal-case tracking-normal text-faint">
+                                    {{ $group['events']->first()?->name ?? 'idle' }}
+                                </span>
+                            @endif
+                        </button>
+
+                        <div x-show="open" x-cloak class="border-b border-border-soft">
+                            @php
+                                $answeredEvents = $group['events']->filter(fn($e) => str_contains($e->name, 'question') && (str_contains($e->name, 'answered') || str_contains($e->name, 'discarded')));
+                                $otherEvents = $group['events']->diff($answeredEvents);
+                            @endphp
+
+                            @if($answeredEvents->isNotEmpty())
+                                <div x-data="{ qOpen: false }">
+                                    <button type="button" @click="qOpen = !qOpen" class="flex w-full items-center gap-2 px-4 py-2 text-left font-mono text-meta text-mute hover:bg-surface-active">
+                                        <span class="transition-transform duration-120" :class="qOpen && 'rotate-90'">›</span>
+                                        <span>{{ $answeredEvents->count() }} answered</span>
+                                    </button>
+                                    <div x-show="qOpen" x-cloak>
+                                        @foreach($answeredEvents as $ev)
+                                            <div class="border-b border-border-soft px-4 py-2.5 cursor-pointer {{ str_contains($ev->name, 'waiting_human') || str_contains($ev->name, 'question') ? 'bg-accent-tint' : '' }} {{ $selectedEventId === $ev->id ? 'bg-surface-active' : '' }}"
+                                                 @if(!empty($ev->payload['messageId']))
+                                                     onclick="document.getElementById('msg-{{ $ev->payload['messageId'] }}')?.scrollIntoView({behavior: 'smooth', block: 'center'})"
+                                                 @endif>
+                                                <button type="button" wire:click="selectEvent({{ $ev->id }})" class="block w-full text-left">
+                                                    <div class="flex items-baseline gap-2">
+                                                        <span class="font-mono text-meta text-mute">{{ $ev->created_at->format('H:i:s') }}</span>
+                                                        <span class="font-mono text-[11.5px] font-medium text-text">{{ $ev->name }}</span>
+                                                        @php $actor = $ev->actor; @endphp
+                                                        <span class="ml-auto rounded-[5px] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[.1em]">{{ $actor }}</span>
+                                                    </div>
+                                                    @if(!empty($ev->payload))
+                                                        <p class="mt-0.5 truncate text-caption">{{ collect($ev->payload)->map(fn ($v, $k) => is_scalar($v) ? "{$k}: {$v}" : null)->filter()->take(2)->implode(' · ') }}</p>
+                                                    @endif
+                                                </button>
+                                            </div>
+                                            @if($selectedEventId === $ev->id)
+                                                <div class="border-b border-border-soft bg-surface px-4 py-3 space-y-2">
+                                                    @php $detail = $this->selectedEventDetail; @endphp
+                                                    @if($detail)
+                                                        <p class="font-mono text-micro uppercase tracking-[.14em] text-mute">payload</p>
+                                                        <pre class="max-h-[200px] overflow-auto rounded-md border border-border-soft bg-bg p-2 font-mono text-[11px] leading-relaxed text-t3">{{ json_encode($detail['event']->payload ?: new stdClass, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) }}</pre>
+                                                        @if($detail['node'])
+                                                            <p class="font-mono text-micro uppercase tracking-[.14em] text-mute">node · {{ $detail['node']->status->value }}@if($detail['node']->started_at) · {{ $detail['node']->started_at->format('H:i:s') }}@endif @if($detail['node']->finished_at)→ {{ $detail['node']->finished_at->format('H:i:s') }}@endif</p>
+                                                            @php $out = collect($detail['node']->output ?? []); @endphp
+                                                            @if($out->has('rawLog'))
+                                                                <div x-data="{ open: false }">
+                                                                    <button type="button" @click="open = !open" class="cursor-pointer font-mono text-meta text-mute hover:text-t3">raw log</button>
+                                                                    <pre x-show="open" x-cloak class="mt-1 max-h-[260px] overflow-auto rounded-md border border-border-soft bg-bg p-2 font-mono text-[11px] text-mute">{{ $out['rawLog'] }}</pre>
+                                                                </div>
+                                                            @endif
+                                                            @if($out->has('diff') && $out['diff'])
+                                                                <div x-data="{ open: false }">
+                                                                    <button type="button" @click="open = !open" class="cursor-pointer font-mono text-meta text-mute hover:text-t3">diff</button>
+                                                                    <pre x-show="open" x-cloak class="mt-1 max-h-[260px] overflow-auto rounded-md border border-border-soft bg-bg p-2 font-mono text-[11px] text-t3">{{ $out['diff'] }}</pre>
+                                                                </div>
+                                                            @endif
+                                                            @php $rest = $out->except(['rawLog', 'diff']); @endphp
+                                                            @if($rest->isNotEmpty())
+                                                                <pre class="max-h-[200px] overflow-auto rounded-md border border-border-soft bg-bg p-2 font-mono text-[11px] leading-relaxed text-t3">{{ json_encode($rest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) }}</pre>
+                                                            @endif
+                                                        @endif
+                                                    @endif
+                                                </div>
+                                            @endif
+                                        @endforeach
+                                    </div>
                                 </div>
-                                @if(!empty($ev->payload))
-                                    <p class="mt-0.5 truncate text-caption">{{ collect($ev->payload)->map(fn ($v, $k) => is_scalar($v) ? "{$k}: {$v}" : null)->filter()->take(2)->implode(' · ') }}</p>
+                            @endif
+
+                            @foreach($otherEvents as $ev)
+                                <div class="border-b border-border-soft px-4 py-2.5 cursor-pointer {{ str_contains($ev->name, 'waiting_human') || str_contains($ev->name, 'question') ? 'bg-accent-tint' : '' }} {{ $selectedEventId === $ev->id ? 'bg-surface-active' : '' }}"
+                                     @if(!empty($ev->payload['messageId']))
+                                         onclick="document.getElementById('msg-{{ $ev->payload['messageId'] }}')?.scrollIntoView({behavior: 'smooth', block: 'center'})"
+                                     @endif>
+                                    <button type="button" wire:click="selectEvent({{ $ev->id }})" class="block w-full text-left">
+                                        <div class="flex items-baseline gap-2">
+                                            <span class="font-mono text-meta text-mute">{{ $ev->created_at->format('H:i:s') }}</span>
+                                            <span class="font-mono text-[11.5px] font-medium text-text">{{ $ev->name }}</span>
+                                            @php $actor = $ev->actor; @endphp
+                                            <span class="ml-auto rounded-[5px] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[.1em]">{{ $actor }}</span>
+                                        </div>
+                                        @if(!empty($ev->payload))
+                                            <p class="mt-0.5 truncate text-caption">{{ collect($ev->payload)->map(fn ($v, $k) => is_scalar($v) ? "{$k}: {$v}" : null)->filter()->take(2)->implode(' · ') }}</p>
+                                        @endif
+                                    </button>
+                                </div>
+                                @if($selectedEventId === $ev->id)
+                                    <div class="border-b border-border-soft bg-surface px-4 py-3 space-y-2">
+                                        @php $detail = $this->selectedEventDetail; @endphp
+                                        @if($detail)
+                                            <p class="font-mono text-micro uppercase tracking-[.14em] text-mute">payload</p>
+                                            <pre class="max-h-[200px] overflow-auto rounded-md border border-border-soft bg-bg p-2 font-mono text-[11px] leading-relaxed text-t3">{{ json_encode($detail['event']->payload ?: new stdClass, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) }}</pre>
+                                            @if($detail['node'])
+                                                <p class="font-mono text-micro uppercase tracking-[.14em] text-mute">node · {{ $detail['node']->status->value }}@if($detail['node']->started_at) · {{ $detail['node']->started_at->format('H:i:s') }}@endif @if($detail['node']->finished_at)→ {{ $detail['node']->finished_at->format('H:i:s') }}@endif</p>
+                                                @php $out = collect($detail['node']->output ?? []); @endphp
+                                                @if($out->has('rawLog'))
+                                                    <div x-data="{ open: false }">
+                                                        <button type="button" @click="open = !open" class="cursor-pointer font-mono text-meta text-mute hover:text-t3">raw log</button>
+                                                        <pre x-show="open" x-cloak class="mt-1 max-h-[260px] overflow-auto rounded-md border border-border-soft bg-bg p-2 font-mono text-[11px] text-mute">{{ $out['rawLog'] }}</pre>
+                                                    </div>
+                                                @endif
+                                                @if($out->has('diff') && $out['diff'])
+                                                    <div x-data="{ open: false }">
+                                                        <button type="button" @click="open = !open" class="cursor-pointer font-mono text-meta text-mute hover:text-t3">diff</button>
+                                                        <pre x-show="open" x-cloak class="mt-1 max-h-[260px] overflow-auto rounded-md border border-border-soft bg-bg p-2 font-mono text-[11px] text-t3">{{ $out['diff'] }}</pre>
+                                                    </div>
+                                                @endif
+                                                @php $rest = $out->except(['rawLog', 'diff']); @endphp
+                                                @if($rest->isNotEmpty())
+                                                    <pre class="max-h-[200px] overflow-auto rounded-md border border-border-soft bg-bg p-2 font-mono text-[11px] leading-relaxed text-t3">{{ json_encode($rest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) }}</pre>
+                                                @endif
+                                            @endif
+                                        @endif
+                                    </div>
                                 @endif
-                            </button>
+                            @endforeach
                         </div>
-                        @if($selectedEventId === $ev->id)
-                            <div class="border-b border-border-soft bg-surface px-4 py-3 space-y-2">
-                                @php $detail = $this->selectedEventDetail; @endphp
-                                @if($detail)
-                                    <p class="font-mono text-micro uppercase tracking-[.14em] text-mute">payload</p>
-                                    <pre class="max-h-[200px] overflow-auto rounded-md border border-border-soft bg-bg p-2 font-mono text-[11px] leading-relaxed text-t3">{{ json_encode($detail['event']->payload ?: new stdClass, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) }}</pre>
-                                    @if($detail['node'])
-                                        <p class="font-mono text-micro uppercase tracking-[.14em] text-mute">node · {{ $detail['node']->status->value }}@if($detail['node']->started_at) · {{ $detail['node']->started_at->format('H:i:s') }}@endif @if($detail['node']->finished_at)→ {{ $detail['node']->finished_at->format('H:i:s') }}@endif</p>
-                                        @php $out = collect($detail['node']->output ?? []); @endphp
-                                        @if($out->has('rawLog'))
-                                            <div x-data="{ open: false }">
-                                                <button type="button" @click="open = !open" class="cursor-pointer font-mono text-meta text-mute hover:text-t3">raw log</button>
-                                                <pre x-show="open" x-cloak class="mt-1 max-h-[260px] overflow-auto rounded-md border border-border-soft bg-bg p-2 font-mono text-[11px] text-mute">{{ $out['rawLog'] }}</pre>
-                                            </div>
-                                        @endif
-                                        @if($out->has('diff') && $out['diff'])
-                                            <div x-data="{ open: false }">
-                                                <button type="button" @click="open = !open" class="cursor-pointer font-mono text-meta text-mute hover:text-t3">diff</button>
-                                                <pre x-show="open" x-cloak class="mt-1 max-h-[260px] overflow-auto rounded-md border border-border-soft bg-bg p-2 font-mono text-[11px] text-t3">{{ $out['diff'] }}</pre>
-                                            </div>
-                                        @endif
-                                        @php $rest = $out->except(['rawLog', 'diff']); @endphp
-                                        @if($rest->isNotEmpty())
-                                            <pre class="max-h-[200px] overflow-auto rounded-md border border-border-soft bg-bg p-2 font-mono text-[11px] leading-relaxed text-t3">{{ json_encode($rest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) }}</pre>
-                                        @endif
-                                    @endif
-                                @endif
-                            </div>
-                        @endif
-                    @endforeach
+                    </div>
                 @empty
                     <p class="px-4 py-6 font-mono text-meta text-faint">no activity yet</p>
                 @endforelse
             </div>
         </aside>
     @endif
+
+    @include('livewire.partials.approval-modal')
 </div>
 
 @script

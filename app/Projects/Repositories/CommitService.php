@@ -158,6 +158,12 @@ class CommitService
             throw new RuntimeException("No milestone branch {$branch} to merge.");
         }
 
+        // Which branch the owner's checkout lands the merge on — so the confirmation
+        // can name it (finding #13: "the folder didn't update"). A detached HEAD
+        // reports as "HEAD"; the merge still lands, but we surface that it wasn't
+        // on a branch so the owner isn't left guessing where the work went.
+        $onBranch = trim(Process::path($repo)->run(['git', 'rev-parse', '--abbrev-ref', 'HEAD'])->output());
+
         $merge = Process::path($repo)
             ->env($this->committerEnv($repo))
             ->run(['git', 'merge', '--no-ff', $branch, '-m', "Merge milestone {$m->milestone_key}: {$m->title}"]);
@@ -167,8 +173,14 @@ class CommitService
             throw new RuntimeException('Milestone merge failed: '.trim($merge->errorOutput()));
         }
 
+        // Report the resulting HEAD so the owner can SEE the merge landed and
+        // where — the visibility that was missing when the folder "stayed put".
+        $head = trim(Process::path($repo)->run(['git', 'rev-parse', '--short', 'HEAD'])->output());
+
         $this->events->record($m->project, 'milestone.merged', [
             'milestone_key' => $m->milestone_key,
+            'into_branch' => $onBranch !== '' ? $onBranch : null,
+            'head' => $head !== '' ? $head : null,
         ], null, 'you');
 
         $this->worktrees->removeMilestoneWorktree($m->project, $m);
@@ -204,6 +216,56 @@ class CommitService
         if ($suggestion->status !== 'suggested') {
             throw new RuntimeException('This suggestion was already resolved.');
         }
+    }
+
+    /**
+     * Write a set of files into the repo working tree and commit them as the
+     * initial scaffold (M14a/T-67 Architect bootstrap of a greenfield repo).
+     * `git init`s the repo if needed. Paths are confined to the repo (no `..`,
+     * no absolute). Returns true on a successful commit.
+     *
+     * @param array<int, array{path: string, contents: string}> $files
+     */
+    public function commitScaffold(string $repoPath, array $files, string $message): bool
+    {
+        $repoPath = rtrim($repoPath, '/');
+        if ($repoPath === '' || ! is_dir($repoPath)) {
+            return false;
+        }
+
+        if (! is_dir($repoPath.'/.git')) {
+            $init = Process::path($repoPath)->run(['git', 'init', '-q']);
+            if (! $init->successful()) {
+                return false;
+            }
+        }
+
+        $wrote = 0;
+        foreach ($files as $file) {
+            $rel = ltrim((string) ($file['path'] ?? ''), '/');
+            if ($rel === '' || str_contains($rel, '..')) {
+                continue; // reject traversal / absolute paths
+            }
+            $target = $repoPath.'/'.$rel;
+            $dir = dirname($target);
+            if (! is_dir($dir) && ! mkdir($dir, 0777, true) && ! is_dir($dir)) {
+                continue;
+            }
+            if (@file_put_contents($target, (string) ($file['contents'] ?? '')) !== false) {
+                $wrote++;
+            }
+        }
+
+        if ($wrote === 0) {
+            return false;
+        }
+
+        Process::path($repoPath)->run(['git', 'add', '-A']);
+        $commit = Process::path($repoPath)
+            ->env($this->committerEnv($repoPath))
+            ->run(['git', 'commit', '-m', $message]);
+
+        return $commit->successful();
     }
 
     /**

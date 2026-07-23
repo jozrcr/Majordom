@@ -3,6 +3,8 @@
 namespace App\Models;
 
 use App\Enums\ApprovalStatus;
+use App\Enums\ApprovalType;
+use App\Enums\CapabilityLevel;
 use App\Enums\ProjectStatus;
 use App\Enums\QuestionStatus;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -25,6 +27,8 @@ class Project extends Model
         'archived_at',
         'workflow_id',
         'confirm_commits',
+        'capability_level',
+        'actor_budgets',
     ];
 
     protected function casts(): array
@@ -34,7 +38,34 @@ class Project extends Model
             'last_activity_at' => 'datetime',
             'archived_at' => 'datetime',
             'confirm_commits' => 'boolean',
+            'capability_level' => CapabilityLevel::class,
+            'actor_budgets' => 'array',
         ];
+    }
+
+    /**
+     * Per-actor daily spend budget for this project (M14b), or null when the
+     * actor is excluded/uncapped. Shape: ['daily_cap_usd' => float, 'backup' =>
+     * '<role>'|null]. Enforcement lives in App\Core\Usage\SpendGuard.
+     *
+     * @return array{daily_cap_usd?: float, backup?: ?string}|null
+     */
+    public function actorBudget(string $role): ?array
+    {
+        $budgets = $this->actor_budgets ?? [];
+        $entry = $budgets[$role] ?? null;
+
+        return is_array($entry) ? $entry : null;
+    }
+
+    /**
+     * The Architect's granted repository-access tier (M14b opt-in rights),
+     * defaulting to Read when unset. Use this — never the raw column — so a null
+     * always resolves to the safe default.
+     */
+    public function capability(): CapabilityLevel
+    {
+        return $this->capability_level ?? CapabilityLevel::Read;
     }
 
     public function workflow(): BelongsTo
@@ -80,6 +111,16 @@ class Project extends Model
     public function openApprovals(): HasMany
     {
         return $this->hasMany(Approval::class)->where('status', ApprovalStatus::Open);
+    }
+
+    /** M16-A: milestone merges the owner set aside — kept ready to merge later,
+     *  surfaced apart from the "Needs You" inbox. */
+    public function deferredMilestoneGates(): HasMany
+    {
+        return $this->hasMany(Approval::class)
+            ->where('status', ApprovalStatus::Deferred)
+            ->where('type', ApprovalType::MilestoneMerge)
+            ->latest('id');
     }
 
     public function events(): HasMany

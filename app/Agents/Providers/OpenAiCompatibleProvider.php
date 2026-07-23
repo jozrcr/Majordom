@@ -65,15 +65,27 @@ class OpenAiCompatibleProvider implements Provider
             $body['stop'] = $request->stop;
         }
 
+        // M15 tool contract: offer tools when the caller set them. Absent tools
+        // ⇒ plain-chat behavior, unchanged. tool_choice defaults to "auto".
+        if ($request->tools !== null && $request->tools !== []) {
+            $body['tools'] = array_map(fn (ToolDefinition $t) => $t->toOpenAi(), $request->tools);
+            $body['tool_choice'] = $this->toolChoicePayload($request->toolChoice);
+        }
+
         try {
             $response = Http::baseUrl($this->baseUrl)
                 ->timeout($request->timeout ?? $this->timeout)
+                // Transient connection blips / timeouts (common with slow
+                // reasoning models) must not lose the turn — retry a few times
+                // before surfacing. Only ConnectionException triggers a retry
+                // here (non-2xx is handled below, never auto-retried).
+                ->retry(3, 500, throw: false)
                 ->acceptJson()
                 ->withToken($this->apiKey)
                 ->withHeaders($this->extraHeaders)
                 ->post('/chat/completions', $body);
         } catch (ConnectionException $e) {
-            throw new ProviderUnreachable('Failed to connect to provider.', 0, $e);
+            throw new ProviderUnreachable('Could not reach the provider after retries (connection/timeout).', 0, $e);
         }
 
         if (!$response->successful()) {
@@ -95,5 +107,16 @@ class OpenAiCompatibleProvider implements Provider
         }
 
         return ProviderResponse::fromOpenAi($json);
+    }
+
+    /** Map the normalized tool_choice to the OpenAI wire shape. */
+    private function toolChoicePayload(?string $choice): string|array
+    {
+        return match ($choice) {
+            null, 'auto' => 'auto',
+            'required' => 'required',
+            'none' => 'none',
+            default => ['type' => 'function', 'function' => ['name' => $choice]],
+        };
     }
 }

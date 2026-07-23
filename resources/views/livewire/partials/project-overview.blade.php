@@ -32,48 +32,83 @@
     </div>
 
     <div class="rounded-lg border border-border bg-surface-card p-4 space-y-3">
-        <h2 class="text-lg font-semibold text-hi">Agreed Plan</h2>
-        @if($this->planText || $this->plannedTask)
+        <h2 class="text-lg font-semibold text-hi">Project Summary</h2>
+        @if($this->projectSummaryText)
             <div x-data="{ open: false }">
                 <button type="button" @click="open = !open" class="flex w-full items-center justify-between text-left text-body-sm text-text hover:text-hi cursor-pointer">
-                    <span>
-                        @if($this->plannedTask)
-                            First task: <span class="font-mono">{{ $this->plannedTask['key'] }}</span> — {{ $this->plannedTask['title'] }}
-                        @else
-                            View the agreed plan
-                        @endif
-                    </span>
+                    <span>View project summary</span>
                     <span class="transition-transform duration-120" :class="open && 'rotate-180'">▼</span>
                 </button>
                 <div x-show="open" x-cloak class="mt-2">
-                    @if($this->planText)
-                        <pre class="whitespace-pre-wrap font-mono text-xs text-t2 leading-relaxed">{{ $this->planText }}</pre>
-                    @else
-                        <p class="text-body-sm text-t2">Plan approved. Builder will execute tasks sequentially.</p>
-                    @endif
+                    <pre class="whitespace-pre-wrap font-mono text-xs text-t2 leading-relaxed">{{ $this->projectSummaryText }}</pre>
                 </div>
             </div>
         @else
-            <p class="text-body-sm text-mute">No approved plan yet. Consensus is needed to generate the project memory and task briefs.</p>
+            <p class="text-body-sm text-mute">No summary yet. Consensus writes the project memory at plan approval.</p>
         @endif
     </div>
 
     <div class="rounded-lg border border-border bg-surface-card p-4 space-y-3">
-        <h2 class="text-lg font-semibold text-hi">Recent Consensus</h2>
-        @forelse($this->recentConsensus as $msg)
-            <div class="border-b border-border-soft pb-2 last:border-0 last:pb-0" x-data="{ open: false }">
-                <button type="button" @click="open = !open" class="flex w-full items-center gap-2 text-left cursor-pointer hover:opacity-80">
-                    <span class="rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-surface-active text-mute">{{ $msg->role->value }}</span>
-                    <span class="text-xs text-mute">{{ $msg->created_at->diffForHumans() }}</span>
-                    <span class="ml-auto text-mute transition-transform duration-120" :class="open && 'rotate-180'">▼</span>
-                </button>
-                <div x-show="open" x-cloak class="mt-2">
-                    <p class="text-sm text-t2">{{ strip_tags($msg->content) }}</p>
-                </div>
-                <p class="text-sm text-t2 line-clamp-1 mt-1" x-show="!open">{{ Str::limit(strip_tags($msg->content), 150) }}</p>
+        <h2 class="text-lg font-semibold text-hi">Agreed Specs</h2>
+        @forelse($this->agreedSpecs as $q)
+            <div class="border-b border-border-soft pb-2 last:border-0 last:pb-0">
+                <p class="text-body-sm text-text">{{ $q->text }}</p>
+                <p class="text-body-sm text-t2">→ {{ $q->answer }}</p>
             </div>
         @empty
-            <p class="text-body-sm text-mute">No consensus messages yet.</p>
+            <p class="text-body-sm text-mute">No settled specs yet.</p>
         @endforelse
+    </div>
+
+    <div class="rounded-lg border border-border bg-surface-card p-4 space-y-3">
+        <h2 class="text-lg font-semibold text-hi">Recent Consensus</h2>
+        @php
+            $groupedConsensus = [];
+            $currentGroup = [];
+            foreach ($this->recentConsensus as $msg) {
+                if ($msg->role === \App\Enums\MessageRole::User) {
+                    $currentGroup[] = $msg;
+                } else {
+                    if (!empty($currentGroup)) {
+                        $groupedConsensus[] = $currentGroup;
+                        $currentGroup = [];
+                    }
+                    $groupedConsensus[] = [$msg];
+                }
+            }
+            if (!empty($currentGroup)) {
+                $groupedConsensus[] = $currentGroup;
+            }
+        @endphp
+        @if(empty($groupedConsensus))
+            <p class="text-body-sm text-mute">No consensus messages yet.</p>
+        @else
+            @foreach($groupedConsensus as $group)
+                @php
+                    $isUserGroup = count($group) > 1 && $group[0]->role === \App\Enums\MessageRole::User;
+                    $singleMsg = $group[0];
+                @endphp
+                <div class="border-b border-border-soft pb-2 last:border-0 last:pb-0" x-data="{ open: false }">
+                    <button type="button" @click="open = !open" class="flex w-full items-center gap-2 text-left cursor-pointer hover:opacity-80">
+                        @if($isUserGroup)
+                            <span class="rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-surface-active text-mute">User</span>
+                            <span class="text-xs text-mute">{{ count($group) }} answers</span>
+                        @else
+                            <span class="rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-surface-active text-mute">{{ $singleMsg->role->value }}</span>
+                            <span class="text-xs text-mute">{{ $singleMsg->created_at->diffForHumans() }}</span>
+                        @endif
+                        <span class="ml-auto text-mute transition-transform duration-120" :class="open && 'rotate-180'">▼</span>
+                    </button>
+                    <div x-show="open" x-cloak class="mt-2 space-y-2">
+                        @foreach($group as $msg)
+                            <p class="text-sm text-t2">{{ strip_tags($msg->content) }}</p>
+                        @endforeach
+                    </div>
+                    @if(!$isUserGroup)
+                        <p class="text-sm text-t2 line-clamp-1 mt-1" x-show="!open">{{ Str::limit(strip_tags($singleMsg->content), 150) }}</p>
+                    @endif
+                </div>
+            @endforeach
+        @endif
     </div>
 </div>

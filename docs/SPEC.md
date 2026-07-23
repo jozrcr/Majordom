@@ -28,9 +28,10 @@ to Services; Services front Models. Events record everything.
 | **Workflow** | A named template: an ordered chain of steps, each `{type, role, config}` — the node type, the actor (a Role name resolved per project), and per-step tunables (e.g. `rescue_role` on review steps). Legacy plain-string chains normalize on read (`ChainStep`). Builtins seeded; custom chains editable in Settings. | DB (chain JSON) |
 | **Execution** | One run of a Workflow against a Project (an "implement this feature" instance). Holds status, autonomy profile, current node, frontier-spend counter + budget cap. | DB |
 | **Milestone** | A chunk of the roadmap the Architect defined. Belongs to a Project; realized within Executions. | DB (+ `roadmap.md`) |
-| **Task** | The atomic unit the Builder executes. Has a `role.md` + versioned `task.md` briefs, a feature branch (checked out in its own worktree), a status. | DB (+ files) |
+| **Task** | The atomic unit the Builder executes. Has a `role.md` + versioned `task.md` briefs, a feature branch (checked out in its own worktree), a status, and an `implementation_strategy` (Builder Selection, M14b — which class of Builder implements it; null = local). | DB (+ files) |
+| **Capability** | Opt-in actor rights per project (M14b, `projects.capability_level`): the Architect's repository access — `none` / `read` (default) / `commands` (gated on a sandbox). Read is enforced in-process (realpath confinement + tracked-only); commands would need OS sandboxing, so it is UI-gated. Set in the Project Settings tab; consumed at `ArchitectService::converse` (reads loop + system prompt). See `App\Enums\CapabilityLevel`. | DB |
 | **Node / Step** | A unit of the workflow (control / AI / dev / runtime / human). Records inputs, outputs, timing. | DB |
-| **Role** | A responsibility (Architect/Builder/Reviewer) bound to a Service. | DB / config |
+| **Role** | A responsibility (Architect/Builder/Reviewer) bound to a Service. The **Reviewer is the Architect** by default (M16-D, one mind): with no explicit binding the reviewer role resolves to the resolved Architect model; a distinct reviewer is opt-in (`MAJORDOM_REVIEWER_MODEL` / a `reviewer` Role row). | DB / config |
 | **Service** | A concrete endpoint fulfilling a role/`capability` (frontier API, or a metallama target). | DB / config |
 | **Event** | An immutable record of a transition; the bus payload and the timeline source. | DB |
 | **Approval / Gate** | A pending human decision (approve / answer / test). Feeds the "Needs You" inbox. | DB |
@@ -70,6 +71,25 @@ notify* vs *auto-proceed & collect*.
      operates in the user's checkout, so the user's working copy stays
      untouched even mid-overnight-run. Emits nothing model-heavy in parallel.
 5. **Build** *(AI: Builder via harness)* — per Task, sequentially in v1
+   - **Greenfield bootstrap (M14a/T-67, reconciled M14b):** on an empty repo the
+     Architect selects the **frontier Builder** to scaffold (layout, manifests,
+     README, test config) via a dedicated flow (direct file generation — no repo
+     yet for an aider worktree). Role separation holds: the scaffold goes through
+     the **Reviewer** before commit (one corrective retry, else surfaced — never
+     commits a rejected scaffold). No human gate (owner-locked). Then decompose
+     runs on real ground. `ArchitectService::bootstrapRepo`.
+   - **Builder Selection (M14b):** the Architect *selects* a Builder per task
+     rather than executing itself. A Task carries `implementation_strategy`
+     (`local` default → local Qwen; `frontier` → a frontier model bound as
+     `frontier_builder`). `BuildNode` routes on it — the node is model-agnostic,
+     so this is a pure routing decision; whatever builds still flows execute →
+     test → **review** (role separation: a frontier Builder never reviews its
+     own output). `ImplementationStrategy::builderRole()` maps strategy → role;
+     `BuilderSelector::assign()` is the single write seam (Architect decompose,
+     escalation "select stronger Builder", owner UI) and emits
+     `task.builder_selected`; `BuildNode` emits `build.builder_selected` naming
+     the actual actor. This is the proactive generalization of the reactive
+     *Frontier rescue* below (§7). `hybrid`/`auto` (telemetry-driven) reserved.
    - Harness runs Aider(Qwen) in the task's worktree with `role.md`+`task.md`.
      Emits `TaskDelegated` → `BuilderStarted` → `BuilderProgress*`.
    - Builder may escalate a blocking question → **[gate]** Human intervenes.
@@ -79,36 +99,58 @@ notify* vs *auto-proceed & collect*.
    - Runs the Task's/Project's test command. Emits `TestsStarted` →
      `TestsPassed` / `TestsFailed`. On fail, route back to Build with the failure
      as the next task revision (bounded retry budget).
-7. **Review** *(AI: Reviewer + Human)*
-   - Reviewer reads diff + criteria + style + handoff + test result. Emits
-     `ReviewRequested` → `ReviewApproved` / `ReviewChangesRequested`. On changes,
-     comments become the next task revision (`task.v2.md`, …) → back to Build
-     (bounded loop — `workflow.max_revisions`, default 3; exhausting the
-     budget parks the execution with the last revision brief written).
-     Files the Reviewer flagged are handed to the next Build as harness
-     file hints, pointing the Builder at what it keeps missing.
-   - **Escalation:** when the failure is the owner's to resolve (ambiguous
-     criteria, unstated design choice), the Reviewer returns `questions`
-     instead of comments → execution-linked Questions, node waits. The last
-     answer appends *Owner clarifications* to `task.v{n+1}.md`, RESETS the
-     revision budget (`clarified_at_revision`) and re-arms build → review.
-   - **Frontier rescue:** a review step may carry `config.rescue_role`; on
-     budget exhaustion the build step's actor is swapped to that role for
-     one more full loop (one rescue per execution) before parking.
-   - **[gate]** Human may be asked to arbitrate or approve the review.
-8. **Accept** *(Human: Manual test)* — configurable, on by default
-   - **[gate]** Human is invited to test the feature. `HumanTestRequested` →
-     `HumanTestPassed` / rejected (→ back to Build with notes).
-9. **Commit** *(Dev: Git + Human)*
-   - Majordom prepares a `CommitSuggestion` (message + diff). Emits
-     `CommitSuggested`. **[gate]** Human commits; optionally pushes.
-     `Committed` / `Pushed`. **Default: no push without the human.**
+7. **Checkpoint & auto-advance** *(within a milestone)*
+   - Per-task review is gone (M15). Once a task is test-green its work is
+     already committed to the shared milestone branch `majordom/<key>`; the
+     `confirm_commits` checkpoint accepts it (task → Approved, worktree detached)
+     and `TaskChain::advance` decomposes + starts the next task in the same
+     milestone. No per-task human gate, no promotion to main here.
+8. **Milestone review** *(AI: Architect-as-Reviewer, at the boundary)*
+   - When a milestone's tasks are all done (`milestone.tasks_complete`), the
+     Architect (as Reviewer — one mind, §Role) judges the milestone's
+     **cumulative** diff at the right altitude: `base_commit..HEAD` on
+     `majordom/<key>`, where `base_commit` is the first task's recorded fork
+     point (falls back to `main...HEAD`). Read via `MilestoneDiff` — the single
+     definition of "the milestone's work", shared by the review and the gate.
+   - Tool-driven (`MilestoneReviewService`): `read_diff`/`read_file` ground the
+     judgment, then exactly one of `approve_milestone` (with a `how_to_test`) /
+     `request_changes` / `ask_owner`. `request_changes` → **one** keyed fix-task
+     whose acceptance criteria are the findings; it rebuilds and re-reviews,
+     bounded by `MAX_REVIEW_ROUNDS` (2) then escalates instead of looping. An
+     empty diff fast-approves.
+9. **Merge gate** *(Human: review surface + promotion)*
+   - Approve / escalate / stuck all raise the **[gate]** `MilestoneMerge`
+     approval — never a dead end. The gate is a real review surface (M16-A): its
+     payload carries a frozen `recap` — milestone goal, each task with its
+     acceptance criteria, the `git diff --numstat` diffstat, the reviewer's
+     verdict, the `how_to_test`, and the `branch`/`worktree` — assembled once by
+     `MilestoneRecap` so the decision never depends on a worktree that may later
+     be merged away. The gate surfaces that `worktree` path with an **Open in
+     VS Code** action (M16-C) so the disposable worktree is legible — the target
+     dir is derived server-side (gate worktree, else `repo_path`), launched via
+     the array-form `Process` under `majordom.editor.command`; best-effort, it
+     never raises into the request (`editor.opened`).
+   - **Three resolutions** (no silent decline): **merge now** promotes the
+     branch; **not yet** DEFERS (`ApprovalStatus::Deferred`) — branch and
+     worktree kept intact, out of the inbox but re-openable via
+     `deferredMilestoneGates` and merged later (`mergeDeferredMilestoneGate`);
+     **request changes** (a reason is required) routes to the Architect as ONE
+     keyed fix-task (`TaskChain::requestChangesFromOwner`) that rebuilds and
+     re-reviews — the owner's words are never dropped.
+   - Granting promotes the branch: `CommitService::mergeMilestone` runs
+     `git merge --no-ff majordom/<key>` into the project's `repo_path`, removes
+     the milestone worktree, optionally pushes, then `startNextMilestone`. It
+     reports the resulting HEAD (`head`, `into_branch` on `milestone.merged`) so
+     the owner can see where the work landed. Under **full_auto** the merge is
+     automatic on approval; every other profile waits. **Default: no push
+     without the human.**
 10. **Close** — `current_iteration.md` and `roadmap.md` updated; next milestone
     or `WorkflowCompleted`.
 
 **Batch / overnight:** an Execution (or several, queued) may run under the
 *Overnight* profile — phases 1–8 auto-proceed where non-destructive, piling every
-human-needed item into the morning inbox; phase 9 (commit/push) **always** waits.
+human-needed item into the morning inbox; phase 9 (the merge gate) **always**
+waits (only full_auto promotes to main without you).
 
 ## 4. Node types (v1, coding-scoped)
 
@@ -250,6 +292,16 @@ invitations. **Commit and push never auto-run** (PHILOSOPHY §2). Overnight runs
 also carry a **frontier-spend cap** per Execution; exceeding it parks the
 Execution in the inbox like any other gate.
 
+**Per-role spend caps + full_auto local fallback (M14b, `SpendGuard`):** the flat
+per-Execution cap is a blunt total — the real cost lever is the frontier Builder,
+while the Reviewer (a cheap model) is inconsequential. `workflow.role_spend_caps.<role>`
+sets a per-role ceiling (frontier_builder capped by default; reviewer/architect/
+builder uncapped). When a frontier build's budget is gone it **downgrades to the
+local Builder** (free) via `SpendGuard::mustBuildLocal`. Under **full_auto** the
+flat cap no longer hard-parks (owner policy: keep moving) — builds go local and
+the cheap Reviewer keeps running; **attended/overnight still park** on the flat
+cap. Emits `build.builder_downgraded`.
+
 Profiles are data, not code — new profiles can be added without touching the
 engine (the engine only asks "is this gate blocking under the active profile?").
 
@@ -266,7 +318,17 @@ Reverb for live updates.
   (`#[Url]`) and normalized to `chat` on any unknown value:
   - **Chat** (default) — the four core regions:
     1. **Consensus chat** — the primary surface; talk to the Architect, answer its
-       questions, approve the plan. The captured system-of-record for intent.
+       questions, approve the plan. The captured system-of-record for intent. The
+       **same** free-chat surface persists after a plan is approved (M16): steering
+       is not a separate mode — a plain reply just continues the conversation, and
+       asking for a scope change lets the Architect re-`propose_plan`. That revision
+       is human-gated exactly like the first plan; approving it preserves built work
+       (RoadmapSync upserts by key), resets the loop, regenerates the restart
+       brief (`plan.redefined`), and reconciles worktrees — a milestone the revised
+       roadmap no longer declares (`RoadmapSync::milestoneKeysIn`) has its orphaned
+       `majordom/<key>` worktree and branch removed (`WorktreeManager::reconcileMilestones`,
+       best-effort, `worktrees.reconciled`) so no stale worktree shadows the active
+       one. No one-shot redefine turn — it is the tool loop.
     2. **Roadmap** — milestones → tasks, editable, reflecting `roadmap.md`.
     3. **Activity timeline** — the live event feed (Reverb): delegated → building →
        review → …
@@ -279,6 +341,15 @@ Reverb for live updates.
   - **Stats** — usage totals per role (tokens + `cost_usd`) from `UsageRecord`, a
     grand total, and execution counts by status. A richer per-project cost
     dashboard (dataviz) is a later enhancement.
+  - **Settings** (T-55) — project-scoped controls: rename (slug immutable — it
+    keys memory/worktrees), archive/unarchive, autonomy profile (canonical
+    `switchProfile` surface), `confirm_commits` per-task diff checkpoint,
+    `push_after_merge` (mirrors the **global** `Setting::get('git.push_after_merge')`
+    — labeled "(global)"; per-project column deliberately NOT added, owner call
+    pending), and a disabled `night_mode` placeholder for M14/T-62.
+  - A slim **common header** (name · repo path · status badge, null-safe) renders
+    above the tab bar on EVERY tab; chat-only extras (Architect chip, workflow
+    select) stay inside the chat tab.
 - **"Needs You" inbox** — global across all projects; the queue of open
   Approvals/Questions/Test-invites. **This is exactly what Telegram/Discord
   mirror** — one queue, three windows (app, phone, desktop). Backbone of the

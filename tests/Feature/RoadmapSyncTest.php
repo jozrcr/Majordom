@@ -190,4 +190,65 @@ MD
         // No new event should be created for description-only change
         $this->assertDatabaseCount('roadmap_events', 1);
     }
+
+    /**
+     * M16-D2 freeze: a re-sync from a revised roadmap that omits work must never
+     * orphan or drop a BUILT task (the small-space-sim "T-007 forgotten" bug). Only
+     * a not-started task may be removed; done/ongoing work is frozen in place.
+     */
+    public function test_sync_never_drops_built_work(): void
+    {
+        $project = Project::factory()->create(['repo_path' => '/tmp/freeze-repo-'.uniqid()]);
+        $mdPath = $project->repo_path . '/agents/ROADMAP.md';
+        File::ensureDirectoryExists(dirname($mdPath));
+        File::put($mdPath, "## M1 — Test\n- [x] T-01 — Built\n- [ ] T-02 — Todo\n");
+        RoadmapSync::for($project)->sync();
+        $milestoneId = \App\Models\Milestone::where('project_id', $project->id)->first()->id;
+
+        // A revision that omits BOTH prior tasks: the built one stays attached
+        // (frozen), the not-started one is legitimately removed (orphaned).
+        File::put($mdPath, "## M1 — Test\n- [ ] T-03 — New\n");
+        RoadmapSync::for($project)->sync();
+
+        $built = Task::where('project_id', $project->id)->where('task_key', 'T-01')->first();
+        $this->assertNotNull($built);
+        $this->assertSame($milestoneId, $built->milestone_id); // frozen, not orphaned
+
+        $todo = Task::where('project_id', $project->id)->where('task_key', 'T-02')->first();
+        $this->assertNull($todo->milestone_id); // not-started → removed
+
+        $this->assertDatabaseHas('tasks', ['project_id' => $project->id, 'task_key' => 'T-03']);
+    }
+
+    /**
+     * M16-D2: renderMarkdown is the inverse of parse — the canonical roadmap it
+     * emits from the DB round-trips back to the same milestone/task keys and
+     * effective statuses. Used to re-persist roadmap.md after a revision.
+     */
+    public function test_render_markdown_round_trips_keys_and_statuses(): void
+    {
+        $project = Project::factory()->create(['repo_path' => '/tmp/rt-repo-'.uniqid()]);
+        $mdPath = $project->repo_path . '/agents/ROADMAP.md';
+        File::ensureDirectoryExists(dirname($mdPath));
+        File::put($mdPath, "## M1 — Foundations\nAuth and dashboard.\n\n- [x] T-01 — Token auth\n- [ ] T-02 — Dashboard\n\n## M2 — Polish\n- [ ] T-03 — Theme\n");
+        RoadmapSync::for($project)->sync();
+
+        $rendered = RoadmapSync::for($project)->renderMarkdown();
+        $this->assertStringContainsString('## M1 — Foundations', $rendered);
+        $this->assertStringContainsString('- [x] T-01 — Token auth', $rendered);
+        $this->assertStringContainsString('- [ ] T-02 — Dashboard', $rendered);
+        $this->assertStringContainsString('## M2 — Polish', $rendered);
+
+        // Round-trip: parse the rendered md into a FRESH project → same keys/statuses.
+        $other = Project::factory()->create(['repo_path' => '/tmp/rt-repo2-'.uniqid()]);
+        $otherPath = $other->repo_path . '/agents/ROADMAP.md';
+        File::ensureDirectoryExists(dirname($otherPath));
+        File::put($otherPath, $rendered);
+        RoadmapSync::for($other)->sync();
+
+        $this->assertSame(['M1', 'M2'], RoadmapSync::milestoneKeysIn($rendered));
+        $this->assertDatabaseHas('tasks', ['project_id' => $other->id, 'task_key' => 'T-01', 'declared_status' => 'done']);
+        $this->assertDatabaseHas('tasks', ['project_id' => $other->id, 'task_key' => 'T-02', 'declared_status' => 'todo']);
+        $this->assertDatabaseHas('tasks', ['project_id' => $other->id, 'task_key' => 'T-03', 'declared_status' => 'todo']);
+    }
 }

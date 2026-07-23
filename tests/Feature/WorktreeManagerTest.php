@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\Milestone;
 use App\Models\Project;
 use App\Models\Task;
 use App\Projects\Repositories\WorktreeManager;
@@ -172,4 +173,71 @@ it('refuses a repo with no commits with a human message', function () {
 
     expect(fn () => app(WorktreeManager::class)->create($task))
         ->toThrow(RuntimeException::class, 'no commits yet');
+});
+
+it('reconciles milestone worktrees — removes the orphan, leaves the live one', function () {
+    $root = sys_get_temp_dir().'/majordom-wt-root-'.uniqid();
+    config(['majordom.worktrees_root' => $root]);
+
+    $repoDir = sys_get_temp_dir().'/majordom-test-repo-'.uniqid();
+    mkdir($repoDir.'/.git', 0755, true);
+
+    $project = Project::factory()->create(['slug' => 'proj', 'repo_path' => $repoDir]);
+    $live = Milestone::factory()->create(['project_id' => $project->id, 'milestone_key' => 'M1', 'position' => 1]);
+    $dropped = Milestone::factory()->create(['project_id' => $project->id, 'milestone_key' => 'M2', 'position' => 2]);
+
+    $manager = WorktreeManager::fromConfig();
+    $livePath = $manager->pathForMilestone($project, $live);
+    $droppedPath = $manager->pathForMilestone($project, $dropped);
+    mkdir($livePath, 0755, true);
+    mkdir($droppedPath, 0755, true);
+
+    // Bare fake → a `*` catch-all that fakes AND records every git command as a
+    // success (a keyed fake would let unlisted commands run for real, unrecorded).
+    Process::fake();
+
+    $removed = $manager->reconcileMilestones($project, ['M1']);
+
+    expect($removed)->toBe(['M2']);
+
+    // The orphaned milestone's worktree and branch are both gone.
+    Process::assertRan(fn ($run) => $run->path === $repoDir
+        && $run->command === ['git', 'worktree', 'remove', '--force', $droppedPath]);
+    Process::assertRan(fn ($run) => $run->command === ['git', 'branch', '-D', 'majordom/M2']);
+    Process::assertRan(fn ($run) => $run->command === ['git', 'worktree', 'prune']);
+
+    // The live milestone is never touched.
+    Process::assertDidntRun(fn ($run) => in_array($livePath, $run->command, true));
+    Process::assertDidntRun(fn ($run) => $run->command === ['git', 'branch', '-D', 'majordom/M1']);
+});
+
+it('reconcile deletes an orphan branch even when its worktree dir is already gone', function () {
+    $root = sys_get_temp_dir().'/majordom-wt-root-'.uniqid();
+    config(['majordom.worktrees_root' => $root]);
+
+    $repoDir = sys_get_temp_dir().'/majordom-test-repo-'.uniqid();
+    mkdir($repoDir.'/.git', 0755, true);
+
+    $project = Project::factory()->create(['slug' => 'proj', 'repo_path' => $repoDir]);
+    $dropped = Milestone::factory()->create(['project_id' => $project->id, 'milestone_key' => 'M2', 'position' => 1]);
+
+    // No worktree dir on disk — only the branch remains. Bare fake so rev-parse
+    // reports the branch exists and the delete is recorded.
+    Process::fake();
+
+    $removed = WorktreeManager::fromConfig()->reconcileMilestones($project, []);
+
+    expect($removed)->toBe(['M2']);
+    Process::assertRan(fn ($run) => $run->command === ['git', 'branch', '-D', 'majordom/M2']);
+    Process::assertDidntRun(fn ($run) => ($run->command[1] ?? null) === 'worktree' && ($run->command[2] ?? null) === 'remove');
+});
+
+it('reconcile is a no-op on a non-git repo path', function () {
+    $project = Project::factory()->create(['slug' => 'proj', 'repo_path' => '/no/such/repo-'.uniqid()]);
+    Milestone::factory()->create(['project_id' => $project->id, 'milestone_key' => 'M2', 'position' => 1]);
+
+    Process::fake();
+
+    expect(WorktreeManager::fromConfig()->reconcileMilestones($project, []))->toBe([]);
+    Process::assertNothingRan();
 });

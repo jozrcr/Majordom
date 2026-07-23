@@ -67,6 +67,47 @@ test('builder fallback carries managed_model meta', function () {
         ->and($binding->meta['managed_model'])->toBe(Config::get('majordom.builder.model'));
 });
 
+test('reviewer mirrors the Architect by default (one mind)', function () {
+    // M16-D: no reviewer row seeded, not distinct → reviewer IS the Architect.
+    $binding = app(RoleResolver::class)->resolve('reviewer');
+
+    expect($binding->model)->toBe(Config::get('majordom.architect.model'))
+        ->and($binding->provider)->toBe('openrouter')
+        ->and($binding->meta)->toHaveKey('mirrors')
+        ->and($binding->meta['mirrors'])->toBe('architect')
+        // review-appropriate sampling, not the Architect's planning budget
+        ->and($binding->maxTokens)->toBe(Config::get('majordom.reviewer.max_tokens'));
+});
+
+test('reviewer follows a per-project Architect override (still one mind)', function () {
+    Role::create(['project_id' => null, 'name' => 'architect', 'provider' => 'openrouter', 'model' => 'global/arch']);
+    $project = Project::factory()->create();
+    Role::create(['project_id' => $project->id, 'name' => 'architect', 'provider' => 'openrouter', 'model' => 'proj/arch']);
+
+    $resolver = app(RoleResolver::class);
+    expect($resolver->resolve('reviewer', $project)->model)->toBe('proj/arch')
+        ->and($resolver->resolve('reviewer')->model)->toBe('global/arch');
+});
+
+test('an explicitly distinct reviewer is honored', function () {
+    Config::set('majordom.reviewer.distinct', true);
+    Config::set('majordom.reviewer.model', 'glm/reviewer');
+
+    $binding = app(RoleResolver::class)->resolve('reviewer');
+
+    expect($binding->model)->toBe('glm/reviewer')
+        ->and($binding->meta)->not->toHaveKey('mirrors');
+});
+
+test('a bound reviewer Role row wins over the mirror', function () {
+    Role::create(['project_id' => null, 'name' => 'reviewer', 'provider' => 'openrouter', 'model' => 'bound/reviewer']);
+
+    $binding = app(RoleResolver::class)->resolve('reviewer');
+
+    expect($binding->model)->toBe('bound/reviewer')
+        ->and($binding->meta)->not->toHaveKey('mirrors');
+});
+
 test('unknown role name without a row throws', function () {
     app(RoleResolver::class)->resolve('unknown_role');
 })->throws(InvalidArgumentException::class);

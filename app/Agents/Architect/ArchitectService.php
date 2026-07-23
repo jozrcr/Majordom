@@ -4,28 +4,60 @@ namespace App\Agents\Architect;
 
 use App\Agents\Providers\ProviderRegistry;
 use App\Agents\Providers\ProviderRequest;
+use App\Agents\Providers\ProviderResponse;
+use App\Agents\Providers\ToolCall;
+use App\Agents\Providers\ToolDefinition;
+use App\Agents\Providers\ToolMessages;
 use App\Core\Events\EventRecorder;
 use App\Core\Usage\UsageLedger;
 use App\Enums\MessageRole;
 use App\Enums\ProjectStatus;
 use App\Models\ConsensusMessage;
+use App\Models\Milestone;
 use App\Models\Project;
 use App\Models\Question;
 use App\Models\Task;
 use App\Projects\Memory\MemoryStore;
 use App\Projects\Repositories\RepoIndex;
+use App\Support\RoleBinding;
 use App\Support\RoleResolver;
 use Illuminate\Support\Str;
 
 /**
- * The Architect's consensus orchestration (SPEC §3 phase 1–2, M2 slice).
- *
- * The ask-all-questions mandate is enforced twice: in the system prompt, and
- * mechanically here — consensus_reached is ignored while any question is open
- * or the same turn raised new ones. The model cannot talk its way past the gate.
+ * The Architect's consensus orchestration (SPEC §3 phase 1–2), driven by the
+ * M15 tool contract. A turn ends in exactly one known state — a read (loop
+ * continues), ask_owner (questions), propose_plan (consensus, human-gated), or a
+ * plain-text reply (the owner's turn) — so there is no "stalled" dead end to
+ * detect. The plan-approval gate still holds: a proposed plan only counts as
+ * pending with zero open questions, and nothing is written until the owner approves.
  */
 class ArchitectService
 {
+    /** Max repo-read rounds the Architect may self-drive per turn before it must
+     *  ask or conclude (M15 runaway guard — reads can't loop forever). */
+    private const MAX_READ_ROUNDS = 4;
+
+    /** Per-file read cap, and total budget across one inspection round (bytes). */
+    private const READ_MAX_BYTES = 4000;
+    private const GATHER_MAX_TOTAL = 16000;
+
+    /** T-67: greenfield scaffold instruction. */
+    private const BOOTSTRAP_PROMPT = <<<'PROMPT'
+The plan is approved and the repository is currently EMPTY. Produce the initial
+project scaffold the first task will build on — nothing more.
+
+Respond ONLY with a JSON object (no markdown fences, no prose outside the JSON):
+{
+  "files": [{"path": "relative/path", "contents": "full file contents"}],
+  "commit_message": "chore: scaffold project structure"
+}
+
+Include only foundation: directory layout, dependency/package manifests, a README,
+test runner/config, and an entry point — grounded in the agreed architecture. Do
+NOT implement any feature or task logic; leave that to the Builder. Keep files
+minimal but runnable. Use repo-relative paths (no leading slash, no "..").
+PROMPT;
+
     public function __construct(
         private readonly ProviderRegistry $providers,
         private readonly MemoryStore $memory,
@@ -33,10 +65,14 @@ class ArchitectService
     ) {}
 
     /**
-     * One conversation turn. $userMessage may be null when re-prompting after
-     * answers were recorded. When the turn closed consensus,
-     * 'consensusPending' is true and the plan awaits the owner's explicit
-     * approval (approvePlan()) — nothing is written yet.
+     * One consensus turn, driven by tool calls (M15 tool contract). The Architect
+     * either calls read tools (read_file / list_repo — the engine fulfills them and
+     * the loop continues) or terminates the turn in exactly one known way:
+     *   • ask_owner    — surfaces questions; the owner's turn next
+     *   • propose_plan — consensus reached; the plan is captured, still human-gated
+     *   • plain text   — a conversational reply; the owner's turn next
+     * There is no fourth outcome, so the old "stalled with nothing pending" dead
+     * end (T-65) cannot occur — the never-stall invariant is structural, not detected.
      *
      * @return array{message: ConsensusMessage, consensusPending: bool}
      */
@@ -50,14 +86,98 @@ class ArchitectService
         }
 
         $binding = app(RoleResolver::class)->resolve('architect', $project);
-
         $extraSystem = $binding->meta['system_prompt_extra'] ?? null;
+        $canRead = $project->capability()->canRead();
+
+        // The tool loop runs over an in-memory copy of the conversation; only the
+        // final human-visible outcome is persisted. Reads stay ephemeral — recorded
+        // as events for the trace, never replayed into every future turn (which is
+        // what used to bloat the context in the old inspection design).
+        $messages = $this->buildMessages($project, $extraSystem);
+
+        $readRounds = 0;
+        $outcome = null;
+        $lastResponse = null;
+        $continued = false;   // one auto-continue per turn (dropped-intent recovery)
+        $replyText = '';      // the model's prose, carried across a continue
+
+        while ($outcome === null) {
+            // On the last permitted round, withdraw the read tools so the model
+            // must ask or conclude — reads cannot loop forever.
+            $offerReads = $canRead && $readRounds < self::MAX_READ_ROUNDS;
+            $response = $this->architectChat($project, $binding, $messages, $this->consensusTools($offerReads));
+            $lastResponse = $response;
+
+            if (! $response->hasToolCalls()) {
+                if ($response->content !== '') {
+                    $replyText = $response->content;
+                }
+
+                // Dropped-intent recovery: a model sometimes NARRATES its intent
+                // ("Let me ask the next batch…") as prose without calling ask_owner
+                // in the same turn — which would leave the owner with a promise and
+                // no questions. Give it ONE chance to follow through with a tool
+                // before we treat the turn as the owner's. Still a known state.
+                if (! $continued) {
+                    $continued = true;
+                    app(EventRecorder::class)->record($project, 'consensus.continued', ['messageId' => null], null, 'architect');
+                    $messages[] = ['role' => 'assistant', 'content' => $response->content !== '' ? $response->content : '(thinking)'];
+                    $messages[] = ['role' => 'user', 'content' => '[system note] Continue now: if you have questions for the owner, call ask_owner with them in THIS turn; if the scope is fully clear, call propose_plan; if you are genuinely waiting on the owner, reply briefly to confirm.'];
+
+                    continue;
+                }
+
+                $outcome = ['type' => 'reply', 'reply' => $replyText];
+                break;
+            }
+
+            // Replay the assistant's tool-call turn so the next request is valid.
+            $messages[] = ToolMessages::assistantToolCalls($response);
+
+            $didRead = false;
+            foreach ($response->toolCalls as $call) {
+                // A terminating tool wins immediately, even if the same turn also
+                // requested reads — a real question/plan always reaches the owner.
+                if ($call->name === 'ask_owner') {
+                    $outcome = ['type' => 'questions', 'reply' => $response->content, 'questions' => $this->parseAskOwner($call)];
+                    break;
+                }
+                if ($call->name === 'propose_plan') {
+                    $outcome = ['type' => 'plan', 'reply' => $response->content, 'plan' => $this->normalizePlan($call->arguments)];
+                    break;
+                }
+                if ($call->name === 'read_file' || $call->name === 'list_repo') {
+                    $messages[] = ToolMessages::toolResult($call->id, $this->runReadTool($project, $call));
+                    $didRead = true;
+
+                    continue;
+                }
+                $messages[] = ToolMessages::toolResult($call->id, "Unknown tool '{$call->name}'. Use read_file, list_repo, ask_owner, or propose_plan.");
+            }
+
+            if ($outcome === null) {
+                // Advance the round counter whether the model read or emitted only
+                // unknown tools; the cap guards against any non-terminating loop.
+                $readRounds++;
+                if (! $didRead && $readRounds >= self::MAX_READ_ROUNDS) {
+                    $outcome = ['type' => 'reply', 'reply' => $response->content !== '' ? $response->content : 'I need direction to continue.'];
+                }
+            }
+        }
+
+        return $this->persistConsensusOutcome($project, $outcome, $lastResponse);
+    }
+
+    /** One tool-enabled Architect provider call, with usage recorded. */
+    private function architectChat(Project $project, RoleBinding $binding, array $messages, array $tools): ProviderResponse
+    {
         $response = $this->providers->forBinding($binding)->chat(new ProviderRequest(
             model: $binding->model,
-            messages: $this->buildMessages($project, $extraSystem),
+            messages: $messages,
             maxTokens: $binding->maxTokens,
             temperature: $binding->temperature,
-            jsonMode: true,
+            tools: $tools,
+            toolChoice: 'auto',
             topP: isset($binding->meta['top_p']) ? (float) $binding->meta['top_p'] : null,
             frequencyPenalty: isset($binding->meta['frequency_penalty']) ? (float) $binding->meta['frequency_penalty'] : null,
             presencePenalty: isset($binding->meta['presence_penalty']) ? (float) $binding->meta['presence_penalty'] : null,
@@ -65,62 +185,201 @@ class ArchitectService
             timeout: isset($binding->meta['timeout']) ? (int) $binding->meta['timeout'] : null,
         ));
 
-        app(UsageLedger::class)->record(
-            $project,
-            'architect',
-            $binding->model,
-            $response->promptTokens,
-            $response->completionTokens
+        app(UsageLedger::class)->record($project, 'architect', $binding->model, $response->promptTokens, $response->completionTokens);
+
+        return $response;
+    }
+
+    /**
+     * The consensus tool surface (M15). read_file/list_repo are offered only when
+     * the owner granted read access AND we are within the read-round budget.
+     *
+     * @return ToolDefinition[]
+     */
+    private function consensusTools(bool $withReads): array
+    {
+        $ask = new ToolDefinition(
+            name: 'ask_owner',
+            description: 'Ask the owner one or more specific, answerable questions whenever anything about the scope is ambiguous — never assume. Ends your turn until the owner answers.',
+            parameters: [
+                'type' => 'object',
+                'properties' => [
+                    'questions' => [
+                        'type' => 'array',
+                        'items' => [
+                            'type' => 'object',
+                            'properties' => [
+                                'text' => ['type' => 'string', 'description' => 'One specific question.'],
+                                'options' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Optional answer choices.'],
+                            ],
+                            'required' => ['text'],
+                        ],
+                    ],
+                ],
+                'required' => ['questions'],
+            ],
         );
 
-        $envelope = ArchitectEnvelope::fromContent($response->content);
+        $propose = new ToolDefinition(
+            name: 'propose_plan',
+            description: 'Propose the plan once every question is answered and the scope is clear. Ends your turn; the owner must approve before anything is written.',
+            parameters: [
+                'type' => 'object',
+                'properties' => [
+                    'architecture_md' => ['type' => 'string', 'description' => 'Markdown: the target architecture as agreed.'],
+                    'roadmap_md' => ['type' => 'string', 'description' => "Markdown roadmap. Milestones as '## M<N> — <title>' + one summary line, then tasks as '- [ ] T-00N — <title>'."],
+                    'first_task_id' => ['type' => 'string', 'description' => 'The first task key, e.g. T-001.'],
+                    'first_task_md' => ['type' => 'string', 'description' => 'Markdown brief for the first task: goal, acceptance criteria, files likely involved, test command.'],
+                    'summary' => ['type' => 'string', 'description' => '2-3 sentences for the owner: what was agreed and what happens next.'],
+                ],
+                'required' => ['architecture_md', 'roadmap_md', 'first_task_id', 'first_task_md', 'summary'],
+            ],
+        );
+
+        if (! $withReads) {
+            return [$ask, $propose];
+        }
+
+        return [
+            new ToolDefinition(
+                name: 'read_file',
+                description: 'Read the contents of one tracked file to ground your decisions. You have this capability — never ask the owner to paste a file.',
+                parameters: [
+                    'type' => 'object',
+                    'properties' => ['path' => ['type' => 'string', 'description' => 'Repo-relative path of a tracked file.']],
+                    'required' => ['path'],
+                ],
+            ),
+            new ToolDefinition(
+                name: 'list_repo',
+                description: 'List tracked files: the whole tree (omit the argument) or one directory (a path ending in "/").',
+                parameters: [
+                    'type' => 'object',
+                    'properties' => ['path' => ['type' => 'string', 'description' => 'Optional directory (e.g. "src/"). Omit for the full tree.']],
+                ],
+            ),
+            $ask,
+            $propose,
+        ];
+    }
+
+    /** Fulfil a read_file/list_repo call, reusing the vetted tracked-only reader. */
+    private function runReadTool(Project $project, ToolCall $call): string
+    {
+        $path = is_string($call->arguments['path'] ?? null) ? trim((string) $call->arguments['path']) : '';
+
+        if ($call->name === 'read_file') {
+            if ($path === '') {
+                return 'read_file requires a "path".';
+            }
+            $req = [$path];
+        } else { // list_repo
+            $req = [$path === '' ? 'tree' : (str_ends_with($path, '/') ? $path : $path.'/')];
+        }
+
+        app(EventRecorder::class)->record($project, 'consensus.inspected', ['tool' => $call->name, 'paths' => $req], null, 'architect');
+
+        return $this->gatherRepoContext($project, $req);
+    }
+
+    /**
+     * @return array<int, array{text: string, options: ?array}>
+     */
+    private function parseAskOwner(ToolCall $call): array
+    {
+        $out = [];
+        foreach (is_array($call->arguments['questions'] ?? null) ? $call->arguments['questions'] : [] as $q) {
+            if (is_string($q) && trim($q) !== '') {
+                $out[] = ['text' => trim($q), 'options' => null];
+            } elseif (is_array($q) && is_string($q['text'] ?? null) && trim($q['text']) !== '') {
+                $opts = $q['options'] ?? null;
+                $out[] = [
+                    'text' => trim($q['text']),
+                    'options' => is_array($opts) && $opts !== [] ? array_values(array_filter($opts, 'is_string')) : null,
+                ];
+            }
+        }
+
+        return $out;
+    }
+
+    /** @return array{architecture_md: string, roadmap_md: string, first_task_id: string, first_task_md: string, summary: string} */
+    private function normalizePlan(array $args): array
+    {
+        $taskId = is_string($args['first_task_id'] ?? null) && trim($args['first_task_id']) !== '' ? trim($args['first_task_id']) : 'T-001';
+
+        return [
+            'architecture_md' => (string) ($args['architecture_md'] ?? ''),
+            'roadmap_md' => (string) ($args['roadmap_md'] ?? ''),
+            'first_task_id' => $taskId,
+            'first_task_md' => (string) ($args['first_task_md'] ?? ''),
+            'summary' => (string) ($args['summary'] ?? ''),
+        ];
+    }
+
+    /**
+     * Persist the single human-visible outcome of a consensus turn and set state.
+     * A propose_plan turn captures the plan in the message meta (not memory) — the
+     * owner's approval (approvePlan) writes it. Every outcome ends NeedsYou.
+     *
+     * @param array{type: string, reply?: string, questions?: array, plan?: array} $outcome
+     * @return array{message: ConsensusMessage, consensusPending: bool}
+     */
+    private function persistConsensusOutcome(Project $project, array $outcome, ProviderResponse $response): array
+    {
+        $consensusClaimed = $outcome['type'] === 'plan';
+
+        $reply = trim((string) ($outcome['reply'] ?? ''));
+        if ($reply === '') {
+            $reply = match ($outcome['type']) {
+                'questions' => 'I have a few questions before we go further.',
+                'plan' => (string) ($outcome['plan']['summary'] ?? 'Here is the plan for your approval.'),
+                default => '…',
+            };
+        }
+
+        $meta = [
+            'promptTokens' => $response->promptTokens,
+            'completionTokens' => $response->completionTokens,
+            'consensusClaimed' => $consensusClaimed,
+        ];
+        if ($outcome['type'] === 'plan') {
+            $meta['proposed_plan'] = $outcome['plan'];
+        }
 
         $message = $project->consensusMessages()->create([
             'role' => MessageRole::Architect,
-            'content' => $envelope->reply,
-            'meta' => [
-                'promptTokens' => $response->promptTokens,
-                'completionTokens' => $response->completionTokens,
-                'consensusClaimed' => $envelope->consensusReached,
-            ],
+            'content' => $reply,
+            'meta' => $meta,
         ]);
 
-        foreach ($envelope->questions as $q) {
-            $project->questions()->create([
-                'consensus_message_id' => $message->id,
-                'text' => $q['text'],
-                'options' => $q['options'],
-            ]);
+        if ($outcome['type'] === 'questions') {
+            foreach ($outcome['questions'] as $q) {
+                $project->questions()->create([
+                    'consensus_message_id' => $message->id,
+                    'text' => $q['text'],
+                    'options' => $q['options'],
+                ]);
+            }
         }
 
         app(EventRecorder::class)->record(
             $project,
             'consensus.message',
             [
-                'questionsRaised' => count($envelope->questions),
-                'consensusClaimed' => $envelope->consensusReached,
+                'questionsRaised' => $outcome['type'] === 'questions' ? count($outcome['questions']) : 0,
+                'consensusClaimed' => $consensusClaimed,
                 'messageId' => $message->id,
             ],
             null,
             'architect'
         );
 
-        // The question gate: a consensus claim only stands with zero open
-        // questions — including ones raised this very turn. Even then the
-        // plan is NOT drafted here: that is the human's call (SPEC §3 phase 2
-        // plan-approval gate; always blocking until autonomy profiles land).
-        $consensusPending = $envelope->consensusReached
-            && $project->openQuestions()->count() === 0;
+        // The question gate: a plan only stands with zero open questions. Even
+        // then nothing is written — the owner approves it (SPEC §3 phase 2 gate).
+        $consensusPending = $consensusClaimed && $project->openQuestions()->count() === 0;
 
-        // Status light: open questions OR a plan awaiting approval = the
-        // human is awaited. Direct writes for now; M4 moves these behind
-        // event listeners.
-        $project->update([
-            'status' => ($project->openQuestions()->count() > 0 || $consensusPending)
-                ? ProjectStatus::NeedsYou
-                : ProjectStatus::Idle,
-            'last_activity_at' => now(),
-        ]);
+        $project->update(['status' => ProjectStatus::NeedsYou, 'last_activity_at' => now()]);
 
         return ['message' => $message, 'consensusPending' => $consensusPending];
     }
@@ -154,77 +413,74 @@ class ArchitectService
     }
 
     /**
-     * Phase 2, on the owner's explicit approval: distill the agreed intent
-     * into project memory files. Called from the RunPlanDraft job — this
-     * makes a provider call and must never run inside a web request.
+     * Phase 2, on the owner's explicit approval: write the plan the Architect
+     * already captured via propose_plan (M15 — no second provider call; the plan
+     * content came back structured in the tool arguments). Called from the
+     * RunPlanDraft job. Salvage guards keep an unbuildable plan from writing an
+     * empty brief the Builder can't act on.
      */
     public function approvePlan(Project $project): void
     {
-        $binding = app(RoleResolver::class)->resolve('architect', $project);
+        $plan = $this->capturedPlan($project);
 
-        $extraSystem = $binding->meta['system_prompt_extra'] ?? null;
-        $response = $this->providers->forBinding($binding)->chat(new ProviderRequest(
-            model: $binding->model,
-            messages: array_merge($this->buildMessages($project, $extraSystem), [[
-                'role' => 'user',
-                'content' => self::PLAN_PROMPT,
-            ]]),
-            maxTokens: (int) config('majordom.architect.plan_max_tokens', 8000),
-            temperature: $binding->temperature,
-            jsonMode: true,
-            topP: isset($binding->meta['top_p']) ? (float) $binding->meta['top_p'] : null,
-            frequencyPenalty: isset($binding->meta['frequency_penalty']) ? (float) $binding->meta['frequency_penalty'] : null,
-            presencePenalty: isset($binding->meta['presence_penalty']) ? (float) $binding->meta['presence_penalty'] : null,
-            stop: isset($binding->meta['stop']) ? $binding->meta['stop'] : null,
-            timeout: isset($binding->meta['timeout']) ? (int) $binding->meta['timeout'] : null,
-        ));
-
-        app(UsageLedger::class)->record(
-            $project,
-            'architect',
-            $binding->model,
-            $response->promptTokens,
-            $response->completionTokens
-        );
-
-        $data = json_decode(trim($response->content), true);
-        if (! is_array($data)) {
-            // Salvage: keep the raw response as a draft rather than losing it.
-            $this->memory->write($project, 'plan_draft.md', $response->content);
+        if ($plan === null) {
             $project->consensusMessages()->create([
                 'role' => MessageRole::System,
-                'content' => 'Consensus reached, but the plan came back malformed — raw draft saved to plan_draft.md. Re-run planning.',
+                'content' => 'No proposed plan was found to approve — ask the Architect to propose the plan again in the chat.',
             ]);
 
             return;
         }
 
-        $taskId = is_string($data['first_task_id'] ?? null) && $data['first_task_id'] !== ''
-            ? $data['first_task_id']
+        // Revision approval (M16-B, finding 6): when a plan already exists this
+        // propose_plan REVISES it — the same consensus surface as the first plan.
+        // Preserve built work (RoadmapSync upserts by key), reset the loop, and
+        // regenerate the restart brief. No re-scaffold: the repo is already real.
+        if ($this->planAlreadyWritten($project)) {
+            if (trim((string) ($plan['roadmap_md'] ?? '')) === '') {
+                $project->consensusMessages()->create([
+                    'role' => MessageRole::System,
+                    'content' => 'The revised plan came back without a roadmap — nothing changed. Ask the Architect to propose the revision again.',
+                ]);
+
+                return;
+            }
+
+            $this->applyRevisedRoadmap(
+                $project,
+                (string) $plan['roadmap_md'],
+                $plan['architecture_md'] ?? null,
+                (string) ($plan['summary'] ?? 'the roadmap was revised.'),
+            );
+
+            return;
+        }
+
+        // A plan without a real first task brief is unbuildable — salvage it
+        // rather than writing an empty file the Builder can't act on.
+        if (trim((string) ($plan['first_task_md'] ?? '')) === '') {
+            $this->memory->write($project, 'plan_draft.md', json_encode($plan, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+            $project->consensusMessages()->create([
+                'role' => MessageRole::System,
+                'content' => 'The proposed plan had no first task brief — raw draft saved to plan_draft.md. Ask the Architect to propose a complete plan, then approve again.',
+            ]);
+
+            return;
+        }
+
+        $taskId = is_string($plan['first_task_id'] ?? null) && trim($plan['first_task_id']) !== ''
+            ? trim($plan['first_task_id'])
             : 'T-001';
 
-        // A plan without a real first task brief is malformed — salvage it
-        // rather than writing an empty file the Builder can't act on
-        // (bit a legacy project on 2026-07-15).
-        if (trim((string) ($data['first_task_md'] ?? '')) === '') {
-            $this->memory->write($project, 'plan_draft.md', $response->content);
-            $project->consensusMessages()->create([
-                'role' => MessageRole::System,
-                'content' => 'The plan came back without a first task brief — raw draft saved to plan_draft.md. Approve the plan again to retry.',
-            ]);
-
-            return;
-        }
-
-        $this->memory->write($project, 'architecture.md', (string) ($data['architecture_md'] ?? ''));
-        $this->memory->write($project, 'roadmap.md', (string) ($data['roadmap_md'] ?? ''));
-        $this->memory->write($project, "tasks/{$taskId}/task.md", (string) ($data['first_task_md'] ?? ''));
+        $this->memory->write($project, 'architecture.md', (string) ($plan['architecture_md'] ?? ''));
+        $this->memory->write($project, 'roadmap.md', (string) ($plan['roadmap_md'] ?? ''));
+        $this->memory->write($project, "tasks/{$taskId}/task.md", (string) ($plan['first_task_md'] ?? ''));
 
         $project->consensusMessages()->create([
             'role' => MessageRole::System,
             'content' => "Consensus reached — project memory written to {$this->memory->pathFor($project)} "
                 ."(architecture.md, roadmap.md, tasks/{$taskId}/task.md).\n\n"
-                .(string) ($data['summary'] ?? ''),
+                .(string) ($plan['summary'] ?? ''),
             'meta' => ['planWritten' => true, 'firstTaskId' => $taskId],
         ]);
 
@@ -237,7 +493,206 @@ class ArchitectService
         );
 
         app(\App\Projects\Roadmap\RoadmapSync::class)->for($project)->sync();
+
+        // T-67: a greenfield repo gets an Architect-selected frontier-Builder
+        // scaffold so the first Builder task starts on real ground.
+        $this->bootstrapRepo($project);
     }
+
+    /** The plan captured by the most recent propose_plan turn, or null. */
+    private function capturedPlan(Project $project): ?array
+    {
+        $message = $project->consensusMessages()
+            ->where('role', MessageRole::Architect)
+            ->orderByDesc('id')
+            ->get()
+            ->first(fn ($m) => is_array($m->meta['proposed_plan'] ?? null));
+
+        return $message?->meta['proposed_plan'] ?? null;
+    }
+
+    /**
+     * Scaffold a greenfield repository (M14a/T-67, reconciled onto Builder
+     * Selection in M14b). No-ops (returns false, no model call) on a repo that
+     * already has tracked files.
+     *
+     * Under Builder Selection the Architect SELECTS the frontier Builder for the
+     * scaffold; role separation still holds — the scaffold goes through the
+     * **Reviewer** before it is committed (no self-approval). There is no HUMAN
+     * gate (owner-locked: scaffolding an empty repo is obviously the right move),
+     * but a rejected scaffold is retried once with the feedback and, if still
+     * rejected, surfaced rather than committed. Scaffolding uses a dedicated
+     * flow (direct file generation, owner-blessed) rather than the aider chain,
+     * since there is no repo for aider to operate a worktree on yet. Returns
+     * true only if a reviewed scaffold was committed.
+     */
+    public function bootstrapRepo(Project $project): bool
+    {
+        if ($this->repoIndex->fileList($project->repo_path) !== null) {
+            return false; // not greenfield
+        }
+
+        // Builder Selection: greenfield scaffolding is a FRONTIER BUILDER action.
+        app(EventRecorder::class)->record(
+            $project,
+            'build.builder_selected',
+            ['strategy' => 'frontier', 'role' => 'frontier_builder', 'phase' => 'bootstrap'],
+            null,
+            'frontier_builder'
+        );
+
+        $scaffold = $this->generateScaffold($project, null);
+        if ($scaffold === null) {
+            app(EventRecorder::class)->record($project, 'repo.bootstrap_failed', ['reason' => 'no files'], null, 'frontier_builder');
+
+            return false;
+        }
+
+        // Reviewer gate (no human gate): one corrective retry, then surface.
+        $verdict = $this->reviewScaffold($project, $scaffold['files']);
+        if (! $verdict->approved) {
+            $retry = $this->generateScaffold($project, $this->scaffoldFeedback($verdict));
+            if ($retry !== null) {
+                $scaffold = $retry;
+                $verdict = $this->reviewScaffold($project, $scaffold['files']);
+            }
+        }
+
+        if (! $verdict->approved) {
+            app(EventRecorder::class)->record($project, 'repo.bootstrap_review_rejected', ['summary' => $verdict->summary], null, 'reviewer');
+            $project->consensusMessages()->create([
+                'role' => MessageRole::System,
+                'content' => "The project scaffold didn't pass review, so nothing was committed:\n\n> ".$verdict->summary
+                    ."\n\nRefine the scope (Redefine milestones) and approve the plan again to retry the scaffold.",
+                'meta' => ['bootstrap_rejected' => true],
+            ]);
+
+            return false;
+        }
+
+        $ok = app(\App\Projects\Repositories\CommitService::class)
+            ->commitScaffold($project->repo_path, $scaffold['files'], $scaffold['message']);
+
+        app(EventRecorder::class)->record(
+            $project,
+            $ok ? 'repo.bootstrapped' : 'repo.bootstrap_failed',
+            ['files' => count($scaffold['files']), 'reviewed' => true],
+            null,
+            'frontier_builder'
+        );
+
+        if ($ok) {
+            $project->consensusMessages()->create([
+                'role' => MessageRole::System,
+                'content' => 'The frontier Builder scaffolded the empty repository with '.count($scaffold['files'])
+                    .' starter file(s), reviewed and committed, so the Builder has real ground for the first task.',
+                'meta' => ['bootstrap' => true],
+            ]);
+        }
+
+        return $ok;
+    }
+
+    /**
+     * Generate a project scaffold from the frontier Builder binding (M14b). When
+     * $feedback is set, this is the corrective retry after a review rejection.
+     * Returns ['files' => [['path','contents'], …], 'message' => …] or null when
+     * the model produced no usable files.
+     *
+     * @return array{files: array<int, array{path: string, contents: string}>, message: string}|null
+     */
+    private function generateScaffold(Project $project, ?string $feedback): ?array
+    {
+        $binding = app(RoleResolver::class)->resolve('frontier_builder', $project);
+        $extraSystem = $binding->meta['system_prompt_extra'] ?? null;
+
+        $prompt = self::BOOTSTRAP_PROMPT;
+        if ($feedback !== null && trim($feedback) !== '') {
+            $prompt .= "\n\nYour previous scaffold was REJECTED in review. Regenerate the FULL scaffold addressing this:\n".trim($feedback);
+        }
+
+        $response = $this->providers->forBinding($binding)->chat(new ProviderRequest(
+            model: $binding->model,
+            messages: array_merge($this->buildMessages($project, $extraSystem), [['role' => 'user', 'content' => $prompt]]),
+            maxTokens: (int) config('majordom.architect.plan_max_tokens', 8000),
+            temperature: $binding->temperature,
+            jsonMode: true,
+        ));
+
+        app(UsageLedger::class)->record($project, 'frontier_builder', $binding->model, $response->promptTokens, $response->completionTokens);
+
+        $data = json_decode(trim($response->content), true);
+        $files = [];
+        foreach (is_array($data['files'] ?? null) ? $data['files'] : [] as $f) {
+            if (is_array($f) && is_string($f['path'] ?? null) && trim($f['path']) !== '' && array_key_exists('contents', $f)) {
+                $files[] = ['path' => trim($f['path']), 'contents' => (string) $f['contents']];
+            }
+        }
+
+        if ($files === []) {
+            return null;
+        }
+
+        $message = is_string($data['commit_message'] ?? null) && trim($data['commit_message']) !== ''
+            ? $data['commit_message']
+            : 'chore: scaffold project structure';
+
+        return ['files' => $files, 'message' => $message];
+    }
+
+    /**
+     * Run the Reviewer over a proposed (uncommitted) scaffold. Uses an ephemeral
+     * Task (not persisted — the scaffold isn't a roadmap task) and a synthetic
+     * added-files diff so the standard ReviewerService can judge it.
+     */
+    private function reviewScaffold(Project $project, array $files): \App\Agents\Reviewer\ReviewVerdict
+    {
+        $this->memory->write($project, 'tasks/__bootstrap__/task.md', self::BOOTSTRAP_REVIEW_BRIEF);
+
+        $task = new Task(['task_key' => '__bootstrap__', 'title' => 'Project scaffold']);
+        $task->project_id = $project->id;
+        $task->setRelation('project', $project);
+
+        return app(\App\Agents\Reviewer\ReviewerService::class)->review($task, $this->scaffoldDiff($files), null);
+    }
+
+    /** Render proposed scaffold files as a synthetic unified diff of additions. */
+    private function scaffoldDiff(array $files): string
+    {
+        $blocks = [];
+        foreach ($files as $f) {
+            $path = $f['path'];
+            $added = implode("\n", array_map(fn ($l) => '+'.$l, explode("\n", (string) $f['contents'])));
+            $blocks[] = "diff --git a/{$path} b/{$path}\nnew file mode 100644\n--- /dev/null\n+++ b/{$path}\n{$added}";
+        }
+
+        return implode("\n\n", $blocks);
+    }
+
+    private function scaffoldFeedback(\App\Agents\Reviewer\ReviewVerdict $verdict): string
+    {
+        $lines = [$verdict->summary];
+        foreach ($verdict->comments as $c) {
+            $lines[] = '- '.($c['file'] ? $c['file'].': ' : '').$c['comment'];
+        }
+
+        return implode("\n", array_filter($lines));
+    }
+
+    private const BOOTSTRAP_REVIEW_BRIEF = <<<'MD'
+# Project scaffold (bootstrap)
+
+This is the INITIAL scaffold of a greenfield repository — foundation only, not a
+feature. Judge whether it is a sound, runnable starting point for the agreed
+architecture: sensible directory layout, dependency/package manifests, a README,
+test runner/config, and an entry point.
+
+Approve when the scaffold is coherent and consistent with the architecture. Do
+NOT reject for missing feature logic, missing tests of behavior, or incomplete
+functionality — those are for later tasks. Reject only for real problems:
+malformed manifests, broken structure, missing essential foundation, or
+contents that contradict the agreed architecture.
+MD;
 
     /**
      * Decompose a roadmap task into a concrete `task.md` brief (SPEC §3 phase 3).
@@ -341,89 +796,289 @@ class ArchitectService
         app(EventRecorder::class)->record($project, 'context.added', [], null, 'you');
     }
 
-    /**
-     * "Redefine milestones / specs" (the lightweight amend): the Architect
-     * revises roadmap.md (+ architecture.md) from the owner's instruction and
-     * re-syncs. Keys stay stable so built work is preserved (RoadmapSync upserts
-     * by key). One provider turn.
-     */
-    public function redefinePlan(Project $project, string $instruction): void
+    /** True once the owner has approved at least one plan (a planWritten note exists). */
+    private function planAlreadyWritten(Project $project): bool
     {
-        $instruction = trim($instruction);
-        if ($instruction === '') {
-            return;
-        }
+        return $project->consensusMessages()
+            ->where('role', MessageRole::System)
+            ->get()
+            ->contains(fn ($m) => ($m->meta['planWritten'] ?? false) === true);
+    }
 
-        $binding = app(RoleResolver::class)->resolve('architect', $project);
-        $current = $this->memory->read($project, 'roadmap.md') ?? '(none yet)';
-        $architecture = $this->memory->read($project, 'architecture.md') ?? '(none yet)';
-
-        $response = $this->providers->forBinding($binding)->chat(new ProviderRequest(
-            model: $binding->model,
-            messages: [
-                ['role' => 'system', 'content' => self::REDEFINE_PROMPT],
-                ['role' => 'user', 'content' => "## Current roadmap.md\n{$current}\n\n## Current architecture.md\n{$architecture}\n\n## Owner change request\n{$instruction}"],
-            ],
-            maxTokens: (int) config('majordom.architect.plan_max_tokens', 8000),
-            temperature: $binding->temperature,
-            jsonMode: true,
-        ));
-
-        app(UsageLedger::class)->record($project, 'architect', $binding->model, $response->promptTokens, $response->completionTokens);
-
-        $data = json_decode(trim($response->content), true);
-        if (! is_array($data) || empty($data['roadmap_md'])) {
+    /**
+     * Apply an owner-approved roadmap REVISION to an existing plan (M16-B). The
+     * revision arrived through the same consensus surface as the first plan (a
+     * propose_plan the owner approved), so this only reconciles memory + the loop:
+     * re-sync (keys preserved so built work survives), reset the execution loop,
+     * regenerate the restart brief, and re-arm "Start build". No provider call —
+     * the roadmap came back structured in the propose_plan arguments.
+     */
+    private function applyRevisedRoadmap(Project $project, string $roadmapMd, ?string $architectureMd, string $summary): void
+    {
+        // M16-D2 WS3 ordering guard: a revision must not race an open merge gate.
+        // Merging + resuming while a redefine is in flight left two parallel
+        // worktrees on divergent bases (the small-space-sim e2e). Block the
+        // revision until the owner resolves the gate — merge or defer it first.
+        $openGate = $project->approvals()
+            ->where('type', \App\Enums\ApprovalType::MilestoneMerge)
+            ->where('status', \App\Enums\ApprovalStatus::Open)
+            ->first();
+        if ($openGate !== null) {
+            $gm = Milestone::find($openGate->payload['milestone_id'] ?? null);
+            $mkey = $gm?->milestone_key ?? 'a milestone';
             $project->consensusMessages()->create([
                 'role' => MessageRole::System,
-                'content' => 'The roadmap revision came back malformed — nothing changed. Try rephrasing the request.',
+                'content' => "There's an open merge gate for {$mkey} — merge or defer it before revising the plan, so the worktrees don't diverge. Your revision was NOT applied; resolve the gate, then propose the revision again.",
+                'meta' => ['revision_blocked' => true],
             ]);
+            app(EventRecorder::class)->record($project, 'plan.revision_blocked', ['reason' => 'open_merge_gate', 'milestone_key' => $mkey], null, 'system');
 
             return;
         }
 
-        $this->memory->write($project, 'roadmap.md', (string) $data['roadmap_md']);
-        if (! empty($data['architecture_md'])) {
-            $this->memory->write($project, 'architecture.md', (string) $data['architecture_md']);
+        // M16-D2 WS2c hard freeze: snapshot built (done/ongoing) work BEFORE the
+        // sync so we can undo any rename/renumber/move the model attempted on a
+        // built key — built work is untouchable; a revision may only reword a
+        // not-started milestone, add tasks to the current/later milestones, or
+        // append new milestones.
+        $built = $this->snapshotBuiltPlan($project);
+
+        $this->memory->write($project, 'roadmap.md', $roadmapMd);
+        if ($architectureMd !== null && trim($architectureMd) !== '') {
+            $this->memory->write($project, 'architecture.md', $architectureMd);
         }
 
         app(\App\Projects\Roadmap\RoadmapSync::class)->for($project)->sync();
 
+        // Restore the built prefix the model may have disturbed (freeze) — undoes
+        // any rename/renumber/move it attempted on a built key.
+        $this->restoreBuiltPlan($project, $built);
+
+        // M16-C: reconcile worktrees — a revision that drops a NOT-started
+        // milestone leaves its majordom/<key> worktree/branch orphaned. liveKeys is
+        // what the REVISION keeps (not the DB, which never deletes milestone rows);
+        // reconcileMilestones itself spares built milestones (never destroy work).
+        $liveKeys = \App\Projects\Roadmap\RoadmapSync::milestoneKeysIn($roadmapMd);
+        $reconciled = app(\App\Projects\Repositories\WorktreeManager::class)->reconcileMilestones($project, $liveKeys);
+        if ($reconciled !== []) {
+            app(EventRecorder::class)->record($project, 'worktrees.reconciled', ['removed' => $reconciled], null, 'system');
+        }
+
+        // Drop the DB rows for NOT-started milestones the revision removed, so the
+        // canonical roadmap reflects the true plan. Built milestones are frozen and
+        // kept regardless of whether the revision re-listed them.
+        $liveSet = array_flip($liveKeys);
+        foreach (Milestone::where('project_id', $project->id)->get() as $m) {
+            if (! isset($liveSet[$m->milestone_key]) && $m->deriveStatus() === 'todo') {
+                $m->delete();
+            }
+        }
+
+        // Re-render the canonical roadmap from the reconciled DB so the persisted
+        // roadmap.md matches the frozen state (the Builder's decompose reads it).
+        $canonical = app(\App\Projects\Roadmap\RoadmapSync::class)->for($project)->renderMarkdown();
+        $this->memory->write($project, 'roadmap.md', $canonical);
+
+        // T-62: the revised plan must not resume the old, possibly-poisoned
+        // cycle — reset the execution loop, then name the task the loop restarts
+        // from (its first still-pending task in roadmap order).
+        $firstTaskKey = app(\App\Core\Workflow\WorkflowEngine::class)->resetForRedefine($project);
+
+        // Real recovery, not a replay: the restart task's brief was written
+        // against the OLD roadmap. Regenerate it from the revised roadmap so
+        // "Start build" launches fresh — DelegateNode reads task.md directly and
+        // never re-decomposes, so an un-refreshed brief would rebuild the exact
+        // thing being escaped.
+        if ($firstTaskKey !== null) {
+            $this->regenerateBriefForRestart($project, $firstTaskKey);
+        }
+
+        // Re-arm the "Start build" trigger: getPlannedTaskProperty needs the
+        // planWritten message to carry firstTaskId.
         $project->consensusMessages()->create([
             'role' => MessageRole::System,
-            'content' => "✓ Plan updated — ".(string) ($data['summary'] ?? 'the roadmap was revised.'),
-            'meta' => ['planWritten' => true],
+            'content' => "✓ Plan updated — {$summary}"
+                .($firstTaskKey !== null
+                    ? "\n\nThe build loop was reset. Use **Start build** to relaunch from {$firstTaskKey} with the revised brief."
+                    : "\n\nNo tasks remain to build."),
+            'meta' => array_filter([
+                'planWritten' => true,
+                'firstTaskId' => $firstTaskKey,
+            ], fn ($v) => $v !== null),
         ]);
 
-        app(EventRecorder::class)->record($project, 'plan.redefined', [], null, 'architect');
+        app(EventRecorder::class)->record($project, 'plan.redefined', ['firstTaskId' => $firstTaskKey], null, 'architect');
     }
 
-    private const REDEFINE_PROMPT = <<<'PROMPT'
-You are the Architect revising an EXISTING project roadmap per the owner's
-change request. Output ONLY a JSON object:
-{
-  "roadmap_md": "the FULL updated roadmap markdown",
-  "architecture_md": "the updated architecture markdown, or omit if unchanged",
-  "summary": "1-2 sentences: what changed"
-}
+    /**
+     * Snapshot built (done/ongoing) milestones and tasks before a revision syncs
+     * (M16-D2 freeze). Built work is frozen — a revision may only touch not-started
+     * items — so restoreBuiltPlan uses this to undo any rename/renumber/move the
+     * model attempted on a built key. A built task's milestone is itself always
+     * built (a milestone with any non-todo task never derives 'todo'), so its key
+     * is captured here too and resolves back cleanly on restore.
+     *
+     * @return array{milestones: array<string, array{title: ?string, summary: ?string, position: ?int}>, tasks: array<string, array{milestone_key: ?string, position: ?int, title: ?string, declared_status: ?string}>}
+     */
+    private function snapshotBuiltPlan(Project $project): array
+    {
+        $milestones = [];
+        foreach (Milestone::where('project_id', $project->id)->orderBy('position')->get() as $m) {
+            if ($m->deriveStatus() !== 'todo') {
+                $milestones[$m->milestone_key] = [
+                    'title' => $m->title,
+                    'summary' => $m->summary,
+                    'position' => $m->position,
+                ];
+            }
+        }
 
-The roadmap format is milestones `## M<N> — <title>` each followed by one
-summary line, then tasks as checkboxes `- [ ] T-00N — <title>`.
+        $tasks = [];
+        foreach ($project->tasks()->with('milestone')->get() as $t) {
+            if (in_array(\App\Projects\Roadmap\RoadmapSync::effectiveStatus($t), ['done', 'ongoing'], true)) {
+                $tasks[$t->task_key] = [
+                    'milestone_key' => $t->milestone?->milestone_key,
+                    'position' => $t->position,
+                    'title' => $t->title,
+                    'declared_status' => $t->declared_status,
+                ];
+            }
+        }
 
-HARD RULES — you are AMENDING, not rewriting from scratch:
-- Preserve every existing milestone key (M1, M2 …) and task key (T-001 …). Do
-  NOT renumber, and do NOT delete a task that may already be built — reword or
-  reorder if needed, but keep its key.
-- Preserve `[x]`/`[~]` checkbox marks on tasks that already have them (done /
-  in-progress work must not regress to unchecked).
-- Add new milestones/tasks with the NEXT available keys.
-- Make the smallest change that satisfies the request. Keep everything else identical.
-PROMPT;
+        return ['milestones' => $milestones, 'tasks' => $tasks];
+    }
+
+    /**
+     * Re-assert the built prefix a revision's sync may have disturbed (M16-D2
+     * freeze): restore each built milestone's title/summary/position and each
+     * built task's milestone/position/title/declared_status. Recreates a built
+     * milestone the model dropped entirely (updateOrCreate never deletes, so this
+     * is defensive), and re-resolves each built task's milestone_id by key so a
+     * recreated milestone reconnects correctly.
+     *
+     * @param array{milestones: array<string, array>, tasks: array<string, array>} $snapshot
+     */
+    private function restoreBuiltPlan(Project $project, array $snapshot): void
+    {
+        foreach ($snapshot['milestones'] as $key => $data) {
+            Milestone::updateOrCreate(
+                ['project_id' => $project->id, 'milestone_key' => $key],
+                ['title' => $data['title'], 'summary' => $data['summary'], 'position' => $data['position']],
+            );
+        }
+
+        foreach ($snapshot['tasks'] as $key => $data) {
+            $task = $project->tasks()->where('task_key', $key)->first();
+            if ($task === null) {
+                continue; // built tasks are never deleted by sync — nothing to restore
+            }
+
+            $milestoneId = $task->milestone_id;
+            if ($data['milestone_key'] !== null) {
+                $milestoneId = Milestone::where('project_id', $project->id)
+                    ->where('milestone_key', $data['milestone_key'])
+                    ->value('id') ?? $milestoneId;
+            }
+
+            $task->update([
+                'milestone_id' => $milestoneId,
+                'position' => $data['position'],
+                'title' => $data['title'],
+                'declared_status' => $data['declared_status'],
+            ]);
+        }
+    }
+
+    /**
+     * Regenerate a task's build brief from the CURRENT roadmap so a restart
+     * doesn't rebuild the stale (possibly poisoned) brief (M14a/T-62, reused by
+     * the failed-task retry recovery in M14b). decomposeTask skips when a
+     * non-empty brief exists, so clear it first; if regeneration comes back
+     * empty, restore the prior brief so the restart is never blocked on a
+     * missing task.md.
+     */
+    public function refreshTaskBrief(Project $project, string $taskKey): void
+    {
+        $this->regenerateBriefForRestart($project, $taskKey);
+    }
+
+    private function regenerateBriefForRestart(Project $project, string $taskKey): void
+    {
+        $task = $project->tasks()->where('task_key', $taskKey)->latest('id')->first();
+        if ($task === null) {
+            return;
+        }
+
+        $briefPath = "tasks/{$taskKey}/task.md";
+        $stale = (string) $this->memory->read($project, $briefPath);
+
+        $this->memory->write($project, $briefPath, ''); // force decompose to regenerate
+        $this->decomposeTask($project, $task);
+
+        if (trim((string) $this->memory->read($project, $briefPath)) === '' && trim($stale) !== '') {
+            $this->memory->write($project, $briefPath, $stale); // regen failed — keep something buildable
+        }
+    }
 
     /**
      * Assemble the decompose context: the milestone goal, this task's line, the
      * project architecture, and a short trail of already-built sibling tasks so
      * the new brief fits what came before (no duplicate work, consistent style).
      */
+    /**
+     * Fetch the repo context the Architect requested (M14a/T-66). Entries are
+     * tracked file paths, a directory ("dir/") for its listing, or "tree" for
+     * the full tracked tree. Enforces tracked-only reads (membership against the
+     * git file list) so gitignored secrets like .env can never be pulled into
+     * the model, on top of RepoIndex::readFile's in-repo confinement. Capped.
+     *
+     * @param string[] $reads
+     */
+    private function gatherRepoContext(Project $project, array $reads): string
+    {
+        $treeAll = $this->repoIndex->fileList($project->repo_path, 2000);
+        $tracked = $treeAll !== null
+            ? array_values(array_filter(array_map('trim', explode("\n", $treeAll))))
+            : [];
+        // Drop the "+N more" footer line from the membership set if present.
+        $trackedSet = array_flip(array_filter($tracked, fn ($f) => ! str_starts_with($f, '…')));
+
+        $blocks = [];
+        $budget = self::GATHER_MAX_TOTAL;
+
+        foreach ($reads as $req) {
+            if (! is_string($req) || $budget <= 0) {
+                continue;
+            }
+            $req = trim($req);
+            if ($req === '') {
+                continue;
+            }
+
+            if (in_array($req, ['tree', '**', '.', './'], true)) {
+                $block = "### Repository tree (tracked)\n".($treeAll ?? '(empty — no tracked files)');
+            } elseif (str_ends_with($req, '/')) {
+                $prefix = ltrim($req, '/');
+                $under = array_values(array_filter(array_keys($trackedSet), fn ($f) => str_starts_with($f, $prefix)));
+                $block = "### {$req} (tracked files)\n".($under === [] ? '(no tracked files here)' : implode("\n", array_slice($under, 0, 200)));
+            } else {
+                $rel = ltrim($req, '/');
+                if (! isset($trackedSet[$rel])) {
+                    $block = "### {$req}\n(not a tracked file — cannot read; consult the tree)";
+                } else {
+                    $contents = $this->repoIndex->readFile($project->repo_path, $rel, self::READ_MAX_BYTES);
+                    $block = "### {$req}\n".($contents ?? '(unreadable)');
+                }
+            }
+
+            $block = mb_substr($block, 0, $budget);
+            $budget -= mb_strlen($block);
+            $blocks[] = $block;
+        }
+
+        return $blocks === [] ? '(nothing to show)' : implode("\n\n", $blocks);
+    }
+
     private function decomposeContext(Project $project, Task $task): string
     {
         $milestone = $task->milestone;
@@ -551,27 +1206,69 @@ PROMPT;
             ? 'There are currently no unanswered questions.'
             : "Unanswered questions you have already raised (do NOT re-raise them):\n- ".implode("\n- ", $open);
 
+        // Grounding (e2e#3): let the Architect reason about the REAL repository
+        // during consensus — so it grounds questions in what exists, and
+        // recognizes a greenfield repo that must be scaffolded before any task.
+        $canRead = $project->capability()->canRead();
+        $tree = $this->repoIndex->fileList($project->repo_path);
+        if (! $tree) {
+            $repoBlock = "Repository state: this repository is EMPTY (no tracked files yet) — the project is greenfield. The first work will be scaffolding the project structure; factor that into the scope you agree on.";
+        } elseif ($canRead) {
+            $repoBlock = "Repository files (tracked — ground your questions and scope in these real paths; do not invent files):\n{$tree}\n\n"
+                ."Use the read_file tool to see any file's contents and list_repo to browse directories — never ask the owner to paste a file.";
+        } else {
+            $repoBlock = "Repository files (tracked — names only; ground your scope in these real paths, do not invent files):\n{$tree}\n\n"
+                ."You do NOT have read access to file CONTENTS in this project (the owner has not granted it). When you need to see inside a file, ask the owner to share it.";
+        }
+
+        // Phase-awareness (M16-B): pre-plan you converge on a FIRST plan;
+        // post-plan the same surface lets the owner refine, add constraints, or
+        // request a scope change — a propose_plan then REVISES the existing plan.
+        //
+        // M16-D2 grounding: post-plan, the roadmap/architecture live in project
+        // MEMORY, not the tracked repo, so read_file/list_repo cannot reach them.
+        // Without the live plan state below, the model re-plans blind and destroys
+        // built work (the small-space-sim e2e). Inject the authoritative DB state.
+        $planExists = $this->planAlreadyWritten($project);
+        $goalLine = $planExists
+            ? 'A plan has ALREADY been approved for this project and work may be underway. The owner is now STEERING it. Consult the "Current plan state" below — it is the authoritative, live status of every milestone and task; the roadmap/architecture docs in memory are only summarized there. When the owner asks a question or adds a constraint, help directly. When they want to change WHAT gets built, reach consensus (ask_owner for anything ambiguous), then propose_plan with the FULL revised roadmap for their approval. A revision may ONLY reword/expand a not-started milestone, add NEW tasks to the current or a later milestone, or append NEW milestones — it PRESERVES every existing milestone/task key exactly and NEVER renumbers, renames, drops, or re-scopes a built or in-progress item. If a milestone is awaiting a merge decision, ask the owner to resolve that gate before restructuring. If they only want to talk, reply in plain text.'
+            : 'Your single goal in this conversation is to reach consensus with the human owner on WHAT to build — before any plan is made.';
+
+        $planStateBlock = '';
+        if ($planExists) {
+            $state = $this->currentPlanState($project);
+            $arch = trim((string) $this->memory->read($project, 'architecture.md'));
+            $decisions = trim((string) $this->memory->read($project, 'decisions.md'));
+
+            $planStateBlock = "\n\n## Current plan state — AUTHORITATIVE (the live built state; trust this over any memory of the roadmap)\n"
+                ."Statuses: [x] built & frozen · [~] in progress · [ ] not started. NEVER renumber, rename, drop, or re-scope a [x] or [~] milestone/task — that work already exists. Only reword/expand a [ ] milestone, add NEW tasks to the current or a later milestone, or append NEW milestones; preserve every existing key.\n\n"
+                .($state !== '' ? $state : '(no milestones recorded yet)');
+
+            if ($arch !== '') {
+                $planStateBlock .= "\n\n## Agreed architecture (architecture.md)\n".mb_substr($arch, 0, 4000);
+            }
+            if ($decisions !== '') {
+                $planStateBlock .= "\n\n## Owner decisions & added context (MUST honor)\n".mb_substr($decisions, 0, 4000);
+            }
+        }
+
         $prompt = <<<PROMPT
 You are the Architect of the software project "{$project->name}" (repository: {$project->repo_path}).
-Your single goal in this conversation is to reach consensus with the human owner on WHAT to build — before any plan is made.
+{$goalLine}
 
 Non-negotiable mandate: surface EVERY open question before proposing anything. Ask, never assume. Questions must be discrete, answerable items — not prose musings.
 
+How you act each turn — through your tools:
+- To inspect the repository, call read_file or list_repo. The engine fulfils the read and hands you the contents; then continue. Never ask permission to read, and never ask the owner to paste a file.
+- When anything about the scope is ambiguous, call ask_owner with specific questions. This ends your turn until the owner answers. If you tell the owner you have questions, ask them in that SAME turn via ask_owner — never announce a batch of questions you then don't ask.
+- When every question is answered and the scope is clear, call propose_plan (architecture, roadmap, first task brief, summary). The owner must approve before anything is written.
+- If you are only replying conversationally (acknowledging, thinking aloud), just write text — it is the owner's turn next.
+
+You may only propose_plan once every question you ever raised has been answered. The owner may answer in their own words or defer to you ("your call"); treat a deferral as a real answer — decide, state it, and don't re-ask. Prefer the project's own summary docs (architecture.md, roadmap.md, decisions.md) when they exist; only read source when you need specifics.
+
 {$openBlock}
 
-You must respond ONLY with a JSON object of this exact shape (no markdown fences, no text outside the JSON):
-{
-  "reply": "markdown text shown to the owner — your reasoning, acknowledgements, current understanding",
-  "questions": [{"text": "one specific question", "options": ["optional", "answer", "choices"]}],
-  "consensus_reached": false
-}
-
-Rules:
-1. New ambiguities go in "questions" — one entry per question, never buried in "reply".
-2. "consensus_reached" may only be true when every question you ever raised has been answered AND this turn raises none. The engine enforces this regardless of what you claim.
-3. When consensus_reached is true, "reply" must restate the agreed scope in a few sentences.
-4. Keep "reply" concise; the owner reads it in a chat pane.
-5. The owner may answer a question in their own words instead of picking an option — including deferring to you ("your call"). Treat a deferral as a real answer: make a sensible decision, state it explicitly in "reply", and do not re-ask.
+{$repoBlock}{$planStateBlock}
 PROMPT;
 
         if ($extraSystemPrompt !== null && trim($extraSystemPrompt) !== '') {
@@ -581,15 +1278,58 @@ PROMPT;
         return $prompt;
     }
 
-    private const PLAN_PROMPT = <<<'PROMPT'
-Consensus is reached. Produce the initial project memory now.
-Respond ONLY with a JSON object of this exact shape:
-{
-  "architecture_md": "markdown — the target repo's architecture as you understand it",
-  "roadmap_md": "markdown roadmap. Each milestone is a header '## M<N> — <title>' followed by one summary line, then its tasks as checkbox items '- [ ] T-00N — <task title>'. The first task MUST appear as the first checkbox and match first_task_id. Example:\n## M1 — Skeleton\nStand up the project shell.\n- [ ] T-001 — Create repo structure\n- [ ] T-002 — Add build system",
-  "first_task_id": "T-001",
-  "first_task_md": "markdown — the first task brief: goal, acceptance criteria, files likely involved, test command",
-  "summary": "2-3 sentences for the owner: what was agreed and what happens next"
-}
-PROMPT;
+    /**
+     * The live, authoritative plan state (M16-D2 grounding). Built from the DB —
+     * every milestone with its derived status and every task with its effective
+     * status — so a post-plan steering turn sees what is actually built and cannot
+     * re-plan blind. The roadmap/architecture docs live in project MEMORY, which
+     * the read tools (scoped to the git repo) cannot reach; this is how the
+     * Architect learns which milestones/tasks exist and which are done.
+     *
+     * Marks any milestone awaiting the owner's merge decision (open MilestoneMerge
+     * gate) so steering resolves that gate before restructuring — the guard that
+     * prevents the divergent two-worktree state (M16-D2 WS3).
+     */
+    private function currentPlanState(Project $project): string
+    {
+        $milestones = Milestone::where('project_id', $project->id)
+            ->orderBy('position')
+            ->get();
+
+        if ($milestones->isEmpty()) {
+            return '';
+        }
+
+        $gatedMilestoneIds = $project->approvals()
+            ->where('type', \App\Enums\ApprovalType::MilestoneMerge)
+            ->where('status', \App\Enums\ApprovalStatus::Open)
+            ->get()
+            ->map(fn ($a) => $a->payload['milestone_id'] ?? null)
+            ->filter()
+            ->all();
+
+        $mark = ['done' => 'x', 'ongoing' => '~', 'todo' => ' '];
+        $lines = [];
+
+        foreach ($milestones as $milestone) {
+            $status = $milestone->deriveStatus();
+            $tag = match ($status) {
+                'done' => ' — BUILT (frozen)',
+                'ongoing' => ' — in progress',
+                default => '',
+            };
+            if (in_array($milestone->id, $gatedMilestoneIds, true)) {
+                $tag .= ' — AWAITING YOUR MERGE DECISION (resolve the gate before restructuring)';
+            }
+
+            $lines[] = "{$milestone->milestone_key} — {$milestone->title}  [{$status}]{$tag}";
+
+            foreach ($milestone->tasks as $task) {
+                $ts = \App\Projects\Roadmap\RoadmapSync::effectiveStatus($task);
+                $lines[] = "  - [{$mark[$ts]}] {$task->task_key} — {$task->title}  ({$ts})";
+            }
+        }
+
+        return implode("\n", $lines);
+    }
 }

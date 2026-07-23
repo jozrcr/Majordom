@@ -130,6 +130,17 @@ class TelegramNotifier
             return;
         }
 
+        // run.escalated → Telegram ping.
+        if ($name === 'run.escalated') {
+            $this->telegram->sendMessage("[{$project->name}] Run escalated ({$payload['class']}): {$payload['reason']}", silent: $silent);
+            return;
+        }
+
+        // run.parked → inbox/event only, no Telegram buzz.
+        if ($name === 'run.parked') {
+            return;
+        }
+
         // Anything parked → plain info line.
         if (str_ends_with($name, '.failed') && isset($payload['reason'])) {
             $this->telegram->sendMessage("[{$project->name}] parked — {$payload['reason']}", silent: $silent);

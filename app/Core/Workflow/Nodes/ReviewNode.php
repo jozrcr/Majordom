@@ -8,6 +8,7 @@ use App\Core\Workflow\NodeJob;
 use App\Core\Workflow\NodeResult;
 use App\Enums\ApprovalType;
 use App\Enums\NodeStatus;
+use App\Enums\ParkedReason;
 use App\Enums\TaskStatus;
 use App\Models\Execution;
 use App\Models\Node;
@@ -36,7 +37,13 @@ class ReviewNode extends NodeJob
             ->orderByDesc('id')
             ->first();
 
-        $diff = $buildNode->output['diff'] ?? '';
+        // Review the task's CUMULATIVE work (base_commit..worktree), not just the
+        // last aider run's incremental diff. A Builder that edits minimally on a
+        // revision/retry produces a tiny diff; judged alone against the full
+        // acceptance criteria it is always (wrongly) rejected, even when the
+        // task's earlier revisions already satisfy the criteria. Falls back to
+        // the incremental diff when there's no base (greenfield / legacy task).
+        $diff = $this->reviewDiff($task, $buildNode->output['diff'] ?? '');
         if ($diff === '') {
             // No-op build: the Builder correctly changed nothing (e.g. a prior
             // task already covers this one). There is literally nothing to
@@ -98,6 +105,7 @@ class ReviewNode extends NodeJob
                         return NodeResult::failed(
                             "Reviewer still requesting changes after {$revision} revisions — parked for the owner (task.v{$revision}.md).",
                             ['verdict' => $verdict->toArray()],
+                            ParkedReason::ReworkLimit,
                         );
                     }
 
@@ -131,6 +139,7 @@ class ReviewNode extends NodeJob
                 return NodeResult::failed(
                     "Reviewer still requesting changes after {$revision} revisions — parked for the owner (task.v{$revision}.md).",
                     ['verdict' => $verdict->toArray()],
+                    ParkedReason::ReworkLimit,
                 );
             }
 
@@ -168,6 +177,27 @@ class ReviewNode extends NodeJob
             ],
             ['verdict' => $verdict->toArray()],
         );
+    }
+
+    /**
+     * The task's cumulative diff since its build baseline (base_commit..worktree),
+     * so the Reviewer judges everything the task built across its revisions — not
+     * just the latest incremental change. Falls back to the incremental diff when
+     * there's no recorded base or the worktree/git call is unavailable.
+     */
+    private function reviewDiff($task, string $incremental): string
+    {
+        $worktree = $task->worktree_path;
+        $base = $task->base_commit;
+
+        if (! $base || ! $worktree || ! is_dir($worktree)) {
+            return $incremental;
+        }
+
+        $result = \Illuminate\Support\Facades\Process::path($worktree)->run(['git', 'diff', $base]);
+        $cumulative = $result->successful() ? trim($result->output()) : '';
+
+        return $cumulative !== '' ? $cumulative : $incremental;
     }
 
     private function testsPassed(Execution $execution): ?bool

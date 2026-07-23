@@ -186,6 +186,8 @@ test('start-build card hides while a plan approval is pending', function () {
     ]);
 
     Livewire::test(ProjectWorkspace::class, ['project' => $project])
-        ->assertSee('Plan approval')
+        // A claim after an existing plan is a REVISION (M16-B) — the approval
+        // card is revision-aware, and Start build still hides behind the gate.
+        ->assertSee('Revised plan')
         ->assertDontSee('Start build');
 });

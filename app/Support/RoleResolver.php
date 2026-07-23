@@ -41,7 +41,7 @@ class RoleResolver
         }
 
         // 3. Built-in config fallback
-        return $this->fallback($name);
+        return $this->fallback($name, $project);
     }
 
     private function toBinding(Role $role): RoleBinding
@@ -56,7 +56,7 @@ class RoleResolver
         );
     }
 
-    private function fallback(string $name): RoleBinding
+    private function fallback(string $name, ?Project $project = null): RoleBinding
     {
         return match ($name) {
             'architect' => new RoleBinding(
@@ -66,18 +66,49 @@ class RoleResolver
                 temperature: config('majordom.architect.temperature'),
                 maxTokens: config('majordom.architect.max_tokens'),
             ),
-            'reviewer' => new RoleBinding(
-                name: 'reviewer',
-                provider: 'openrouter',
-                model: (string) config('majordom.reviewer.model'),
-                temperature: config('majordom.reviewer.temperature'),
-                maxTokens: config('majordom.reviewer.max_tokens'),
-            ),
+            // M16-D: one mind. Unless an owner explicitly binds a DISTINCT
+            // reviewer (MAJORDOM_REVIEWER_MODEL → `distinct`, or a reviewer Role
+            // row, handled above), the reviewer mirrors the *resolved* Architect
+            // — provider + model, honoring per-project / global architect
+            // overrides — with review-appropriate sampling. `meta.mirrors` lets
+            // the UI say "the Architect" instead of presenting a second model.
+            'reviewer' => (function () use ($project) {
+                if (config('majordom.reviewer.distinct')) {
+                    return new RoleBinding(
+                        name: 'reviewer',
+                        provider: 'openrouter',
+                        model: (string) config('majordom.reviewer.model'),
+                        temperature: config('majordom.reviewer.temperature'),
+                        maxTokens: config('majordom.reviewer.max_tokens'),
+                    );
+                }
+
+                $architect = $this->resolve('architect', $project);
+
+                return new RoleBinding(
+                    name: 'reviewer',
+                    provider: $architect->provider,
+                    model: $architect->model,
+                    meta: ['mirrors' => 'architect'],
+                    temperature: config('majordom.reviewer.temperature'),
+                    maxTokens: config('majordom.reviewer.max_tokens'),
+                );
+            })(),
             'builder' => new RoleBinding(
                 name: 'builder',
                 provider: 'metallama',
                 model: (string) config('majordom.builder.gateway_model'),
                 meta: ['managed_model' => config('majordom.builder.model')],
+            ),
+            // Builder Selection (M14b): a frontier model bound as a Builder.
+            // Distinct role from 'architect' even though it shares the default
+            // model — role separation means Architect never reviews its own build.
+            'frontier_builder' => new RoleBinding(
+                name: 'frontier_builder',
+                provider: 'openrouter',
+                model: (string) config('majordom.frontier_builder.model'),
+                temperature: config('majordom.frontier_builder.temperature'),
+                maxTokens: config('majordom.frontier_builder.max_tokens'),
             ),
             default => throw new InvalidArgumentException("Unknown role: {$name}"),
         };

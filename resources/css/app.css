@@ -96,6 +96,7 @@
     --failed-border:  rgba(229, 100, 92, .45);
     --failed-tint:    rgba(229, 100, 92, .10);
     --ok:             #4f9e6f;
+    --ok-tint:        rgba(79, 158, 111, .10);
 
     /* diff */
     --diff-add-bg:    rgba(63, 185, 80, .10);
@@ -163,6 +164,7 @@
     --color-failed-border:  var(--failed-border);
     --color-failed-tint:    var(--failed-tint);
     --color-ok:             var(--ok);
+    --color-ok-tint:        var(--ok-tint);
 
     --color-diff-add-bg:    var(--diff-add-bg);
     --color-diff-add-text:  var(--diff-add-text);

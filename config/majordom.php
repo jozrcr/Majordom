@@ -4,6 +4,13 @@ return [
     'token' => env('MAJORDOM_TOKEN'),
     'memory_root' => env('MAJORDOM_MEMORY_ROOT'),
     'worktrees_root' => env('MAJORDOM_WORKTREES_ROOT'), // null => $HOME/.majordom/worktrees
+
+    // The owner's editor for the "Open in VS Code" gate action (M16-C). A local
+    // desktop launch on the active worktree (fallback: the project folder).
+    // Any CLI that takes a directory works — `code`, `cursor`, `subl`, etc.
+    'editor' => [
+        'command' => env('MAJORDOM_EDITOR', 'code'),
+    ],
     'metallama' => [
         'base_url' => env('METALLAMA_BASE_URL', 'http://127.0.0.1:8010'),
         'token' => env('METALLAMA_TOKEN'),
@@ -28,6 +35,17 @@ return [
         'max_revisions' => (int) env('MAJORDOM_MAX_REVISIONS', 3),
         // Overnight executions carry a frontier-spend ceiling (SPEC §8).
         'overnight_spend_cap_usd' => (float) env('MAJORDOM_OVERNIGHT_SPEND_CAP', 1.00),
+        // Per-role spend caps (M14b): the expensive frontier Builder is the one
+        // worth bounding; the Reviewer (deepseek-v4-flash) is inconsequential,
+        // so it stays uncapped. When a role's per-execution spend exceeds its
+        // cap, a full_auto build DOWNGRADES to the local Builder (free) so the
+        // loop keeps moving instead of stalling; attended/overnight park. A role
+        // absent here (or null) is uncapped. Overridable via Setting
+        // `workflow.role_spend_caps.<role>`.
+        'role_spend_caps' => [
+            'frontier_builder' => (float) env('MAJORDOM_FRONTIER_BUILDER_SPEND_CAP', 1.00),
+            // architect / reviewer / builder: uncapped by default.
+        ],
     ],
 
     // Autonomy profiles are DATA (SPEC §8): per gate, 'block' pings the
@@ -74,9 +92,25 @@ return [
         'temperature' => (float) env('MAJORDOM_ARCHITECT_TEMPERATURE', 0.3),
     ],
 
-    // Reviewer defaults to the Architect's model until bound separately in
-    // Settings → Actors (GLM 5.2 is the standing candidate).
+    // Frontier Builder (M14b Builder Selection): a frontier model acting under
+    // the Builder role for tasks the Architect selects for it (bootstrap,
+    // security-sensitive, hard refactors). Defaults to the Architect's model +
+    // OpenRouter endpoint, but is a DISTINCT role — its output still goes
+    // through the Reviewer (role separation). Bind separately in Settings →
+    // Actors later (claude / deepseek / glm).
+    'frontier_builder' => [
+        'model' => env('MAJORDOM_FRONTIER_BUILDER_MODEL') ?: env('MAJORDOM_ARCHITECT_MODEL', 'deepseek/deepseek-v4-flash'),
+        'max_tokens' => (int) env('MAJORDOM_FRONTIER_BUILDER_MAX_TOKENS', 8000),
+        'temperature' => (float) env('MAJORDOM_FRONTIER_BUILDER_TEMPERATURE', 0.2),
+    ],
+
+    // M16-D: the Reviewer IS the Architect — one mind judges the milestone.
+    // By default there is no separate reviewer model; the reviewer role mirrors
+    // the Architect binding (see RoleResolver). Set MAJORDOM_REVIEWER_MODEL only
+    // to opt into a DISTINCT reviewer (e.g. GLM for diversity); `distinct` then
+    // flips true and the seeder/resolver treat it as its own actor.
     'reviewer' => [
+        'distinct' => (bool) env('MAJORDOM_REVIEWER_MODEL'),
         'model' => env('MAJORDOM_REVIEWER_MODEL') ?: env('MAJORDOM_ARCHITECT_MODEL', 'deepseek/deepseek-v4-flash'),
         'max_tokens' => (int) env('MAJORDOM_REVIEWER_MAX_TOKENS', 3000),
         'temperature' => (float) env('MAJORDOM_REVIEWER_TEMPERATURE', 0.2),

@@ -18,19 +18,36 @@ class RoleSeeder extends Seeder
                 'max_tokens' => config('majordom.architect.max_tokens'),
             ],
             [
-                'name' => 'reviewer',
-                'provider' => 'openrouter',
-                'model' => config('majordom.reviewer.model'),
-                'temperature' => config('majordom.reviewer.temperature'),
-                'max_tokens' => config('majordom.reviewer.max_tokens'),
-            ],
-            [
                 'name' => 'builder',
                 'provider' => 'metallama',
                 'model' => config('majordom.builder.gateway_model'),
                 'meta' => ['managed_model' => config('majordom.builder.model')],
             ],
+            // Builder Selection (M14b): the frontier model bound as a Builder,
+            // selected per task (bootstrap / security / hard refactors). Distinct
+            // from 'architect' (role separation) though it defaults to the same
+            // model — bind it to claude / deepseek / glm here per project needs.
+            [
+                'name' => 'frontier_builder',
+                'provider' => 'openrouter',
+                'model' => config('majordom.frontier_builder.model'),
+                'temperature' => config('majordom.frontier_builder.temperature'),
+                'max_tokens' => config('majordom.frontier_builder.max_tokens'),
+            ],
         ];
+
+        // M16-D: the Reviewer is the Architect (one mind) — seed a distinct
+        // reviewer actor ONLY when the owner opted into one. Otherwise the
+        // reviewer role resolves to the Architect via RoleResolver's fallback.
+        if (config('majordom.reviewer.distinct')) {
+            $roles[] = [
+                'name' => 'reviewer',
+                'provider' => 'openrouter',
+                'model' => config('majordom.reviewer.model'),
+                'temperature' => config('majordom.reviewer.temperature'),
+                'max_tokens' => config('majordom.reviewer.max_tokens'),
+            ];
+        }
 
         foreach ($roles as $data) {
             Role::updateOrCreate(

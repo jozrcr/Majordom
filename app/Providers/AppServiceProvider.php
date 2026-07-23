@@ -40,6 +40,11 @@ class AppServiceProvider extends ServiceProvider
 
         $this->app->singleton(RoleResolver::class);
         $this->app->singleton(ProviderRegistry::class);
+
+        // M15 Sandbox seam: no real backend yet, so bind the honest default that
+        // refuses command execution rather than running unconfined on the host.
+        // Swapping in a container/microVM implementation is a one-line rebind.
+        $this->app->bind(\App\Sandbox\Sandbox::class, \App\Sandbox\UnavailableSandbox::class);
     }
 
     /**

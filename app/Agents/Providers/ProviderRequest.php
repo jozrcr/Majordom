@@ -15,5 +15,9 @@ final readonly class ProviderRequest
         public ?float $presencePenalty = null,
         public ?array $stop = null,
         public ?int $timeout = null,
+        /** @var ToolDefinition[]|null Tools the model may call (M15). null ⇒ plain chat. */
+        public ?array $tools = null,
+        /** "auto" (default when tools set) | "required" | "none" | a specific tool name to force. */
+        public ?string $toolChoice = null,
     ) {}
 }

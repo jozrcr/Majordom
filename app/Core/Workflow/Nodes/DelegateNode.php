@@ -10,6 +10,7 @@ use App\Models\Node;
 use App\Models\Task;
 use App\Projects\Memory\MemoryStore;
 use App\Projects\Repositories\WorktreeManager;
+use Illuminate\Support\Facades\Process;
 
 class DelegateNode extends NodeJob
 {
@@ -57,6 +58,18 @@ MD
             }
         } catch (\Throwable $e) {
             return NodeResult::failed('Failed to create worktree: '.$e->getMessage());
+        }
+
+        // Record the pre-work commit ONCE, on the task's first build, so the
+        // Reviewer can later judge the task's cumulative work (base_commit..HEAD)
+        // rather than the last aider run's incremental diff. Guarded to the first
+        // build (revision <= 1) so retries of an already-built task don't capture
+        // a base that already contains the work.
+        if ($task->base_commit === null && (int) ($task->revision ?? 1) <= 1 && is_dir($path)) {
+            $head = Process::path($path)->run(['git', 'rev-parse', 'HEAD']);
+            if ($head->successful()) {
+                $task->base_commit = trim($head->output());
+            }
         }
 
         $task->status = TaskStatus::Building;

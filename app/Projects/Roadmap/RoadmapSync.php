@@ -21,6 +21,26 @@ class RoadmapSync
         return new self($project);
     }
 
+    /**
+     * The milestone keys (`M<N>`) a roadmap markdown declares, in document order.
+     * The one authority on "which milestones does this roadmap still define" —
+     * used by the redefine reconciler (M16-C) to spot milestones a revision
+     * dropped. Same header grammar as the full parser.
+     *
+     * @return array<int, string>
+     */
+    public static function milestoneKeysIn(string $markdown): array
+    {
+        $keys = [];
+        foreach (explode("\n", $markdown) as $line) {
+            if (preg_match('/^##\s+(?:M(?:ilestone)?)\s*(\d+(?:[a-z]?)?)\s*[—:]\s*(.+)$/iu', $line, $m)) {
+                $keys[] = 'M'.$m[1];
+            }
+        }
+
+        return $keys;
+    }
+
     public function sync(): void
     {
         $filePath = rtrim($this->project->repo_path ?? '', '/') . '/agents/ROADMAP.md';
@@ -41,6 +61,45 @@ class RoadmapSync
             $this->syncMilestones($parsed['milestones']);
             $this->syncTasks($parsed['milestones']);
         });
+    }
+
+    /**
+     * Serialize the project's current DB plan back to roadmap markdown (M16-D2) —
+     * the inverse of parse(). After an approved revision this re-renders the
+     * canonical roadmap from the reconciled DB, so the persisted roadmap.md stays
+     * consistent with the frozen built work (and the Builder's decompose context
+     * never reads a roadmap that dropped a done milestone). Milestones and tasks in
+     * position order; the checkbox mark reflects each task's effective status.
+     * Orphaned tasks (no milestone) are legitimately removed and not re-emitted.
+     */
+    public function renderMarkdown(): string
+    {
+        $mark = ['done' => 'x', 'ongoing' => '~', 'todo' => ' '];
+        $blocks = [];
+
+        $milestones = Milestone::where('project_id', $this->project->id)
+            ->orderBy('position')
+            ->get();
+
+        foreach ($milestones as $milestone) {
+            $block = "## {$milestone->milestone_key} — {$milestone->title}";
+            if (trim((string) $milestone->summary) !== '') {
+                $block .= "\n".trim((string) $milestone->summary);
+            }
+
+            $lines = [];
+            foreach ($milestone->tasks as $task) {
+                $m = $mark[self::effectiveStatus($task)] ?? ' ';
+                $lines[] = "- [{$m}] {$task->task_key} — {$task->title}";
+            }
+            if ($lines !== []) {
+                $block .= "\n\n".implode("\n", $lines);
+            }
+
+            $blocks[] = $block;
+        }
+
+        return implode("\n\n", $blocks)."\n";
     }
 
     public static function effectiveStatus(Task $task): string
@@ -171,6 +230,14 @@ class RoadmapSync
                     ]);
                 }
             } else {
+                // M16-D2 freeze: a revision must NEVER orphan or drop built work.
+                // A task that is done or in-progress stays exactly where it is even
+                // if the revised roadmap omitted it (the small-space-sim "T-007
+                // forgotten" bug). Only a not-started task may be removed.
+                if (in_array(self::effectiveStatus($task), ['done', 'ongoing'], true)) {
+                    continue;
+                }
+
                 $task->update(['milestone_id' => null]);
                 RoadmapEvent::create([
                     'project_id' => $this->project->id,

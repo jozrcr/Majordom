@@ -32,13 +32,47 @@ class BuildNode extends NodeJob
             return NodeResult::failed('Task has no worktree.');
         }
 
-        $roleName = $node->input['role'] ?? 'builder';
+        // Builder Selection (M14b): a task the Architect flagged `frontier`
+        // builds under the frontier_builder binding; every other task uses the
+        // chain's configured build role (local Qwen by default). The choice
+        // lives on the TASK — the Architect selects a Builder per task, not per
+        // workflow — and the build node is model-agnostic, so this is purely a
+        // routing decision. Whatever builds still flows execute → test → review.
+        //
+        // Budget fallback (owner policy): a frontier build whose budget is gone
+        // DOWNGRADES to the local Builder (free) so the loop keeps moving rather
+        // than stalling — see SpendGuard::mustBuildLocal.
+        $wantsFrontier = $task->strategy() === \App\Enums\ImplementationStrategy::Frontier;
+        $downgraded = $wantsFrontier && \App\Core\Usage\SpendGuard::mustBuildLocal($execution, $task);
+        $roleName = ($wantsFrontier && ! $downgraded)
+            ? 'frontier_builder'
+            : ($node->input['role'] ?? 'builder');
+
+        if ($downgraded) {
+            app(\App\Core\Events\EventRecorder::class)->record(
+                $task->project,
+                'build.builder_downgraded',
+                ['from' => 'frontier_builder', 'to' => $roleName, 'reason' => 'budget'],
+                $execution,
+                $roleName,
+            );
+        }
+
         $binding = app(RoleResolver::class)->resolve($roleName, $task->project);
 
         $endpoint = ProviderEndpoint::named($binding->provider);
         if (! $endpoint) {
             return NodeResult::failed("Unknown provider endpoint: {$binding->provider}");
         }
+
+        // Name the actor that built (the "which agent" of the failure cards).
+        app(\App\Core\Events\EventRecorder::class)->record(
+            $task->project,
+            'build.builder_selected',
+            ['strategy' => $task->strategy()->value, 'role' => $roleName, 'model' => $binding->model],
+            $execution,
+            $roleName,
+        );
 
         if ($endpoint->driver === 'metallama') {
             $managedModel = $binding->meta['managed_model'] ?? $binding->model;

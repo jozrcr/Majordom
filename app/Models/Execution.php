@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\ExecutionStatus;
+use App\Enums\ParkedReason;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -60,10 +61,14 @@ class Execution extends Model
         return config("majordom.profiles.{$this->profile}.{$gate}", 'block');
     }
 
-    public function park(string $reason): void
+    public function park(string $reason, ?ParkedReason $class = null): void
     {
         $this->status = ExecutionStatus::Parked;
-        $this->meta = array_merge($this->meta ?? [], ['parked_reason' => $reason]);
+        $meta = array_merge($this->meta ?? [], ['parked_reason' => $reason]);
+        if ($class !== null) {
+            $meta['parked_reason_class'] = $class->value;
+        }
+        $this->meta = $meta;
         $this->save();
     }
 }
