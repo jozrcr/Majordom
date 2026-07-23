@@ -1,6 +1,5 @@
 <?php
 
-use App\Agents\Architect\ArchitectEnvelope;
 use App\Agents\Architect\ArchitectService;
 use App\Agents\Providers\Provider;
 use App\Agents\Providers\ProviderRegistry;
@@ -17,6 +16,8 @@ class InspectScriptedProvider implements Provider
 {
     public int $calls = 0;
 
+    public array $requests = [];
+
     public array $lastMessages = [];
 
     public function __construct(public array $responses) {}
@@ -24,10 +25,15 @@ class InspectScriptedProvider implements Provider
     public function chat(ProviderRequest $request): ProviderResponse
     {
         $this->calls++;
+        $this->requests[] = $request;
         $this->lastMessages = $request->messages;
-        $content = array_shift($this->responses) ?? '{"reply":"…","questions":[],"consensus_reached":false}';
+        $next = array_shift($this->responses);
 
-        return new ProviderResponse($content, 'stop', 5, 5);
+        if ($next instanceof ProviderResponse) {
+            return $next;
+        }
+
+        return new ProviderResponse($next ?? '', 'stop', 5, 5);
     }
 }
 
@@ -40,6 +46,14 @@ function inspectService(array $responses): array
         new ArchitectService(app(ProviderRegistry::class), MemoryStore::fromConfig(), app(RepoIndex::class)),
         $provider,
     ];
+}
+
+/** Concatenate the tool-result messages fed back on the loop's last request. */
+function toolResults(InspectScriptedProvider $provider): string
+{
+    $tools = array_filter($provider->lastMessages, fn ($m) => ($m['role'] ?? '') === 'tool');
+
+    return implode("\n", array_map(fn ($m) => (string) ($m['content'] ?? ''), $tools));
 }
 
 beforeEach(function () {
@@ -57,56 +71,56 @@ afterEach(function () {
     }
 });
 
-it('fetches a requested tracked file and continues to a question', function () {
+it('fulfils a read_file call and feeds the contents back, then continues to a question', function () {
     Process::fake(['*' => Process::result("app/Foo.php\n")]); // ls-tree: only app/Foo.php is tracked
 
     [$service, $provider] = inspectService([
-        json_encode(['reply' => '', 'questions' => [], 'consensus_reached' => false, 'reads' => ['app/Foo.php']]),
-        json_encode(['reply' => 'Saw it.', 'questions' => [['text' => 'Keep Foo::bar?']], 'consensus_reached' => false]),
+        archReadFile('app/Foo.php'),
+        archAsk([['text' => 'Keep Foo::bar?']], 'Saw it.'),
     ]);
 
     $service->converse($this->project, 'Start');
 
-    $inspection = $this->project->consensusMessages()->get()
-        ->first(fn ($m) => ($m->meta['inspection'] ?? false) === true);
-
-    expect($inspection)->not->toBeNull()
-        ->and($inspection->content)->toContain('class Foo')
+    expect(toolResults($provider))->toContain('class Foo')
         ->and($this->project->events()->where('name', 'consensus.inspected')->count())->toBe(1)
         ->and($provider->calls)->toBe(2)
         ->and($this->project->openQuestions()->pluck('text')->all())->toContain('Keep Foo::bar?');
 });
 
-it('stops after the inspection-round cap and surfaces a recoverable stall', function () {
+it('withdraws read tools after the read-round budget so the loop must conclude', function () {
     Process::fake(['*' => Process::result("app/Foo.php\n")]);
 
-    $read = json_encode(['reply' => '', 'questions' => [], 'consensus_reached' => false, 'reads' => ['app/Foo.php']]);
-    [$service, $provider] = inspectService([$read, $read, $read, $read]);
+    [$service, $provider] = inspectService([
+        archReadFile('app/Foo.php'),
+        archReadFile('app/Foo.php'),
+        archReadFile('app/Foo.php'),
+        archReadFile('app/Foo.php'),
+        archReply('I have enough context now.'),
+    ]);
 
     $result = $service->converse($this->project, 'Start');
 
-    expect($this->project->consensusMessages()->get()->filter(fn ($m) => $m->meta['inspection'] ?? false)->count())->toBe(2)
-        ->and($provider->calls)->toBe(3) // 2 inspection rounds + 1 final
-        ->and($result['stalled'])->toBeTrue()
-        ->and($this->project->events()->where('name', 'consensus.stalled')->count())->toBe(1);
+    // 4 read rounds + 1 concluding turn where reads were no longer offered.
+    $lastTools = array_map(fn ($t) => $t->name, end($provider->requests)->tools);
+
+    expect($provider->calls)->toBe(5)
+        ->and($lastTools)->not->toContain('read_file')
+        ->and($lastTools)->toContain('propose_plan')
+        ->and($result['message']->content)->toContain('enough context');
 });
 
 it('refuses to read an untracked path so secrets never leak', function () {
     Process::fake(['*' => Process::result("app/Foo.php\n")]); // .env is NOT in the tracked set
 
-    [$service] = inspectService([
-        json_encode(['reply' => '', 'questions' => [], 'consensus_reached' => false, 'reads' => ['.env']]),
-        json_encode(['reply' => 'ok', 'questions' => [['text' => 'next?']], 'consensus_reached' => false]),
+    [$service, $provider] = inspectService([
+        archReadFile('.env'),
+        archAsk([['text' => 'next?']], 'ok'),
     ]);
 
     $service->converse($this->project, 'Start');
 
-    $inspection = $this->project->consensusMessages()->get()
-        ->first(fn ($m) => ($m->meta['inspection'] ?? false) === true);
-
-    expect($inspection)->not->toBeNull()
-        ->and($inspection->content)->toContain('not a tracked file')
-        ->and($inspection->content)->not->toContain('supersecret');
+    expect(toolResults($provider))->toContain('not a tracked file')
+        ->and(toolResults($provider))->not->toContain('supersecret');
 });
 
 it('confines readFile to inside the repo', function () {
@@ -117,14 +131,13 @@ it('confines readFile to inside the repo', function () {
         ->and($repo->readFile($this->repoDir, 'nope/missing.php'))->toBeNull();
 });
 
-it('tells the Architect it can read files directly and must never ask to paste', function () {
-    // BUG 1 (mansarde) regression guard: the model kept asking permission /
-    // asking the owner to paste files instead of emitting "reads". The fix is
-    // prompt adoption — assert the affirmative capability language survives.
+it('tells the Architect it reads files via tools and must never ask to paste', function () {
+    // BUG 1 (mansarde) regression guard, M15 form: the read affordance is now a
+    // real tool, so the prompt names it and forbids the paste ask.
     Process::fake(['*' => Process::result("app/Foo.php\n")]);
 
     [$service, $provider] = inspectService([
-        json_encode(['reply' => 'ok', 'questions' => [['text' => 'q?']], 'consensus_reached' => false]),
+        archAsk([['text' => 'q?']], 'ok'),
     ]);
 
     $service->converse($this->project, 'Start');
@@ -132,16 +145,6 @@ it('tells the Architect it can read files directly and must never ask to paste',
     $system = $provider->lastMessages[0]['content'] ?? '';
 
     expect($provider->lastMessages[0]['role'] ?? null)->toBe('system')
-        ->and($system)->toContain('YOU CAN READ THESE FILES DIRECTLY')
-        ->and($system)->toContain('ask the owner to paste a file')
-        ->and($system)->toContain('"reads"');
-});
-
-it('parses and normalizes reads from the envelope', function () {
-    $env = ArchitectEnvelope::fromContent(json_encode([
-        'reply' => 'x', 'questions' => [], 'consensus_reached' => false,
-        'reads' => ['a.php', ' b/ ', 3, ''],
-    ]));
-
-    expect($env->reads)->toBe(['a.php', 'b/']);
+        ->and($system)->toContain('read_file')
+        ->and($system)->toContain('paste');
 });

@@ -108,22 +108,10 @@
                     </div>
                 @endif
 
-                @if($this->architectStalled)
-                    {{-- Never-stall recovery (M14a): the Architect replied without a
-                         question or a consensus decision. Make the dead end visible +
-                         recoverable instead of a silent Idle. --}}
-                    <div class="max-w-[640px] rounded-lg border border-border-strong bg-surface-raised p-4 space-y-3">
-                        <p class="font-mono text-micro uppercase tracking-[.14em] text-accent">Architect paused</p>
-                        <p class="text-body-sm text-text">The Architect responded but didn't raise a question or reach consensus, so the workflow is waiting on direction. Reply below to steer it, or nudge it to continue on its own.</p>
-                        <div class="flex items-center gap-3">
-                            <button wire:click="nudgeArchitect" wire:loading.attr="disabled" class="rounded-lg bg-accent px-3 py-1.5 text-body-sm font-semibold text-accent-ink disabled:opacity-55">
-                                <span wire:loading.remove wire:target="nudgeArchitect">Nudge the Architect</span>
-                                <span wire:loading wire:target="nudgeArchitect">Nudging…</span>
-                            </button>
-                            <span class="font-mono text-meta text-faint">re-runs the turn asking it to question or conclude</span>
-                        </div>
-                    </div>
-                @endif
+                {{-- M15: the "Architect stalled" card is gone. With the tool
+                     contract a consensus turn always ends in a known state (a
+                     question to answer, a plan to approve, or a plain reply that
+                     is simply the owner's turn) — there is no stall to recover. --}}
 
                 @if($this->plannedTask)
                     <div class="max-w-[640px] rounded-lg border border-border-strong bg-surface-raised p-4 space-y-3">

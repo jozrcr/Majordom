@@ -20,8 +20,13 @@ class BootstrapScriptedProvider implements Provider
     public function chat(ProviderRequest $request): ProviderResponse
     {
         $this->calls++;
+        $next = array_shift($this->responses);
 
-        return new ProviderResponse(array_shift($this->responses) ?? '{}', 'stop', 3, 3);
+        if ($next instanceof ProviderResponse) {
+            return $next;
+        }
+
+        return new ProviderResponse($next ?? '{}', 'stop', 3, 3);
     }
 }
 
@@ -137,12 +142,13 @@ it('rejects scaffold paths that escape the repo', function () {
 
 it('approvePlan scaffolds (through review) when the repo is greenfield', function () {
     [$service] = bootstrapService([
-        json_encode(['architecture_md' => '# Arch', 'roadmap_md' => '# Roadmap', 'first_task_id' => 'T-001', 'first_task_md' => '# Task', 'summary' => 's']),
+        archPropose(samplePlan(['first_task_md' => '# Task'])), // captured by converse
         json_encode(['files' => [['path' => 'README.md', 'contents' => "# x\n"]], 'commit_message' => 'chore: scaffold']),
         REVIEW_OK,
     ]);
 
-    $service->approvePlan($this->project);
+    $service->converse($this->project, 'go'); // capture the plan
+    $service->approvePlan($this->project);     // write it + scaffold through review
 
     expect(is_file($this->repoDir.'/README.md'))->toBeTrue()
         ->and($this->project->events()->where('name', 'repo.bootstrapped')->count())->toBe(1);

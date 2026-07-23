@@ -108,17 +108,16 @@ class TestScriptedProvider implements Provider
     public function __construct(public array $responses) {}
     public function chat(ProviderRequest $request): ProviderResponse
     {
-        $content = array_shift($this->responses) ?? '{}';
-        return new ProviderResponse($content, 'stop', 10, 20);
+        $next = array_shift($this->responses);
+        if ($next instanceof ProviderResponse) {
+            return $next;
+        }
+        return new ProviderResponse($next ?? '{}', 'stop', 10, 20);
     }
 }
 
 it('records consensus.message on architect turn', function () {
-    $provider = new TestScriptedProvider([json_encode([
-        'reply' => 'Agreed.',
-        'questions' => [],
-        'consensus_reached' => true,
-    ])]);
+    $provider = new TestScriptedProvider([archPropose(samplePlan())]);
     
     app()->instance(\App\Agents\Providers\Provider::class, $provider);
     $service = new ArchitectService(app(\App\Agents\Providers\ProviderRegistry::class), MemoryStore::fromConfig(), app(\App\Projects\Repositories\RepoIndex::class));

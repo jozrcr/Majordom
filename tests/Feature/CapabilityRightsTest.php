@@ -21,14 +21,22 @@ class CapScriptedProvider implements Provider
 
     public array $lastMessages = [];
 
+    public array $requests = [];
+
     public function __construct(public array $responses) {}
 
     public function chat(ProviderRequest $request): ProviderResponse
     {
         $this->calls++;
         $this->lastMessages = $request->messages;
+        $this->requests[] = $request;
+        $next = array_shift($this->responses);
 
-        return new ProviderResponse(array_shift($this->responses) ?? '{"reply":"x","questions":[],"consensus_reached":false}', 'stop', 5, 5);
+        if ($next instanceof ProviderResponse) {
+            return $next;
+        }
+
+        return new ProviderResponse($next ?? 'x', 'stop', 5, 5);
     }
 }
 
@@ -73,31 +81,32 @@ it('grants reads by default: an inspection turn is fulfilled', function () {
     Process::fake(['*' => Process::result("app/Foo.php\n")]);
 
     [$service, $provider] = capService([
-        json_encode(['reply' => '', 'questions' => [], 'consensus_reached' => false, 'reads' => ['app/Foo.php']]),
-        json_encode(['reply' => 'saw it', 'questions' => [['text' => 'q?']], 'consensus_reached' => false]),
+        archReadFile('app/Foo.php'),
+        archAsk([['text' => 'q?']], 'saw it'),
     ]);
 
     $service->converse($this->project, 'go');
 
-    expect($provider->calls)->toBe(2) // inspection round fired, then the real turn
+    expect($provider->calls)->toBe(2) // read round fired, then the real turn
         ->and($this->project->events()->where('name', 'consensus.inspected')->count())->toBe(1)
-        ->and($provider->lastMessages[0]['content'])->toContain('YOU CAN READ THESE FILES DIRECTLY');
+        ->and($provider->lastMessages[0]['content'])->toContain('read_file');
 });
 
-it('withholds reads when capability is None: the field is ignored and the Architect is told to ask', function () {
+it('withholds reads when capability is None: no read tools are offered and the Architect is told to ask', function () {
     Process::fake(['*' => Process::result("app/Foo.php\n")]);
     $this->project->update(['capability_level' => CapabilityLevel::None]);
 
     [$service, $provider] = capService([
-        json_encode(['reply' => 'I would look but cannot', 'questions' => [['text' => 'share Foo.php?']], 'consensus_reached' => false, 'reads' => ['app/Foo.php']]),
+        archAsk([['text' => 'share Foo.php?']], 'I would look but cannot'),
     ]);
 
     $service->converse($this->project, 'go');
 
-    expect($provider->calls)->toBe(1) // no inspection loop
+    $toolNames = array_map(fn ($t) => $t->name, $provider->requests[0]->tools ?? []);
+    expect($provider->calls)->toBe(1) // no read loop
         ->and($this->project->events()->where('name', 'consensus.inspected')->count())->toBe(0)
-        ->and($provider->lastMessages[0]['content'])->toContain('do NOT have read access')
-        ->and($provider->lastMessages[0]['content'])->not->toContain('YOU CAN READ THESE FILES DIRECTLY');
+        ->and($toolNames)->not->toContain('read_file')
+        ->and($provider->lastMessages[0]['content'])->toContain('do NOT have read access');
 });
 
 it('Settings: owner can set Read/None but the gated Commands tier is refused server-side', function () {

@@ -4,6 +4,10 @@ namespace App\Agents\Architect;
 
 use App\Agents\Providers\ProviderRegistry;
 use App\Agents\Providers\ProviderRequest;
+use App\Agents\Providers\ProviderResponse;
+use App\Agents\Providers\ToolCall;
+use App\Agents\Providers\ToolDefinition;
+use App\Agents\Providers\ToolMessages;
 use App\Core\Events\EventRecorder;
 use App\Core\Usage\UsageLedger;
 use App\Enums\MessageRole;
@@ -14,20 +18,23 @@ use App\Models\Question;
 use App\Models\Task;
 use App\Projects\Memory\MemoryStore;
 use App\Projects\Repositories\RepoIndex;
+use App\Support\RoleBinding;
 use App\Support\RoleResolver;
 use Illuminate\Support\Str;
 
 /**
- * The Architect's consensus orchestration (SPEC §3 phase 1–2, M2 slice).
- *
- * The ask-all-questions mandate is enforced twice: in the system prompt, and
- * mechanically here — consensus_reached is ignored while any question is open
- * or the same turn raised new ones. The model cannot talk its way past the gate.
+ * The Architect's consensus orchestration (SPEC §3 phase 1–2), driven by the
+ * M15 tool contract. A turn ends in exactly one known state — a read (loop
+ * continues), ask_owner (questions), propose_plan (consensus, human-gated), or a
+ * plain-text reply (the owner's turn) — so there is no "stalled" dead end to
+ * detect. The plan-approval gate still holds: a proposed plan only counts as
+ * pending with zero open questions, and nothing is written until the owner approves.
  */
 class ArchitectService
 {
-    /** Max repo-inspection round-trips the Architect may self-drive per turn (M14a/T-66). */
-    private const MAX_INSPECT_ROUNDS = 2;
+    /** Max repo-read rounds the Architect may self-drive per turn before it must
+     *  ask or conclude (M15 runaway guard — reads can't loop forever). */
+    private const MAX_READ_ROUNDS = 4;
 
     /** Per-file read cap, and total budget across one inspection round (bytes). */
     private const READ_MAX_BYTES = 4000;
@@ -57,10 +64,14 @@ PROMPT;
     ) {}
 
     /**
-     * One conversation turn. $userMessage may be null when re-prompting after
-     * answers were recorded. When the turn closed consensus,
-     * 'consensusPending' is true and the plan awaits the owner's explicit
-     * approval (approvePlan()) — nothing is written yet.
+     * One consensus turn, driven by tool calls (M15 tool contract). The Architect
+     * either calls read tools (read_file / list_repo — the engine fulfills them and
+     * the loop continues) or terminates the turn in exactly one known way:
+     *   • ask_owner    — surfaces questions; the owner's turn next
+     *   • propose_plan — consensus reached; the plan is captured, still human-gated
+     *   • plain text   — a conversational reply; the owner's turn next
+     * There is no fourth outcome, so the old "stalled with nothing pending" dead
+     * end (T-65) cannot occur — the never-stall invariant is structural, not detected.
      *
      * @return array{message: ConsensusMessage, consensusPending: bool}
      */
@@ -74,133 +85,282 @@ PROMPT;
         }
 
         $binding = app(RoleResolver::class)->resolve('architect', $project);
-
         $extraSystem = $binding->meta['system_prompt_extra'] ?? null;
+        $canRead = $project->capability()->canRead();
 
-        // Bounded self-inspection (M14a/T-66): the Architect may request repo
-        // context (tracked files, a "dir/" listing, or "tree") and continue on
-        // its own — up to MAX_INSPECT_ROUNDS — before it must ask a question or
-        // conclude. Beyond the cap it falls through to the normal handling (a
-        // still-empty turn surfaces as a T-65 stall the owner can nudge).
-        $rounds = 0;
-        while (true) {
-            $response = $this->providers->forBinding($binding)->chat(new ProviderRequest(
-                model: $binding->model,
-                messages: $this->buildMessages($project, $extraSystem),
-                maxTokens: $binding->maxTokens,
-                temperature: $binding->temperature,
-                jsonMode: true,
-                topP: isset($binding->meta['top_p']) ? (float) $binding->meta['top_p'] : null,
-                frequencyPenalty: isset($binding->meta['frequency_penalty']) ? (float) $binding->meta['frequency_penalty'] : null,
-                presencePenalty: isset($binding->meta['presence_penalty']) ? (float) $binding->meta['presence_penalty'] : null,
-                stop: isset($binding->meta['stop']) ? $binding->meta['stop'] : null,
-                timeout: isset($binding->meta['timeout']) ? (int) $binding->meta['timeout'] : null,
-            ));
+        // The tool loop runs over an in-memory copy of the conversation; only the
+        // final human-visible outcome is persisted. Reads stay ephemeral — recorded
+        // as events for the trace, never replayed into every future turn (which is
+        // what used to bloat the context in the old inspection design).
+        $messages = $this->buildMessages($project, $extraSystem);
 
-            app(UsageLedger::class)->record(
-                $project,
-                'architect',
-                $binding->model,
-                $response->promptTokens,
-                $response->completionTokens
-            );
+        $readRounds = 0;
+        $outcome = null;
+        $lastResponse = null;
 
-            $envelope = ArchitectEnvelope::fromContent($response->content);
+        while ($outcome === null) {
+            // On the last permitted round, withdraw the read tools so the model
+            // must ask or conclude — reads cannot loop forever.
+            $offerReads = $canRead && $readRounds < self::MAX_READ_ROUNDS;
+            $response = $this->architectChat($project, $binding, $messages, $this->consensusTools($offerReads));
+            $lastResponse = $response;
 
-            // Only a PURE inspection request loops (no question, no consensus) —
-            // a turn that asks or concludes is honored immediately even if it
-            // also listed reads, so a real question always reaches the owner.
-            // Reads are an OPT-IN capability (M14b): if the owner hasn't granted
-            // read access, the Architect's `reads` are ignored and it must ask.
-            $wantsInspection = $envelope->reads !== []
-                && $envelope->questions === []
-                && ! $envelope->consensusReached
-                && $project->capability()->canRead();
-
-            if ($wantsInspection && $rounds < self::MAX_INSPECT_ROUNDS) {
-                $context = $this->gatherRepoContext($project, $envelope->reads);
-                $project->consensusMessages()->create([
-                    'role' => MessageRole::System,
-                    'content' => '[repo inspection: '.implode(', ', $envelope->reads)."]\n\n".$context,
-                    'meta' => ['inspection' => true, 'paths' => array_values($envelope->reads)],
-                ]);
-                app(EventRecorder::class)->record(
-                    $project,
-                    'consensus.inspected',
-                    ['paths' => array_values($envelope->reads)],
-                    null,
-                    'architect'
-                );
-                $rounds++;
-
-                continue;
+            if (! $response->hasToolCalls()) {
+                $outcome = ['type' => 'reply', 'reply' => $response->content];
+                break;
             }
 
-            break;
+            // Replay the assistant's tool-call turn so the next request is valid.
+            $messages[] = ToolMessages::assistantToolCalls($response);
+
+            $didRead = false;
+            foreach ($response->toolCalls as $call) {
+                // A terminating tool wins immediately, even if the same turn also
+                // requested reads — a real question/plan always reaches the owner.
+                if ($call->name === 'ask_owner') {
+                    $outcome = ['type' => 'questions', 'reply' => $response->content, 'questions' => $this->parseAskOwner($call)];
+                    break;
+                }
+                if ($call->name === 'propose_plan') {
+                    $outcome = ['type' => 'plan', 'reply' => $response->content, 'plan' => $this->normalizePlan($call->arguments)];
+                    break;
+                }
+                if ($call->name === 'read_file' || $call->name === 'list_repo') {
+                    $messages[] = ToolMessages::toolResult($call->id, $this->runReadTool($project, $call));
+                    $didRead = true;
+
+                    continue;
+                }
+                $messages[] = ToolMessages::toolResult($call->id, "Unknown tool '{$call->name}'. Use read_file, list_repo, ask_owner, or propose_plan.");
+            }
+
+            if ($outcome === null) {
+                // Advance the round counter whether the model read or emitted only
+                // unknown tools; the cap guards against any non-terminating loop.
+                $readRounds++;
+                if (! $didRead && $readRounds >= self::MAX_READ_ROUNDS) {
+                    $outcome = ['type' => 'reply', 'reply' => $response->content !== '' ? $response->content : 'I need direction to continue.'];
+                }
+            }
+        }
+
+        return $this->persistConsensusOutcome($project, $outcome, $lastResponse);
+    }
+
+    /** One tool-enabled Architect provider call, with usage recorded. */
+    private function architectChat(Project $project, RoleBinding $binding, array $messages, array $tools): ProviderResponse
+    {
+        $response = $this->providers->forBinding($binding)->chat(new ProviderRequest(
+            model: $binding->model,
+            messages: $messages,
+            maxTokens: $binding->maxTokens,
+            temperature: $binding->temperature,
+            tools: $tools,
+            toolChoice: 'auto',
+            topP: isset($binding->meta['top_p']) ? (float) $binding->meta['top_p'] : null,
+            frequencyPenalty: isset($binding->meta['frequency_penalty']) ? (float) $binding->meta['frequency_penalty'] : null,
+            presencePenalty: isset($binding->meta['presence_penalty']) ? (float) $binding->meta['presence_penalty'] : null,
+            stop: isset($binding->meta['stop']) ? $binding->meta['stop'] : null,
+            timeout: isset($binding->meta['timeout']) ? (int) $binding->meta['timeout'] : null,
+        ));
+
+        app(UsageLedger::class)->record($project, 'architect', $binding->model, $response->promptTokens, $response->completionTokens);
+
+        return $response;
+    }
+
+    /**
+     * The consensus tool surface (M15). read_file/list_repo are offered only when
+     * the owner granted read access AND we are within the read-round budget.
+     *
+     * @return ToolDefinition[]
+     */
+    private function consensusTools(bool $withReads): array
+    {
+        $ask = new ToolDefinition(
+            name: 'ask_owner',
+            description: 'Ask the owner one or more specific, answerable questions whenever anything about the scope is ambiguous — never assume. Ends your turn until the owner answers.',
+            parameters: [
+                'type' => 'object',
+                'properties' => [
+                    'questions' => [
+                        'type' => 'array',
+                        'items' => [
+                            'type' => 'object',
+                            'properties' => [
+                                'text' => ['type' => 'string', 'description' => 'One specific question.'],
+                                'options' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Optional answer choices.'],
+                            ],
+                            'required' => ['text'],
+                        ],
+                    ],
+                ],
+                'required' => ['questions'],
+            ],
+        );
+
+        $propose = new ToolDefinition(
+            name: 'propose_plan',
+            description: 'Propose the plan once every question is answered and the scope is clear. Ends your turn; the owner must approve before anything is written.',
+            parameters: [
+                'type' => 'object',
+                'properties' => [
+                    'architecture_md' => ['type' => 'string', 'description' => 'Markdown: the target architecture as agreed.'],
+                    'roadmap_md' => ['type' => 'string', 'description' => "Markdown roadmap. Milestones as '## M<N> — <title>' + one summary line, then tasks as '- [ ] T-00N — <title>'."],
+                    'first_task_id' => ['type' => 'string', 'description' => 'The first task key, e.g. T-001.'],
+                    'first_task_md' => ['type' => 'string', 'description' => 'Markdown brief for the first task: goal, acceptance criteria, files likely involved, test command.'],
+                    'summary' => ['type' => 'string', 'description' => '2-3 sentences for the owner: what was agreed and what happens next.'],
+                ],
+                'required' => ['architecture_md', 'roadmap_md', 'first_task_id', 'first_task_md', 'summary'],
+            ],
+        );
+
+        if (! $withReads) {
+            return [$ask, $propose];
+        }
+
+        return [
+            new ToolDefinition(
+                name: 'read_file',
+                description: 'Read the contents of one tracked file to ground your decisions. You have this capability — never ask the owner to paste a file.',
+                parameters: [
+                    'type' => 'object',
+                    'properties' => ['path' => ['type' => 'string', 'description' => 'Repo-relative path of a tracked file.']],
+                    'required' => ['path'],
+                ],
+            ),
+            new ToolDefinition(
+                name: 'list_repo',
+                description: 'List tracked files: the whole tree (omit the argument) or one directory (a path ending in "/").',
+                parameters: [
+                    'type' => 'object',
+                    'properties' => ['path' => ['type' => 'string', 'description' => 'Optional directory (e.g. "src/"). Omit for the full tree.']],
+                ],
+            ),
+            $ask,
+            $propose,
+        ];
+    }
+
+    /** Fulfil a read_file/list_repo call, reusing the vetted tracked-only reader. */
+    private function runReadTool(Project $project, ToolCall $call): string
+    {
+        $path = is_string($call->arguments['path'] ?? null) ? trim((string) $call->arguments['path']) : '';
+
+        if ($call->name === 'read_file') {
+            if ($path === '') {
+                return 'read_file requires a "path".';
+            }
+            $req = [$path];
+        } else { // list_repo
+            $req = [$path === '' ? 'tree' : (str_ends_with($path, '/') ? $path : $path.'/')];
+        }
+
+        app(EventRecorder::class)->record($project, 'consensus.inspected', ['tool' => $call->name, 'paths' => $req], null, 'architect');
+
+        return $this->gatherRepoContext($project, $req);
+    }
+
+    /**
+     * @return array<int, array{text: string, options: ?array}>
+     */
+    private function parseAskOwner(ToolCall $call): array
+    {
+        $out = [];
+        foreach (is_array($call->arguments['questions'] ?? null) ? $call->arguments['questions'] : [] as $q) {
+            if (is_string($q) && trim($q) !== '') {
+                $out[] = ['text' => trim($q), 'options' => null];
+            } elseif (is_array($q) && is_string($q['text'] ?? null) && trim($q['text']) !== '') {
+                $opts = $q['options'] ?? null;
+                $out[] = [
+                    'text' => trim($q['text']),
+                    'options' => is_array($opts) && $opts !== [] ? array_values(array_filter($opts, 'is_string')) : null,
+                ];
+            }
+        }
+
+        return $out;
+    }
+
+    /** @return array{architecture_md: string, roadmap_md: string, first_task_id: string, first_task_md: string, summary: string} */
+    private function normalizePlan(array $args): array
+    {
+        $taskId = is_string($args['first_task_id'] ?? null) && trim($args['first_task_id']) !== '' ? trim($args['first_task_id']) : 'T-001';
+
+        return [
+            'architecture_md' => (string) ($args['architecture_md'] ?? ''),
+            'roadmap_md' => (string) ($args['roadmap_md'] ?? ''),
+            'first_task_id' => $taskId,
+            'first_task_md' => (string) ($args['first_task_md'] ?? ''),
+            'summary' => (string) ($args['summary'] ?? ''),
+        ];
+    }
+
+    /**
+     * Persist the single human-visible outcome of a consensus turn and set state.
+     * A propose_plan turn captures the plan in the message meta (not memory) — the
+     * owner's approval (approvePlan) writes it. Every outcome ends NeedsYou.
+     *
+     * @param array{type: string, reply?: string, questions?: array, plan?: array} $outcome
+     * @return array{message: ConsensusMessage, consensusPending: bool}
+     */
+    private function persistConsensusOutcome(Project $project, array $outcome, ProviderResponse $response): array
+    {
+        $consensusClaimed = $outcome['type'] === 'plan';
+
+        $reply = trim((string) ($outcome['reply'] ?? ''));
+        if ($reply === '') {
+            $reply = match ($outcome['type']) {
+                'questions' => 'I have a few questions before we go further.',
+                'plan' => (string) ($outcome['plan']['summary'] ?? 'Here is the plan for your approval.'),
+                default => '…',
+            };
+        }
+
+        $meta = [
+            'promptTokens' => $response->promptTokens,
+            'completionTokens' => $response->completionTokens,
+            'consensusClaimed' => $consensusClaimed,
+        ];
+        if ($outcome['type'] === 'plan') {
+            $meta['proposed_plan'] = $outcome['plan'];
         }
 
         $message = $project->consensusMessages()->create([
             'role' => MessageRole::Architect,
-            'content' => $envelope->reply,
-            'meta' => [
-                'promptTokens' => $response->promptTokens,
-                'completionTokens' => $response->completionTokens,
-                'consensusClaimed' => $envelope->consensusReached,
-            ],
+            'content' => $reply,
+            'meta' => $meta,
         ]);
 
-        foreach ($envelope->questions as $q) {
-            $project->questions()->create([
-                'consensus_message_id' => $message->id,
-                'text' => $q['text'],
-                'options' => $q['options'],
-            ]);
+        if ($outcome['type'] === 'questions') {
+            foreach ($outcome['questions'] as $q) {
+                $project->questions()->create([
+                    'consensus_message_id' => $message->id,
+                    'text' => $q['text'],
+                    'options' => $q['options'],
+                ]);
+            }
         }
 
         app(EventRecorder::class)->record(
             $project,
             'consensus.message',
             [
-                'questionsRaised' => count($envelope->questions),
-                'consensusClaimed' => $envelope->consensusReached,
+                'questionsRaised' => $outcome['type'] === 'questions' ? count($outcome['questions']) : 0,
+                'consensusClaimed' => $consensusClaimed,
                 'messageId' => $message->id,
             ],
             null,
             'architect'
         );
 
-        // The question gate: a consensus claim only stands with zero open
-        // questions — including ones raised this very turn. Even then the
-        // plan is NOT drafted here: that is the human's call (SPEC §3 phase 2
-        // plan-approval gate; always blocking until autonomy profiles land).
-        $openCount = $project->openQuestions()->count();
-        $consensusPending = $envelope->consensusReached && $openCount === 0;
+        // The question gate: a plan only stands with zero open questions. Even
+        // then nothing is written — the owner approves it (SPEC §3 phase 2 gate).
+        $consensusPending = $consensusClaimed && $project->openQuestions()->count() === 0;
 
-        // Never-stall invariant (M14a, e2e#3): a turn that raises no question
-        // and does not reach consensus used to drop the project to a silent
-        // Idle with an unaddressed reply — the "stalls after Q&A" dead end.
-        // Every consensus turn actually ends with the owner as the next actor
-        // (answer a question · approve the plan · steer/nudge a stall), so the
-        // status is always NeedsYou; a stall additionally emits an event so the
-        // workspace can offer a one-click nudge to recover.
-        $stalled = $openCount === 0 && ! $consensusPending;
+        $project->update(['status' => ProjectStatus::NeedsYou, 'last_activity_at' => now()]);
 
-        if ($stalled) {
-            app(EventRecorder::class)->record(
-                $project,
-                'consensus.stalled',
-                ['messageId' => $message->id],
-                null,
-                'architect'
-            );
-        }
-
-        $project->update([
-            'status' => ProjectStatus::NeedsYou,
-            'last_activity_at' => now(),
-        ]);
-
-        return ['message' => $message, 'consensusPending' => $consensusPending, 'stalled' => $stalled];
+        return ['message' => $message, 'consensusPending' => $consensusPending];
     }
 
     /**
@@ -232,77 +392,50 @@ PROMPT;
     }
 
     /**
-     * Phase 2, on the owner's explicit approval: distill the agreed intent
-     * into project memory files. Called from the RunPlanDraft job — this
-     * makes a provider call and must never run inside a web request.
+     * Phase 2, on the owner's explicit approval: write the plan the Architect
+     * already captured via propose_plan (M15 — no second provider call; the plan
+     * content came back structured in the tool arguments). Called from the
+     * RunPlanDraft job. Salvage guards keep an unbuildable plan from writing an
+     * empty brief the Builder can't act on.
      */
     public function approvePlan(Project $project): void
     {
-        $binding = app(RoleResolver::class)->resolve('architect', $project);
+        $plan = $this->capturedPlan($project);
 
-        $extraSystem = $binding->meta['system_prompt_extra'] ?? null;
-        $response = $this->providers->forBinding($binding)->chat(new ProviderRequest(
-            model: $binding->model,
-            messages: array_merge($this->buildMessages($project, $extraSystem), [[
-                'role' => 'user',
-                'content' => self::PLAN_PROMPT,
-            ]]),
-            maxTokens: (int) config('majordom.architect.plan_max_tokens', 8000),
-            temperature: $binding->temperature,
-            jsonMode: true,
-            topP: isset($binding->meta['top_p']) ? (float) $binding->meta['top_p'] : null,
-            frequencyPenalty: isset($binding->meta['frequency_penalty']) ? (float) $binding->meta['frequency_penalty'] : null,
-            presencePenalty: isset($binding->meta['presence_penalty']) ? (float) $binding->meta['presence_penalty'] : null,
-            stop: isset($binding->meta['stop']) ? $binding->meta['stop'] : null,
-            timeout: isset($binding->meta['timeout']) ? (int) $binding->meta['timeout'] : null,
-        ));
-
-        app(UsageLedger::class)->record(
-            $project,
-            'architect',
-            $binding->model,
-            $response->promptTokens,
-            $response->completionTokens
-        );
-
-        $data = json_decode(trim($response->content), true);
-        if (! is_array($data)) {
-            // Salvage: keep the raw response as a draft rather than losing it.
-            $this->memory->write($project, 'plan_draft.md', $response->content);
+        if ($plan === null) {
             $project->consensusMessages()->create([
                 'role' => MessageRole::System,
-                'content' => 'Consensus reached, but the plan came back malformed — raw draft saved to plan_draft.md. Re-run planning.',
+                'content' => 'No proposed plan was found to approve — ask the Architect to propose the plan again in the chat.',
             ]);
 
             return;
         }
 
-        $taskId = is_string($data['first_task_id'] ?? null) && $data['first_task_id'] !== ''
-            ? $data['first_task_id']
+        // A plan without a real first task brief is unbuildable — salvage it
+        // rather than writing an empty file the Builder can't act on.
+        if (trim((string) ($plan['first_task_md'] ?? '')) === '') {
+            $this->memory->write($project, 'plan_draft.md', json_encode($plan, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+            $project->consensusMessages()->create([
+                'role' => MessageRole::System,
+                'content' => 'The proposed plan had no first task brief — raw draft saved to plan_draft.md. Ask the Architect to propose a complete plan, then approve again.',
+            ]);
+
+            return;
+        }
+
+        $taskId = is_string($plan['first_task_id'] ?? null) && trim($plan['first_task_id']) !== ''
+            ? trim($plan['first_task_id'])
             : 'T-001';
 
-        // A plan without a real first task brief is malformed — salvage it
-        // rather than writing an empty file the Builder can't act on
-        // (bit a legacy project on 2026-07-15).
-        if (trim((string) ($data['first_task_md'] ?? '')) === '') {
-            $this->memory->write($project, 'plan_draft.md', $response->content);
-            $project->consensusMessages()->create([
-                'role' => MessageRole::System,
-                'content' => 'The plan came back without a first task brief — raw draft saved to plan_draft.md. Approve the plan again to retry.',
-            ]);
-
-            return;
-        }
-
-        $this->memory->write($project, 'architecture.md', (string) ($data['architecture_md'] ?? ''));
-        $this->memory->write($project, 'roadmap.md', (string) ($data['roadmap_md'] ?? ''));
-        $this->memory->write($project, "tasks/{$taskId}/task.md", (string) ($data['first_task_md'] ?? ''));
+        $this->memory->write($project, 'architecture.md', (string) ($plan['architecture_md'] ?? ''));
+        $this->memory->write($project, 'roadmap.md', (string) ($plan['roadmap_md'] ?? ''));
+        $this->memory->write($project, "tasks/{$taskId}/task.md", (string) ($plan['first_task_md'] ?? ''));
 
         $project->consensusMessages()->create([
             'role' => MessageRole::System,
             'content' => "Consensus reached — project memory written to {$this->memory->pathFor($project)} "
                 ."(architecture.md, roadmap.md, tasks/{$taskId}/task.md).\n\n"
-                .(string) ($data['summary'] ?? ''),
+                .(string) ($plan['summary'] ?? ''),
             'meta' => ['planWritten' => true, 'firstTaskId' => $taskId],
         ]);
 
@@ -316,9 +449,21 @@ PROMPT;
 
         app(\App\Projects\Roadmap\RoadmapSync::class)->for($project)->sync();
 
-        // T-67: a greenfield repo gets an Architect-authored scaffold so the
-        // first Builder task starts on real ground instead of an empty directory.
+        // T-67: a greenfield repo gets an Architect-selected frontier-Builder
+        // scaffold so the first Builder task starts on real ground.
         $this->bootstrapRepo($project);
+    }
+
+    /** The plan captured by the most recent propose_plan turn, or null. */
+    private function capturedPlan(Project $project): ?array
+    {
+        $message = $project->consensusMessages()
+            ->where('role', MessageRole::Architect)
+            ->orderByDesc('id')
+            ->get()
+            ->first(fn ($m) => is_array($m->meta['proposed_plan'] ?? null));
+
+        return $message?->meta['proposed_plan'] ?? null;
     }
 
     /**
@@ -925,25 +1070,18 @@ PROMPT;
             : "Unanswered questions you have already raised (do NOT re-raise them):\n- ".implode("\n- ", $open);
 
         // Grounding (e2e#3): let the Architect reason about the REAL repository
-        // during consensus, not just its path — so it grounds questions in what
-        // exists instead of stalling for lack of context, and recognizes a
-        // greenfield repo that must be scaffolded before any Builder task.
+        // during consensus — so it grounds questions in what exists, and
+        // recognizes a greenfield repo that must be scaffolded before any task.
         $canRead = $project->capability()->canRead();
         $tree = $this->repoIndex->fileList($project->repo_path);
         if (! $tree) {
             $repoBlock = "Repository state: this repository is EMPTY (no tracked files yet) — the project is greenfield. The first work will be scaffolding the project structure; factor that into the scope you agree on.";
         } elseif ($canRead) {
             $repoBlock = "Repository files (tracked — ground your questions and scope in these real paths; do not invent files):\n{$tree}\n\n"
-                ."YOU CAN READ THESE FILES DIRECTLY. This is not a plain chat — the engine fulfills file reads for you. "
-                ."To see any file's CONTENTS, list its path in the \"reads\" array of your JSON reply and you will be handed the "
-                ."contents on your very next turn. You do NOT need permission, and you must NEVER ask the owner to paste a file, "
-                ."NEVER ask \"may I read …?\", and NEVER claim you lack filesystem access — you have it, through \"reads\".";
+                ."Use the read_file tool to see any file's contents and list_repo to browse directories — never ask the owner to paste a file.";
         } else {
-            // Reads not granted (M14b opt-in rights): be honest — the Architect
-            // must ask the owner to share contents; "reads" will be ignored.
             $repoBlock = "Repository files (tracked — names only; ground your scope in these real paths, do not invent files):\n{$tree}\n\n"
-                ."You can see the file NAMES above but do NOT have read access to their CONTENTS in this project "
-                ."(the owner has not granted it). When you need to see inside a file, ask the owner to share it — the \"reads\" field will not be fulfilled.";
+                ."You do NOT have read access to file CONTENTS in this project (the owner has not granted it). When you need to see inside a file, ask the owner to share it.";
         }
 
         $prompt = <<<PROMPT
@@ -952,34 +1090,17 @@ Your single goal in this conversation is to reach consensus with the human owner
 
 Non-negotiable mandate: surface EVERY open question before proposing anything. Ask, never assume. Questions must be discrete, answerable items — not prose musings.
 
+How you act each turn — through your tools:
+- To inspect the repository, call read_file or list_repo. The engine fulfils the read and hands you the contents; then continue. Never ask permission to read, and never ask the owner to paste a file.
+- When anything about the scope is ambiguous, call ask_owner with specific questions. This ends your turn until the owner answers.
+- When every question is answered and the scope is clear, call propose_plan (architecture, roadmap, first task brief, summary). The owner must approve before anything is written.
+- If you are only replying conversationally (acknowledging, thinking aloud), just write text — it is the owner's turn next.
+
+You may only propose_plan once every question you ever raised has been answered. The owner may answer in their own words or defer to you ("your call"); treat a deferral as a real answer — decide, state it, and don't re-ask. Prefer the project's own summary docs (architecture.md, roadmap.md, decisions.md) when they exist; only read source when you need specifics.
+
 {$openBlock}
 
 {$repoBlock}
-
-You must respond ONLY with a JSON object of this exact shape (no markdown fences, no text outside the JSON):
-{
-  "reply": "markdown text shown to the owner — your reasoning, acknowledgements, current understanding",
-  "questions": [{"text": "one specific question", "options": ["optional", "answer", "choices"]}],
-  "consensus_reached": false,
-  "reads": ["optional/repo/path.php", "some/dir/", "tree"]
-}
-
-To inspect files, your reply looks EXACTLY like this — no permission question, just the read:
-{
-  "reply": "Let me check the current dependency versions before finalizing scope.",
-  "questions": [],
-  "consensus_reached": false,
-  "reads": ["composer.json", "package.json"]
-}
-On the next turn you will receive those file contents as a system note; then continue.
-
-Rules:
-1. New ambiguities go in "questions" — one entry per question, never buried in "reply".
-2. "consensus_reached" may only be true when every question you ever raised has been answered AND this turn raises none. The engine enforces this regardless of what you claim.
-3. When consensus_reached is true, "reply" must restate the agreed scope in a few sentences.
-4. Keep "reply" concise; the owner reads it in a chat pane.
-5. The owner may answer a question in their own words instead of picking an option — including deferring to you ("your call"). Treat a deferral as a real answer: make a sensible decision, state it explicitly in "reply", and do not re-ask.
-6. When you need to see the ACTUAL contents of files to decide, READ THEM — put the repo-relative paths in "reads". Do this yourself; it is never a question and never needs approval. You may request several at once, a directory (path ending in "/") for its listing, or "tree" for the whole file tree. On an inspection turn leave "questions" empty and "consensus_reached" false — you'll be given the contents and can continue. You have a limited number of inspection rounds per turn, so gather what you need, then ask or conclude. Prefer the project's own summary docs (architecture.md, roadmap.md, decisions.md) when they exist; only read source when you genuinely need specifics. Only tracked files are readable (no secrets). FORBIDDEN: asking the owner to paste a file, asking permission to read ("may I check …?"), or claiming you have no file access — all three are always wrong; emit "reads" instead. If the owner ever tells you to go check / read the repo, your reply that turn MUST carry the paths in "reads".
 PROMPT;
 
         if ($extraSystemPrompt !== null && trim($extraSystemPrompt) !== '') {
@@ -988,16 +1109,4 @@ PROMPT;
 
         return $prompt;
     }
-
-    private const PLAN_PROMPT = <<<'PROMPT'
-Consensus is reached. Produce the initial project memory now.
-Respond ONLY with a JSON object of this exact shape:
-{
-  "architecture_md": "markdown — the target repo's architecture as you understand it",
-  "roadmap_md": "markdown roadmap. Each milestone is a header '## M<N> — <title>' followed by one summary line, then its tasks as checkbox items '- [ ] T-00N — <task title>'. The first task MUST appear as the first checkbox and match first_task_id. Example:\n## M1 — Skeleton\nStand up the project shell.\n- [ ] T-001 — Create repo structure\n- [ ] T-002 — Add build system",
-  "first_task_id": "T-001",
-  "first_task_md": "markdown — the first task brief: goal, acceptance criteria, files likely involved, test command",
-  "summary": "2-3 sentences for the owner: what was agreed and what happens next"
-}
-PROMPT;
 }

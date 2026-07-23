@@ -405,51 +405,6 @@ class ProjectWorkspace extends Component
             && $this->project->openQuestions()->count() === 0;
     }
 
-    /**
-     * Never-stall recovery (M14a): the last Architect turn produced no question
-     * and did not reach consensus, and no plan exists yet — the pre-plan loop is
-     * waiting on direction. The workspace surfaces a one-click nudge instead of
-     * a silent dead end (e2e#3 "stalls after Q&A").
-     */
-    public function getArchitectStalledProperty(): bool
-    {
-        if ($this->thinking || $this->planExists) {
-            return false;
-        }
-
-        $last = $this->project->consensusMessages()->orderByDesc('id')->first();
-
-        return $last !== null
-            && $last->role === \App\Enums\MessageRole::Architect
-            && ($last->meta['consensusClaimed'] ?? false) === false
-            && $this->project->openQuestions()->count() === 0;
-    }
-
-    /**
-     * Re-run the Architect turn with a corrective system note so it either
-     * raises its open questions or reaches consensus, instead of leaving the
-     * owner to compose the right prompt by hand.
-     */
-    public function nudgeArchitect(): void
-    {
-        if (! $this->architectStalled) {
-            return;
-        }
-
-        $this->project->consensusMessages()->create([
-            'role' => \App\Enums\MessageRole::System,
-            'content' => 'The previous turn ended without a question or a consensus decision. Continue now: either raise the specific open questions you still need answered, or — if you already have enough to define the scope — set consensus_reached to true and restate the agreed scope. If you need to see particular files to decide, name them explicitly.',
-            'meta' => ['nudge' => true],
-        ]);
-
-        Cache::put("architect-turn:{$this->project->id}", 'thinking', now()->addMinutes(15));
-        $this->project->update(['status' => \App\Enums\ProjectStatus::Working, 'last_activity_at' => now()]);
-
-        RunArchitectTurn::dispatch($this->project->id, null)
-            ->onConnection('harness')
-            ->onQueue('harness');
-    }
-
     public function approvePlan(): void
     {
         if (! $this->consensusPending || $this->thinking) {
