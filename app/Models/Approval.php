@@ -61,4 +61,18 @@ class Approval extends Model
         $this->resolved_at = now();
         $this->save();
     }
+
+    /** M16-A: set aside a milestone merge without closing it — the branch and
+     *  worktree stay intact and the owner can merge it later. */
+    public function defer(): void
+    {
+        $this->status = ApprovalStatus::Deferred;
+        $this->resolved_at = now();
+        $this->save();
+    }
+
+    public function scopeDeferred(Builder $query): Builder
+    {
+        return $query->where('status', ApprovalStatus::Deferred);
+    }
 }

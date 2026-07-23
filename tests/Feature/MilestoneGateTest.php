@@ -105,7 +105,7 @@ test('granting the milestone gate merges and starts the next milestone', functio
     expect(Task::where('task_key', 'T-002')->first()->execution_id)->not->toBeNull();
 });
 
-test('declining the milestone gate merges nothing', function () {
+test('a bare decline DEFERS the gate — kept ready, merges nothing, never a dead end', function () {
     [$project, $m1] = gateFixture('attended');
     Process::fake();
 
@@ -116,6 +116,81 @@ test('declining the milestone gate merges nothing', function () {
 
     app(WorkflowEngine::class)->resolveApproval($gate, false);
 
-    expect($gate->fresh()->status)->toBe(ApprovalStatus::Rejected);
-    Process::assertNothingRan();
+    expect($gate->fresh()->status)->toBe(ApprovalStatus::Deferred)
+        ->and($project->deferredMilestoneGates()->count())->toBe(1)
+        ->and($project->openApprovals()->count())->toBe(0)
+        ->and(Event::where('project_id', $project->id)->where('name', 'milestone.merge_deferred')->exists())->toBeTrue();
+    Process::assertNothingRan(); // branch/worktree untouched
+});
+
+test('a deferred gate can be merged later', function () {
+    [$project, $m1] = gateFixture('attended');
+    $wt = (new WorktreeManager(sys_get_temp_dir().'/majordom-gwt-'.uniqid()));
+    app()->instance(WorktreeManager::class, $wt);
+
+    $gate = $project->approvals()->create([
+        'type' => ApprovalType::MilestoneMerge, 'title' => 'M1',
+        'payload' => ['milestone_id' => $m1->id, 'profile' => 'attended'],
+        'status' => ApprovalStatus::Deferred,
+    ]);
+
+    Process::fake([
+        "'git' 'status' '--porcelain'" => Process::result(output: ''),
+        "'git' 'rev-parse' '--verify' 'majordom/M1'" => Process::result(output: "abc\n"),
+        "'git' 'merge' '--no-ff' 'majordom/M1'*" => Process::result(output: 'merged'),
+    ]);
+
+    app(WorkflowEngine::class)->mergeDeferredMilestoneGate($gate->fresh());
+
+    expect($gate->fresh()->status)->toBe(ApprovalStatus::Granted)
+        ->and(Event::where('name', 'milestone.merged')->where('project_id', $project->id)->exists())->toBeTrue()
+        ->and(Task::where('task_key', 'T-002')->first()->execution_id)->not->toBeNull();
+});
+
+test('declining WITH a reason routes to the Architect as one keyed fix-task (never idle-with-nothing)', function () {
+    [$project, $m1] = gateFixture('attended');
+    Process::fake();
+
+    $gate = $project->approvals()->create([
+        'type' => ApprovalType::MilestoneMerge, 'title' => 'M1',
+        'payload' => ['milestone_id' => $m1->id, 'profile' => 'attended'],
+        'status' => ApprovalStatus::Open,
+    ]);
+
+    app(WorkflowEngine::class)->requestMilestoneGateChanges($gate, 'the login form has no validation');
+
+    $fix = $project->tasks()->where('milestone_id', $m1->id)->where('title', "Address owner's merge-gate feedback")->first();
+    expect($gate->fresh()->status)->toBe(ApprovalStatus::Rejected)
+        ->and($fix)->not->toBeNull()
+        ->and($fix->status)->toBe(TaskStatus::Pending)
+        ->and(app(\App\Projects\Memory\MemoryStore::class)->read($project, "tasks/{$fix->task_key}/task.md"))->toContain('the login form has no validation')
+        ->and(Event::where('project_id', $project->id)->where('name', 'milestone.owner_changes_requested')->exists())->toBeTrue()
+        ->and(Event::where('name', 'milestone.merged')->exists())->toBeFalse();
+});
+
+test('a successful merge reports the resulting HEAD and the branch it landed on', function () {
+    [$project, $m1] = gateFixture('attended');
+    $wt = (new WorktreeManager(sys_get_temp_dir().'/majordom-gwt-'.uniqid()));
+    app()->instance(WorktreeManager::class, $wt);
+
+    $gate = $project->approvals()->create([
+        'type' => ApprovalType::MilestoneMerge, 'title' => 'M1',
+        'payload' => ['milestone_id' => $m1->id, 'profile' => 'attended'],
+        'status' => ApprovalStatus::Open,
+    ]);
+
+    Process::fake([
+        "'git' 'status' '--porcelain'" => Process::result(output: ''),
+        "'git' 'rev-parse' '--verify' 'majordom/M1'" => Process::result(output: "abc\n"),
+        "'git' 'rev-parse' '--abbrev-ref' 'HEAD'" => Process::result(output: "main\n"),
+        "'git' 'merge' '--no-ff' 'majordom/M1'*" => Process::result(output: 'merged'),
+        "'git' 'rev-parse' '--short' 'HEAD'" => Process::result(output: "def4567\n"),
+    ]);
+
+    app(WorkflowEngine::class)->resolveApproval($gate, true);
+
+    $merged = Event::where('project_id', $project->id)->where('name', 'milestone.merged')->first();
+    expect($merged)->not->toBeNull()
+        ->and($merged->payload['head'])->toBe('def4567')
+        ->and($merged->payload['into_branch'])->toBe('main');
 });

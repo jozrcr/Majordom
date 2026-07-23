@@ -158,6 +158,12 @@ class CommitService
             throw new RuntimeException("No milestone branch {$branch} to merge.");
         }
 
+        // Which branch the owner's checkout lands the merge on — so the confirmation
+        // can name it (finding #13: "the folder didn't update"). A detached HEAD
+        // reports as "HEAD"; the merge still lands, but we surface that it wasn't
+        // on a branch so the owner isn't left guessing where the work went.
+        $onBranch = trim(Process::path($repo)->run(['git', 'rev-parse', '--abbrev-ref', 'HEAD'])->output());
+
         $merge = Process::path($repo)
             ->env($this->committerEnv($repo))
             ->run(['git', 'merge', '--no-ff', $branch, '-m', "Merge milestone {$m->milestone_key}: {$m->title}"]);
@@ -167,8 +173,14 @@ class CommitService
             throw new RuntimeException('Milestone merge failed: '.trim($merge->errorOutput()));
         }
 
+        // Report the resulting HEAD so the owner can SEE the merge landed and
+        // where — the visibility that was missing when the folder "stayed put".
+        $head = trim(Process::path($repo)->run(['git', 'rev-parse', '--short', 'HEAD'])->output());
+
         $this->events->record($m->project, 'milestone.merged', [
             'milestone_key' => $m->milestone_key,
+            'into_branch' => $onBranch !== '' ? $onBranch : null,
+            'head' => $head !== '' ? $head : null,
         ], null, 'you');
 
         $this->worktrees->removeMilestoneWorktree($m->project, $m);

@@ -125,11 +125,20 @@ notify* vs *auto-proceed & collect*.
      acceptance criteria, the `git diff --numstat` diffstat, the reviewer's
      verdict, and the `how_to_test` — assembled once by `MilestoneRecap` so the
      decision never depends on a worktree that may later be merged away.
+   - **Three resolutions** (no silent decline): **merge now** promotes the
+     branch; **not yet** DEFERS (`ApprovalStatus::Deferred`) — branch and
+     worktree kept intact, out of the inbox but re-openable via
+     `deferredMilestoneGates` and merged later (`mergeDeferredMilestoneGate`);
+     **request changes** (a reason is required) routes to the Architect as ONE
+     keyed fix-task (`TaskChain::requestChangesFromOwner`) that rebuilds and
+     re-reviews — the owner's words are never dropped.
    - Granting promotes the branch: `CommitService::mergeMilestone` runs
      `git merge --no-ff majordom/<key>` into the project's `repo_path`, removes
-     the milestone worktree, optionally pushes, then `startNextMilestone`. Under
-     **full_auto** the merge is automatic on approval; every other profile waits.
-     **Default: no push without the human.**
+     the milestone worktree, optionally pushes, then `startNextMilestone`. It
+     reports the resulting HEAD (`head`, `into_branch` on `milestone.merged`) so
+     the owner can see where the work landed. Under **full_auto** the merge is
+     automatic on approval; every other profile waits. **Default: no push
+     without the human.**
 10. **Close** — `current_iteration.md` and `roadmap.md` updated; next milestone
     or `WorkflowCompleted`.
 

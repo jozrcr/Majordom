@@ -219,6 +219,46 @@ class TaskChain
         ImplementFeatureWorkflow::startForTask($project, $key, $task->title, $profile);
     }
 
+    /**
+     * The owner declined the merge WITH a reason (M16-A). Route it to the
+     * Architect as ONE keyed fix-task — the smallest change that addresses the
+     * feedback — then rebuild; when it lands, the boundary and review run again
+     * and raise a fresh gate. Distinct from the reviewer's own request_changes
+     * (different event, doesn't count toward the reviewer convergence guard):
+     * this is the owner steering, not the loop failing to converge.
+     */
+    public function requestChangesFromOwner(Project $project, Milestone $milestone, string $reason, string $profile): void
+    {
+        $reason = trim($reason);
+        if ($reason === '') {
+            return;
+        }
+
+        $key = $this->nextTaskKey($project);
+        $position = (int) ($milestone->tasks()->max('position') ?? 0) + 1;
+
+        $task = $milestone->tasks()->create([
+            'project_id' => $project->id,
+            'task_key' => $key,
+            'title' => "Address owner's merge-gate feedback",
+            'position' => $position,
+            'status' => TaskStatus::Pending,
+        ]);
+
+        $brief = "# {$task->title}\n\n## Goal\nAddress the owner's feedback on {$milestone->milestone_key} — {$milestone->title} so it's ready to merge.\n\n## Acceptance criteria\n- {$reason}\n\n## Notes\nThe owner declined the merge with this feedback. Make the smallest change that addresses it; do not touch unrelated code.\n";
+        app(MemoryStore::class)->write($project, "tasks/{$key}/task.md", $brief);
+
+        app(EventRecorder::class)->record(
+            $project,
+            'milestone.owner_changes_requested',
+            ['milestone_key' => $milestone->milestone_key, 'task_key' => $key, 'reason' => $reason],
+            null,
+            'you'
+        );
+
+        ImplementFeatureWorkflow::startForTask($project, $key, $task->title, $profile);
+    }
+
     /** Next free T-0NN key across the project. */
     private function nextTaskKey(Project $project): string
     {

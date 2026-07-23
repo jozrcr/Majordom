@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\ApprovalStatus;
+use App\Enums\ApprovalType;
 use App\Enums\CapabilityLevel;
 use App\Enums\ProjectStatus;
 use App\Enums\QuestionStatus;
@@ -110,6 +111,16 @@ class Project extends Model
     public function openApprovals(): HasMany
     {
         return $this->hasMany(Approval::class)->where('status', ApprovalStatus::Open);
+    }
+
+    /** M16-A: milestone merges the owner set aside — kept ready to merge later,
+     *  surfaced apart from the "Needs You" inbox. */
+    public function deferredMilestoneGates(): HasMany
+    {
+        return $this->hasMany(Approval::class)
+            ->where('status', ApprovalStatus::Deferred)
+            ->where('type', ApprovalType::MilestoneMerge)
+            ->latest('id');
     }
 
     public function events(): HasMany

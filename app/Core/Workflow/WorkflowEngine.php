@@ -126,15 +126,22 @@ class WorkflowEngine
             return;
         }
 
-        $granted ? $approval->grant() : $approval->reject();
-
-        // The milestone gate (M12) is not tied to a workflow node — on grant it
-        // merges the milestone to main and rolls into the next milestone.
+        // The milestone gate (M12/M16-A) is not tied to a workflow node and has
+        // its own three-way resolution: grant → merge; a bare decline → DEFER
+        // (kept ready, never a dead end); a decline WITH a reason is routed via
+        // requestMilestoneGateChanges (the modal calls that directly).
         if ($approval->type === ApprovalType::MilestoneMerge) {
-            $this->resolveMilestoneGate($approval, $granted, $comment);
+            if ($granted) {
+                $approval->grant();
+                $this->mergeGrantedMilestone($approval, $comment);
+            } else {
+                $this->deferMilestoneGate($approval);
+            }
 
             return;
         }
+
+        $granted ? $approval->grant() : $approval->reject();
 
         $execution = $approval->execution;
         $node = Node::find($approval->payload['node_id'] ?? 0);
@@ -171,25 +178,21 @@ class WorkflowEngine
     }
 
     /**
-     * Resolve the milestone gate (M12): on grant, merge the milestone to main
-     * and start the next milestone's first task. On decline, do nothing — the
-     * milestone's work stays on its branch for the owner to revisit.
+     * Grant path: promote the milestone branch into main and roll into the next
+     * milestone's first task. Shared by the open-gate grant and the "merge a
+     * deferred gate later" action.
      */
-    private function resolveMilestoneGate(Approval $approval, bool $granted, ?string $comment): void
+    private function mergeGrantedMilestone(Approval $approval, ?string $comment): void
     {
         $project = $approval->project;
 
         app(EventRecorder::class)->record(
             $project,
-            $granted ? 'approval.granted' : 'approval.rejected',
+            'approval.granted',
             ['title' => $approval->title, 'comment' => $comment],
             $approval->execution,
             'you'
         );
-
-        if (! $granted) {
-            return;
-        }
 
         $milestone = Milestone::find($approval->payload['milestone_id'] ?? 0);
         if ($milestone === null) {
@@ -199,6 +202,75 @@ class WorkflowEngine
 
         app(\App\Projects\Repositories\CommitService::class)->mergeMilestone($milestone);
         app(\App\Core\Workflow\TaskChain::class)->startNextMilestone($project, $milestone, $profile);
+    }
+
+    /**
+     * Decline WITHOUT a reason (M16-A): set the merge aside, kept ready. The
+     * branch and worktree stay intact and the gate becomes re-openable — never
+     * the silent idle dead-end the owner hit before. Not the reviewer's call;
+     * only the owner defers.
+     */
+    public function deferMilestoneGate(Approval $approval): void
+    {
+        if ($approval->status !== ApprovalStatus::Open || $approval->type !== ApprovalType::MilestoneMerge) {
+            return;
+        }
+
+        $approval->defer();
+        $project = $approval->project;
+
+        app(EventRecorder::class)->record(
+            $project,
+            'milestone.merge_deferred',
+            ['title' => $approval->title, 'milestone_id' => $approval->payload['milestone_id'] ?? null],
+            $approval->execution,
+            'you'
+        );
+
+        $project->update(['status' => ProjectStatus::Idle, 'last_activity_at' => now()]);
+    }
+
+    /**
+     * Decline WITH a reason (M16-A, kills finding #5): the owner's feedback is
+     * not dropped — it routes to the Architect as ONE keyed fix-task that
+     * rebuilds and re-reviews, raising a fresh gate when it lands.
+     */
+    public function requestMilestoneGateChanges(Approval $approval, string $comment): void
+    {
+        $comment = trim($comment);
+        if ($approval->status !== ApprovalStatus::Open || $approval->type !== ApprovalType::MilestoneMerge || $comment === '') {
+            return;
+        }
+
+        $approval->reject();
+        $project = $approval->project;
+
+        app(EventRecorder::class)->record(
+            $project,
+            'approval.rejected',
+            ['title' => $approval->title, 'comment' => $comment],
+            $approval->execution,
+            'you'
+        );
+
+        $milestone = Milestone::find($approval->payload['milestone_id'] ?? 0);
+        if ($milestone === null) {
+            return;
+        }
+        $profile = $approval->payload['profile'] ?? 'attended';
+
+        app(\App\Core\Workflow\TaskChain::class)->requestChangesFromOwner($project, $milestone, $comment, $profile);
+    }
+
+    /** Owner merges a previously deferred gate. Same promotion as an open grant. */
+    public function mergeDeferredMilestoneGate(Approval $approval): void
+    {
+        if ($approval->status !== ApprovalStatus::Deferred || $approval->type !== ApprovalType::MilestoneMerge) {
+            return;
+        }
+
+        $approval->grant();
+        $this->mergeGrantedMilestone($approval, null);
     }
 
     /**

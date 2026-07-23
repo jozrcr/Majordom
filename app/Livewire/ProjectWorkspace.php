@@ -709,6 +709,64 @@ class ProjectWorkspace extends Component
         unset($this->openApproval);
     }
 
+    /**
+     * Milestone merge gate — "Not yet, keep it ready" (M16-A). Defers the merge:
+     * the branch/worktree stay intact and it reappears as a "merge later"
+     * affordance. Never the silent idle dead-end the owner hit before.
+     */
+    public function deferMilestone(): void
+    {
+        $approval = $this->openApproval;
+        if (! $approval || $approval->type !== ApprovalType::MilestoneMerge) {
+            return;
+        }
+
+        app(\App\Core\Workflow\WorkflowEngine::class)->deferMilestoneGate($approval);
+        $this->gateComment = null;
+        unset($this->openApproval);
+    }
+
+    /**
+     * Milestone merge gate — "Send back to the Architect" (M16-A, finding #5).
+     * The owner's reason becomes ONE keyed fix-task; it rebuilds and re-reviews.
+     * A reason is required — that's the whole point of this path.
+     */
+    public function requestGateChanges(): void
+    {
+        $approval = $this->openApproval;
+        if (! $approval || $approval->type !== ApprovalType::MilestoneMerge) {
+            return;
+        }
+
+        if (trim($this->gateComment ?? '') === '') {
+            $this->addError('gateComment', 'Say what needs changing — it becomes the Architect’s fix brief.');
+
+            return;
+        }
+
+        app(\App\Core\Workflow\WorkflowEngine::class)->requestMilestoneGateChanges($approval, $this->gateComment);
+        $this->gateComment = null;
+        unset($this->openApproval);
+    }
+
+    /** Merge a previously deferred milestone gate (M16-A "merge later"). */
+    public function mergeDeferred(int $approvalId): void
+    {
+        $approval = $this->project->approvals()->whereKey($approvalId)->first();
+        if (! $approval) {
+            return;
+        }
+
+        app(\App\Core\Workflow\WorkflowEngine::class)->mergeDeferredMilestoneGate($approval);
+        unset($this->deferredMilestoneGates);
+    }
+
+    /** @return \Illuminate\Support\Collection<int, \App\Models\Approval> */
+    public function getDeferredMilestoneGatesProperty(): \Illuminate\Support\Collection
+    {
+        return $this->project->deferredMilestoneGates()->get();
+    }
+
     public function selectEvent(int $eventId): void
     {
         $this->selectedEventId = $this->selectedEventId === $eventId ? null : $eventId;
