@@ -65,6 +65,13 @@ class OpenAiCompatibleProvider implements Provider
             $body['stop'] = $request->stop;
         }
 
+        // M15 tool contract: offer tools when the caller set them. Absent tools
+        // ⇒ plain-chat behavior, unchanged. tool_choice defaults to "auto".
+        if ($request->tools !== null && $request->tools !== []) {
+            $body['tools'] = array_map(fn (ToolDefinition $t) => $t->toOpenAi(), $request->tools);
+            $body['tool_choice'] = $this->toolChoicePayload($request->toolChoice);
+        }
+
         try {
             $response = Http::baseUrl($this->baseUrl)
                 ->timeout($request->timeout ?? $this->timeout)
@@ -100,5 +107,16 @@ class OpenAiCompatibleProvider implements Provider
         }
 
         return ProviderResponse::fromOpenAi($json);
+    }
+
+    /** Map the normalized tool_choice to the OpenAI wire shape. */
+    private function toolChoicePayload(?string $choice): string|array
+    {
+        return match ($choice) {
+            null, 'auto' => 'auto',
+            'required' => 'required',
+            'none' => 'none',
+            default => ['type' => 'function', 'function' => ['name' => $choice]],
+        };
     }
 }
