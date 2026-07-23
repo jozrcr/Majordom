@@ -115,6 +115,64 @@ it('writes the captured plan on explicit approval, with no second model call for
         ->and($last->meta['firstTaskId'])->toBe('T-001');
 });
 
+/** Mark a plan as already approved so converse() enters the post-plan phase. */
+function seedApprovedPlan(Project $project, string $roadmap = "## M1 — Skeleton\n- [ ] T-001 — a\n"): MemoryStore
+{
+    $store = MemoryStore::fromConfig();
+    $store->write($project, 'architecture.md', '# Arch');
+    $store->write($project, 'roadmap.md', $roadmap);
+    $project->consensusMessages()->create([
+        'role' => MessageRole::System, 'content' => 'plan written', 'meta' => ['planWritten' => true],
+    ]);
+
+    return $store;
+}
+
+it('post-plan a plain reply continues the conversation without forcing a gate', function () {
+    // M16-B: the same chat runs after a plan exists — a plain reply is simply the
+    // owner's turn, never a forced approve/reject.
+    seedApprovedPlan($this->project);
+
+    [$service] = architect([archReply('Sure — tell me what you want to change.')]);
+    $result = $service->converse($this->project, 'I might tweak the roadmap');
+
+    expect($result['consensusPending'])->toBeFalse()
+        ->and($result['message']->role)->toBe(MessageRole::Architect);
+});
+
+it('post-plan a propose_plan revises the existing roadmap through the same consensus gate', function () {
+    // M16-B: the two old steering buttons are one chat that can reach a
+    // re-proposed, owner-approved plan. A post-plan propose_plan is a REVISION —
+    // human-gated like the first, then reconciled (keys preserved).
+    $store = seedApprovedPlan($this->project);
+
+    [$service] = architect([
+        archPropose(['roadmap_md' => "## M1 — Skeleton\n- [ ] T-001 — a\n- [ ] T-002 — added\n", 'summary' => 'Added T-002.'], 'Here is the revision.'),
+        '# fresh brief', // decompose reply while regenerating the restart brief
+    ]);
+
+    expect($service->converse($this->project, 'add a task')['consensusPending'])->toBeTrue();
+
+    $service->approvePlan($this->project);
+
+    expect($store->read($this->project, 'roadmap.md'))->toContain('T-002 — added')
+        ->and($this->project->events()->where('name', 'plan.redefined')->exists())->toBeTrue();
+});
+
+it('post-plan an ask_owner during a redefine parks and writes no plan file', function () {
+    // M16-B: a redefine with an open question parks for the owner and changes
+    // NO memory until the question is answered.
+    $store = seedApprovedPlan($this->project);
+    $before = $store->read($this->project, 'roadmap.md');
+
+    [$service] = architect([archAsk([['text' => 'Split M1 how?']], 'One question first.')]);
+    $result = $service->converse($this->project, 'restructure M1');
+
+    expect($result['consensusPending'])->toBeFalse()
+        ->and($this->project->openQuestions()->count())->toBe(1)
+        ->and($store->read($this->project, 'roadmap.md'))->toBe($before); // untouched
+});
+
 it('asks the owner to re-propose when there is no captured plan to approve', function () {
     [$service] = architect([]);
 

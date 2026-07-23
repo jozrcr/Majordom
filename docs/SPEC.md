@@ -313,7 +313,13 @@ Reverb for live updates.
   (`#[Url]`) and normalized to `chat` on any unknown value:
   - **Chat** (default) — the four core regions:
     1. **Consensus chat** — the primary surface; talk to the Architect, answer its
-       questions, approve the plan. The captured system-of-record for intent.
+       questions, approve the plan. The captured system-of-record for intent. The
+       **same** free-chat surface persists after a plan is approved (M16): steering
+       is not a separate mode — a plain reply just continues the conversation, and
+       asking for a scope change lets the Architect re-`propose_plan`. That revision
+       is human-gated exactly like the first plan; approving it preserves built work
+       (RoadmapSync upserts by key), resets the loop, and regenerates the restart
+       brief (`plan.redefined`). No one-shot redefine turn — it is the tool loop.
     2. **Roadmap** — milestones → tasks, editable, reflecting `roadmap.md`.
     3. **Activity timeline** — the live event feed (Reverb): delegated → building →
        review → …

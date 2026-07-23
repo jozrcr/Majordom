@@ -12,7 +12,6 @@ use App\Models\Milestone;
 use App\Models\Project;
 use App\Models\Task;
 use App\Projects\Memory\MemoryStore;
-use Illuminate\Support\Facades\Queue;
 use Livewire\Livewire;
 
 uses(\Illuminate\Foundation\Testing\RefreshDatabase::class);
@@ -43,6 +42,21 @@ function planned(Project $project): void
     ]);
 }
 
+/**
+ * Seed the state approvePlan() reads for a REVISION (M16-B): a prior planWritten
+ * note, plus an Architect message carrying the plan the owner is approving in its
+ * `proposed_plan` meta — exactly what a post-plan propose_plan turn writes.
+ */
+function capturedRevision(Project $project, array $plan): void
+{
+    planned($project);
+    $project->consensusMessages()->create([
+        'role' => MessageRole::Architect,
+        'content' => 'Here is the revised plan.',
+        'meta' => ['consensusClaimed' => true, 'proposed_plan' => $plan],
+    ]);
+}
+
 test('addContext writes decisions.md, notes it in chat, emits an event', function () {
     $project = Project::factory()->create();
 
@@ -69,65 +83,50 @@ test('added context reaches the Builder — it appears in the decompose brief co
     expect($userMsg)->toContain('CONSTRAINT-XYZ must hold.');
 });
 
-test('redefinePlan revises roadmap.md and re-syncs', function () {
+test('approving a revision updates roadmap.md and re-syncs, preserving keys', function () {
+    // M16-B: post-plan chat reaches a re-proposed plan; approving it revises the
+    // roadmap through the same reconciliation the old one-shot redefine used —
+    // now sourced from the captured propose_plan, not a second model call.
     $project = Project::factory()->create();
     app(MemoryStore::class)->write($project, 'roadmap.md', "## M1 — Old\n- [ ] T-001 — a\n");
-    bindArchitect(json_encode([
+    bindArchitect('# fresh brief'); // decompose reply while regenerating the restart brief
+    capturedRevision($project, [
         'roadmap_md' => "## M1 — Old\n- [ ] T-001 — a\n- [ ] T-002 — new task\n",
         'summary' => 'Added T-002.',
-    ]));
+    ]);
 
-    app(ArchitectService::class)->redefinePlan($project, 'Add a task for the new task.');
+    app(ArchitectService::class)->approvePlan($project);
 
     expect(app(MemoryStore::class)->read($project, 'roadmap.md'))->toContain('T-002 — new task');
     expect(Task::where('project_id', $project->id)->where('task_key', 'T-002')->exists())->toBeTrue(); // re-synced
     expect(Event::where('name', 'plan.redefined')->exists())->toBeTrue();
 });
 
-test('after a redefine the workspace shows Start build for the revised first task (live path)', function () {
-    // BUG 2 live-path guard: exercise the real redefinePlan, then mount the
-    // actual component — the button must appear (the mechanism test alone
-    // missed that firstTaskId never reached the component before).
+test('after an approved revision the workspace shows Start build for the revised first task (live path)', function () {
+    // Live-path guard: exercise the real approvePlan revision, then mount the
+    // actual component — the button must appear (firstTaskId must reach the UI).
     $project = Project::factory()->create();
     $m = Milestone::factory()->create(['project_id' => $project->id, 'milestone_key' => 'M1', 'position' => 1]);
     Task::factory()->create(['project_id' => $project->id, 'milestone_id' => $m->id, 'task_key' => 'T-001', 'status' => TaskStatus::Failed, 'position' => 1, 'execution_id' => null]);
     app(MemoryStore::class)->write($project, 'roadmap.md', "## M1 — Old\n- [ ] T-001 — a\n");
     app(MemoryStore::class)->write($project, 'tasks/T-001/task.md', '# OLD brief');
 
-    bindArchitect(json_encode(['roadmap_md' => "## M1 — Old\n- [ ] T-001 — a (revised)\n", 'summary' => 'revised']));
-    app(ArchitectService::class)->redefinePlan($project, 'reshape it');
+    bindArchitect('# FRESH brief');
+    capturedRevision($project, ['roadmap_md' => "## M1 — Old\n- [ ] T-001 — a (revised)\n", 'summary' => 'revised']);
+    app(ArchitectService::class)->approvePlan($project);
 
     Livewire::test(ProjectWorkspace::class, ['project' => $project->fresh()])
         ->assertSee('Start build')
         ->assertSee('T-001');
 });
 
-test('post-plan composer shows steering buttons, not free chat', function () {
+test('post-plan composer is one free chat, not steering buttons', function () {
+    // M16-B: the two steering buttons are gone — a plan-in-progress keeps the
+    // same conversation surface, so a plain reply can continue consensus.
     $project = Project::factory()->create();
     planned($project);
 
     Livewire::test(ProjectWorkspace::class, ['project' => $project])
-        ->assertSee('Add context')
-        ->assertSee('Redefine milestones')
-        ->assertDontSee('Describe what to build');
-});
-
-test('submitChatMode routes add_context synchronously and redefine to a job', function () {
-    Queue::fake();
-    $project = Project::factory()->create();
-    planned($project);
-
-    // add_context: runs now, writes decisions.md
-    Livewire::test(ProjectWorkspace::class, ['project' => $project])
-        ->call('setChatMode', 'add_context')
-        ->set('draft', 'note A')
-        ->call('submitChatMode');
-    expect(app(MemoryStore::class)->read($project, 'decisions.md'))->toContain('note A');
-
-    // redefine: dispatches the job
-    Livewire::test(ProjectWorkspace::class, ['project' => $project])
-        ->call('setChatMode', 'redefine')
-        ->set('draft', 'reshape it')
-        ->call('submitChatMode');
-    Queue::assertPushed(\App\Jobs\RunPlanRedefine::class);
+        ->assertDontSee('Redefine milestones')
+        ->assertSee('Ask a question, add a constraint, or request a change');
 });

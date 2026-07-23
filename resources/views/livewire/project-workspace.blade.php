@@ -94,16 +94,40 @@
                 @endif
 
                 @if($this->consensusPending && !$this->thinking)
-                    {{-- Plan-approval moment (design §2.6): the human owns this gate. --}}
+                    {{-- Plan-approval moment (design §2.6): the human owns this gate.
+                         M16-B: the card shows the recap the owner is agreeing to —
+                         summary + roadmap — and is revision-aware. A revision to an
+                         already-approved plan preserves built work; a first plan
+                         writes fresh memory. --}}
+                    @php $plan = $this->proposedPlan; $isRevision = $this->planExists; @endphp
                     <div class="max-w-[640px] rounded-lg border bg-surface-raised p-4 space-y-3">
-                        <p class="font-mono text-micro uppercase tracking-[.14em] text-accent">Plan approval</p>
-                        <p class="text-body-sm text-text">Consensus reached. Approve to let the Architect write the project memory — architecture.md, roadmap.md and the first task brief. Not confident yet? Keep talking below; the scope stays open.</p>
+                        <p class="font-mono text-micro uppercase tracking-[.14em] text-accent">{{ $isRevision ? 'Revised plan' : 'Plan approval' }}</p>
+
+                        @if($plan)
+                            @if(!empty($plan['summary']))
+                                <p class="text-body-sm text-t2">{{ $plan['summary'] }}</p>
+                            @endif
+                            @if(!empty($plan['roadmap_md']))
+                                <details class="text-caption text-t3" open>
+                                    <summary class="cursor-pointer font-mono text-meta text-mute hover:text-t3">roadmap</summary>
+                                    <pre class="mt-2 max-h-[280px] overflow-auto rounded-md border border-border-soft bg-bg p-2 whitespace-pre-wrap text-caption text-t2">{{ $plan['roadmap_md'] }}</pre>
+                                </details>
+                            @endif
+                        @endif
+
+                        <p class="text-body-sm text-text">
+                            @if($isRevision)
+                                Approve to update the roadmap. Existing milestones and tasks are preserved — reworded or added, never renumbered — and the build loop is reset to the first pending task. Not sure yet? Keep talking below; the scope stays open.
+                            @else
+                                Consensus reached. Approve to let the Architect write the project memory — architecture.md, roadmap.md and the first task brief. Not confident yet? Keep talking below; the scope stays open.
+                            @endif
+                        </p>
                         <div class="flex items-center gap-3">
-                            <button wire:click="approvePlan" wire:confirm="Approve this plan and start the build? Majordom will begin executing immediately." wire:loading.attr="disabled" class="rounded-lg px-3 py-1.5 text-body-sm font-semibold disabled:opacity-55">
-                                <span wire:loading.remove wire:target="approvePlan">Approve plan</span>
+                            <button wire:click="approvePlan" wire:confirm="{{ $isRevision ? 'Approve this revised plan? Majordom will update the roadmap and reset the build loop.' : 'Approve this plan and start the build? Majordom will begin executing immediately.' }}" wire:loading.attr="disabled" class="rounded-lg px-3 py-1.5 text-body-sm font-semibold disabled:opacity-55">
+                                <span wire:loading.remove wire:target="approvePlan">{{ $isRevision ? 'Approve revision' : 'Approve plan' }}</span>
                                 <span wire:loading wire:target="approvePlan">Approving…</span>
                             </button>
-                            <span class="font-mono text-meta text-faint">writes project memory · nothing touches your repo</span>
+                            <span class="font-mono text-meta text-faint">{{ $isRevision ? 'updates the roadmap · preserves built work' : 'writes project memory · nothing touches your repo' }}</span>
                         </div>
                     </div>
                 @endif
@@ -288,41 +312,18 @@
             </div>
 
             <div class="border-t border-border py-4">
-                @if(! $this->planExists)
-                    {{-- Consensus phase: free chat with the Architect. --}}
-                    <form wire:submit="send" class="flex gap-2">
-                        <textarea wire:model="draft" rows="2" placeholder="Describe what to build…" class="flex-1 rounded-lg border border-border-strong bg-surface px-3 py-2 text-body text-hi placeholder:text-faint" @disabled($this->thinking)></textarea>
-                        <button type="submit" wire:loading.attr="disabled" class="rounded-lg border border-border-hover px-3 py-1.5 text-body-sm font-semibold text-[#c7d2df] hover:bg-surface-active disabled:opacity-55" @disabled($this->thinking)>
-                            <span wire:loading.remove wire:target="send">Send</span>
-                            <span wire:loading wire:target="send">Sending…</span>
-                        </button>
-                    </form>
-                    @error('draft') <p class="text-caption text-failed-text mt-1">{{ $message }}</p> @enderror
-                @elseif($chatMode === null)
-                    {{-- Post-plan: free chat is off; steer via defined actions. --}}
-                    <div class="flex flex-wrap items-center gap-2">
-                        <span class="font-mono text-meta text-mute mr-1">steer the project:</span>
-                        <button wire:click="setChatMode('add_context')" @disabled($this->thinking) class="rounded-lg border border-border px-3 py-1.5 text-body-sm font-medium text-hi hover:bg-surface-active disabled:opacity-55">Add context</button>
-                        <button wire:click="setChatMode('redefine')" @disabled($this->thinking) class="rounded-lg border border-border px-3 py-1.5 text-body-sm font-medium text-hi hover:bg-surface-active disabled:opacity-55">Redefine milestones / specs</button>
-                    </div>
-                @else
-                    {{-- A mode is active: labeled composer. --}}
-                    <form wire:submit="submitChatMode" class="space-y-2">
-                        <p class="font-mono text-meta text-accent">
-                            {{ $chatMode === 'add_context'
-                                ? 'Adding context — a durable constraint every future task will follow.'
-                                : 'Redefining the roadmap — the Architect amends milestones/tasks (keys stay stable).' }}
-                        </p>
-                        <textarea wire:model="draft" rows="2" placeholder="{{ $chatMode === 'add_context' ? 'e.g. Must also work on Wayland…' : 'e.g. Split milestone 3 into UI and daemon…' }}" class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-body text-hi placeholder:text-faint" @disabled($this->thinking)></textarea>
-                        <div class="flex items-center gap-2">
-                            <button type="submit" wire:loading.attr="disabled" class="rounded-lg bg-accent px-3 py-1.5 text-body-sm font-semibold text-accent-ink disabled:opacity-55" @disabled($this->thinking)>
-                                {{ $chatMode === 'add_context' ? 'Add' : 'Redefine' }}
-                            </button>
-                            <button type="button" wire:click="cancelChatMode" class="rounded-lg border border-border px-3 py-1.5 text-body-sm font-medium text-mute hover:text-hi">Cancel</button>
-                        </div>
-                        @error('draft') <p class="text-caption text-failed-text">{{ $message }}</p> @enderror
-                    </form>
-                @endif
+                {{-- M16-B: one conversation, before and after the plan. The same
+                     free chat reaches the Architect the whole way — a plain reply
+                     to a proposal continues consensus; asking for a change lets the
+                     Architect re-propose (no forced mode buttons). --}}
+                <form wire:submit="send" class="flex gap-2">
+                    <textarea wire:model="draft" rows="2" placeholder="{{ $this->planExists ? 'Ask a question, add a constraint, or request a change…' : 'Describe what to build…' }}" class="flex-1 rounded-lg border border-border-strong bg-surface px-3 py-2 text-body text-hi placeholder:text-faint" @disabled($this->thinking)></textarea>
+                    <button type="submit" wire:loading.attr="disabled" class="rounded-lg border border-border-hover px-3 py-1.5 text-body-sm font-semibold text-[#c7d2df] hover:bg-surface-active disabled:opacity-55" @disabled($this->thinking)>
+                        <span wire:loading.remove wire:target="send">Send</span>
+                        <span wire:loading wire:target="send">Sending…</span>
+                    </button>
+                </form>
+                @error('draft') <p class="text-caption text-failed-text mt-1">{{ $message }}</p> @enderror
             </div>
         @elseif($tab === 'overview')
             @include('livewire.partials.project-overview')

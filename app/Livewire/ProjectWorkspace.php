@@ -76,13 +76,6 @@ class ProjectWorkspace extends Component
         $this->draft = '';
     }
 
-    /**
-     * Post-plan steering (M14): once a plan exists, free chat is replaced by
-     * defined-action modes so every interaction has a clear intent. `chatMode`
-     * is null (buttons shown), 'add_context', or 'redefine'.
-     */
-    public ?string $chatMode = null;
-
     public function getPlanExistsProperty(): bool
     {
         return $this->project->consensusMessages()
@@ -91,43 +84,28 @@ class ProjectWorkspace extends Component
             ->contains(fn ($m) => ($m->meta['planWritten'] ?? false) === true);
     }
 
-    public function setChatMode(string $mode): void
+    /**
+     * The plan the Architect captured via propose_plan and is awaiting approval
+     * on (M16-B recap). Read from the latest consensus-claiming Architect
+     * message so the approval card can show what the owner is agreeing to —
+     * summary + roadmap — BEFORE they approve. Null unless a plan is pending.
+     *
+     * @return array{summary?: string, roadmap_md?: string, architecture_md?: string, first_task_id?: string}|null
+     */
+    public function getProposedPlanProperty(): ?array
     {
-        if (! in_array($mode, ['add_context', 'redefine'], true)) {
-            return;
-        }
-        $this->chatMode = $mode;
-        $this->draft = '';
-    }
-
-    public function cancelChatMode(): void
-    {
-        $this->chatMode = null;
-        $this->draft = '';
-    }
-
-    public function submitChatMode(): void
-    {
-        $this->validate(['draft' => 'required|string|max:8000']);
-        $mode = $this->chatMode;
-        $text = $this->draft;
-        $this->chatMode = null;
-        $this->draft = '';
-
-        if ($mode === 'add_context') {
-            // Fast + deterministic (no LLM) — folds into project memory.
-            app(ArchitectService::class)->addContext($this->project, $text);
-
-            return;
+        if (! $this->consensusPending) {
+            return null;
         }
 
-        if ($mode === 'redefine') {
-            Cache::put("architect-turn:{$this->project->id}", 'planning', now()->addMinutes(15));
-            $this->project->update(['status' => \App\Enums\ProjectStatus::Working, 'last_activity_at' => now()]);
-            \App\Jobs\RunPlanRedefine::dispatch($this->project->id, $text)
-                ->onConnection('harness')
-                ->onQueue('harness');
-        }
+        $last = $this->project->consensusMessages()
+            ->where('role', \App\Enums\MessageRole::Architect)
+            ->orderByDesc('id')
+            ->first();
+
+        $plan = $last?->meta['proposed_plan'] ?? null;
+
+        return is_array($plan) ? $plan : null;
     }
 
     public function answerQuestion(int $questionId): void

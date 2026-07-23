@@ -431,6 +431,30 @@ PROMPT;
             return;
         }
 
+        // Revision approval (M16-B, finding 6): when a plan already exists this
+        // propose_plan REVISES it — the same consensus surface as the first plan.
+        // Preserve built work (RoadmapSync upserts by key), reset the loop, and
+        // regenerate the restart brief. No re-scaffold: the repo is already real.
+        if ($this->planAlreadyWritten($project)) {
+            if (trim((string) ($plan['roadmap_md'] ?? '')) === '') {
+                $project->consensusMessages()->create([
+                    'role' => MessageRole::System,
+                    'content' => 'The revised plan came back without a roadmap — nothing changed. Ask the Architect to propose the revision again.',
+                ]);
+
+                return;
+            }
+
+            $this->applyRevisedRoadmap(
+                $project,
+                (string) $plan['roadmap_md'],
+                $plan['architecture_md'] ?? null,
+                (string) ($plan['summary'] ?? 'the roadmap was revised.'),
+            );
+
+            return;
+        }
+
         // A plan without a real first task brief is unbuildable — salvage it
         // rather than writing an empty file the Builder can't act on.
         if (trim((string) ($plan['first_task_md'] ?? '')) === '') {
@@ -771,49 +795,28 @@ MD;
         app(EventRecorder::class)->record($project, 'context.added', [], null, 'you');
     }
 
-    /**
-     * "Redefine milestones / specs" (the lightweight amend): the Architect
-     * revises roadmap.md (+ architecture.md) from the owner's instruction and
-     * re-syncs. Keys stay stable so built work is preserved (RoadmapSync upserts
-     * by key). One provider turn.
-     */
-    public function redefinePlan(Project $project, string $instruction): void
+    /** True once the owner has approved at least one plan (a planWritten note exists). */
+    private function planAlreadyWritten(Project $project): bool
     {
-        $instruction = trim($instruction);
-        if ($instruction === '') {
-            return;
-        }
+        return $project->consensusMessages()
+            ->where('role', MessageRole::System)
+            ->get()
+            ->contains(fn ($m) => ($m->meta['planWritten'] ?? false) === true);
+    }
 
-        $binding = app(RoleResolver::class)->resolve('architect', $project);
-        $current = $this->memory->read($project, 'roadmap.md') ?? '(none yet)';
-        $architecture = $this->memory->read($project, 'architecture.md') ?? '(none yet)';
-
-        $response = $this->providers->forBinding($binding)->chat(new ProviderRequest(
-            model: $binding->model,
-            messages: [
-                ['role' => 'system', 'content' => self::REDEFINE_PROMPT],
-                ['role' => 'user', 'content' => "## Current roadmap.md\n{$current}\n\n## Current architecture.md\n{$architecture}\n\n## Owner change request\n{$instruction}"],
-            ],
-            maxTokens: (int) config('majordom.architect.plan_max_tokens', 8000),
-            temperature: $binding->temperature,
-            jsonMode: true,
-        ));
-
-        app(UsageLedger::class)->record($project, 'architect', $binding->model, $response->promptTokens, $response->completionTokens);
-
-        $data = json_decode(trim($response->content), true);
-        if (! is_array($data) || empty($data['roadmap_md'])) {
-            $project->consensusMessages()->create([
-                'role' => MessageRole::System,
-                'content' => 'The roadmap revision came back malformed — nothing changed. Try rephrasing the request.',
-            ]);
-
-            return;
-        }
-
-        $this->memory->write($project, 'roadmap.md', (string) $data['roadmap_md']);
-        if (! empty($data['architecture_md'])) {
-            $this->memory->write($project, 'architecture.md', (string) $data['architecture_md']);
+    /**
+     * Apply an owner-approved roadmap REVISION to an existing plan (M16-B). The
+     * revision arrived through the same consensus surface as the first plan (a
+     * propose_plan the owner approved), so this only reconciles memory + the loop:
+     * re-sync (keys preserved so built work survives), reset the execution loop,
+     * regenerate the restart brief, and re-arm "Start build". No provider call —
+     * the roadmap came back structured in the propose_plan arguments.
+     */
+    private function applyRevisedRoadmap(Project $project, string $roadmapMd, ?string $architectureMd, string $summary): void
+    {
+        $this->memory->write($project, 'roadmap.md', $roadmapMd);
+        if ($architectureMd !== null && trim($architectureMd) !== '') {
+            $this->memory->write($project, 'architecture.md', $architectureMd);
         }
 
         app(\App\Projects\Roadmap\RoadmapSync::class)->for($project)->sync();
@@ -824,20 +827,19 @@ MD;
         $firstTaskKey = app(\App\Core\Workflow\WorkflowEngine::class)->resetForRedefine($project);
 
         // Real recovery, not a replay: the restart task's brief was written
-        // against the OLD roadmap (the poisoned brief the owner redefined away).
-        // Regenerate it from the revised roadmap so "Start build" launches fresh
-        // — DelegateNode reads task.md directly and never re-decomposes, so an
-        // un-refreshed brief would rebuild the exact thing being escaped.
+        // against the OLD roadmap. Regenerate it from the revised roadmap so
+        // "Start build" launches fresh — DelegateNode reads task.md directly and
+        // never re-decomposes, so an un-refreshed brief would rebuild the exact
+        // thing being escaped.
         if ($firstTaskKey !== null) {
             $this->regenerateBriefForRestart($project, $firstTaskKey);
         }
 
         // Re-arm the "Start build" trigger: getPlannedTaskProperty needs the
-        // planWritten message to carry firstTaskId (approvePlan sets it; the old
-        // redefine path did not — that was the "redefine didn't restart" bug).
+        // planWritten message to carry firstTaskId.
         $project->consensusMessages()->create([
             'role' => MessageRole::System,
-            'content' => "✓ Plan updated — ".(string) ($data['summary'] ?? 'the roadmap was revised.')
+            'content' => "✓ Plan updated — {$summary}"
                 .($firstTaskKey !== null
                     ? "\n\nThe build loop was reset. Use **Start build** to relaunch from {$firstTaskKey} with the revised brief."
                     : "\n\nNo tasks remain to build."),
@@ -880,28 +882,6 @@ MD;
             $this->memory->write($project, $briefPath, $stale); // regen failed — keep something buildable
         }
     }
-
-    private const REDEFINE_PROMPT = <<<'PROMPT'
-You are the Architect revising an EXISTING project roadmap per the owner's
-change request. Output ONLY a JSON object:
-{
-  "roadmap_md": "the FULL updated roadmap markdown",
-  "architecture_md": "the updated architecture markdown, or omit if unchanged",
-  "summary": "1-2 sentences: what changed"
-}
-
-The roadmap format is milestones `## M<N> — <title>` each followed by one
-summary line, then tasks as checkboxes `- [ ] T-00N — <title>`.
-
-HARD RULES — you are AMENDING, not rewriting from scratch:
-- Preserve every existing milestone key (M1, M2 …) and task key (T-001 …). Do
-  NOT renumber, and do NOT delete a task that may already be built — reword or
-  reorder if needed, but keep its key.
-- Preserve `[x]`/`[~]` checkbox marks on tasks that already have them (done /
-  in-progress work must not regress to unchecked).
-- Add new milestones/tasks with the NEXT available keys.
-- Make the smallest change that satisfies the request. Keep everything else identical.
-PROMPT;
 
     /**
      * Assemble the decompose context: the milestone goal, this task's line, the
@@ -1104,9 +1084,16 @@ PROMPT;
                 ."You do NOT have read access to file CONTENTS in this project (the owner has not granted it). When you need to see inside a file, ask the owner to share it.";
         }
 
+        // Phase-awareness (M16-B): pre-plan you converge on a FIRST plan;
+        // post-plan the same surface lets the owner refine, add constraints, or
+        // request a scope change — a propose_plan then REVISES the existing plan.
+        $goalLine = $this->planAlreadyWritten($project)
+            ? 'A plan has ALREADY been approved for this project (architecture.md and roadmap.md exist; work may be underway). The owner is now steering it. They may ask a question, add a constraint, or request a change to the scope — help with whatever they raise. If they want to change WHAT gets built, reach consensus the same way (ask_owner for anything ambiguous), then call propose_plan with the FULL revised roadmap for their approval. A revision PRESERVES existing milestone/task keys — reword or add tasks, never renumber or drop work that may already be built. If they only want to talk, reply in plain text.'
+            : 'Your single goal in this conversation is to reach consensus with the human owner on WHAT to build — before any plan is made.';
+
         $prompt = <<<PROMPT
 You are the Architect of the software project "{$project->name}" (repository: {$project->repo_path}).
-Your single goal in this conversation is to reach consensus with the human owner on WHAT to build — before any plan is made.
+{$goalLine}
 
 Non-negotiable mandate: surface EVERY open question before proposing anything. Ask, never assume. Questions must be discrete, answerable items — not prose musings.
 

@@ -62,10 +62,27 @@ it('is safe when there is no execution', function () {
         ->and($project->fresh()->status)->toBe(ProjectStatus::Idle);
 });
 
+/**
+ * Seed a captured revision (M16-B): a prior planWritten note plus an Architect
+ * message carrying the plan in `proposed_plan` — the state approvePlan() reads
+ * when the owner approves a re-proposed plan.
+ */
+function seedRevision(Project $project, array $plan): void
+{
+    $project->consensusMessages()->create([
+        'role' => \App\Enums\MessageRole::System, 'content' => 'plan written',
+        'meta' => ['planWritten' => true],
+    ]);
+    $project->consensusMessages()->create([
+        'role' => \App\Enums\MessageRole::Architect, 'content' => 'revised',
+        'meta' => ['consensusClaimed' => true, 'proposed_plan' => $plan],
+    ]);
+}
+
 it('re-arms Start build with the revised first pending task and a FRESH brief', function () {
-    // BUG 2 (M12Bis): redefine reset the loop but set no firstTaskId, so no
-    // "Start build" appeared — and DelegateNode never re-decomposes, so even a
-    // restart would rebuild the stale (poisoned) brief. Both halves fixed here.
+    // BUG 2 (M12Bis), now via the M16-B consensus-revision path: approving a
+    // re-proposed plan resets the loop, sets firstTaskId so "Start build"
+    // appears, and regenerates the stale (poisoned) brief from the revision.
     config(['majordom.memory_root' => sys_get_temp_dir().'/mj-redef2-'.uniqid()]);
     $project = Project::factory()->create();
     $milestone = \App\Models\Milestone::factory()->create([
@@ -79,13 +96,15 @@ it('re-arms Start build with the revised first pending task and a FRESH brief', 
     $memory = MemoryStore::fromConfig();
     $memory->write($project, 'tasks/T-001/task.md', '# OLD poisoned brief');
 
+    // approvePlan makes no propose call (the plan is captured) — only the
+    // brief-regeneration decompose call reaches the provider.
     app()->instance(Provider::class, new RedefineScriptedProvider([
-        json_encode(['roadmap_md' => "## M1 — Skeleton\nDo it.\n- [ ] T-001 — Do the thing (revised)\n", 'summary' => 'revised']),
         '# FRESH brief from the revised roadmap', // decompose reply (markdown, jsonMode false)
     ]));
     $service = new ArchitectService(app(ProviderRegistry::class), $memory, app(RepoIndex::class));
 
-    $service->redefinePlan($project, 'revise T-001');
+    seedRevision($project, ['roadmap_md' => "## M1 — Skeleton\nDo it.\n- [ ] T-001 — Do the thing (revised)\n", 'summary' => 'revised']);
+    $service->approvePlan($project);
 
     $lastSystem = $project->consensusMessages()
         ->where('role', \App\Enums\MessageRole::System)->orderByDesc('id')->first();
@@ -97,17 +116,18 @@ it('re-arms Start build with the revised first pending task and a FRESH brief', 
             ->toBe('# FRESH brief from the revised roadmap');
 });
 
-it('redefinePlan resets the loop after a valid revision', function () {
+it('approving a revision resets the loop after a valid revision', function () {
     config(['majordom.memory_root' => sys_get_temp_dir().'/mj-redef-'.uniqid()]);
     $project = Project::factory()->create();
     $exec = Execution::factory()->create(['project_id' => $project->id, 'status' => ExecutionStatus::Parked]);
 
     app()->instance(Provider::class, new RedefineScriptedProvider([
-        json_encode(['roadmap_md' => "## M1\n- [ ] T-001 — Do the thing\n", 'summary' => 'revised']),
+        '# brief', // brief-regeneration decompose reply
     ]));
     $service = new ArchitectService(app(ProviderRegistry::class), MemoryStore::fromConfig(), app(RepoIndex::class));
 
-    $service->redefinePlan($project, 'restructure the milestones');
+    seedRevision($project, ['roadmap_md' => "## M1\n- [ ] T-001 — Do the thing\n", 'summary' => 'revised']);
+    $service->approvePlan($project);
 
     expect($project->events()->where('name', 'plan.redefine_reset')->count())->toBe(1)
         ->and($exec->fresh()->status)->toBe(ExecutionStatus::Completed);
